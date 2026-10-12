@@ -63,3 +63,32 @@ export function buildDesignPrompt(userPrompt) {
   const system = buildSystemInstruction();
   return `[System]\n${system}\n\n[User]\n${userPrompt}`;
 }
+
+/**
+ * Builds a revalidation prompt: resends the original request plus the model's
+ * previously-invalid output and the exact validation errors, asking for a
+ * corrected Design JSON.
+ */
+export function buildRevalidationPrompt(userPrompt, previousOutput, errors) {
+  const system = buildSystemInstruction();
+  const cappedOutput = String(previousOutput).slice(0, 12000);
+  const errorList = errors.map((e) => `- ${e}`).join("\n");
+
+  return [
+    "[System]",
+    system,
+    "",
+    "[Correction]",
+    "Your previous response failed validation. Fix it and return the corrected Design JSON.",
+    "Validation errors:",
+    errorList,
+    "",
+    "Your previous (invalid) output:",
+    `\`\`\`json\n${cappedOutput}\n\`\`\``,
+    "",
+    "[Original request]",
+    userPrompt,
+    "",
+    "Rules: keep the user's original design intent. If a text element is missing 'content', add sensible placeholder copy matching that element's role. Do not remove elements unless an error requires it. Return ONLY valid JSON. Do not use Markdown or explain.",
+  ].join("\n");
+}

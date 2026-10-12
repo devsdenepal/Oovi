@@ -1,4 +1,4 @@
-import { buildDesignPrompt } from "./designPrompt";
+import { buildDesignPrompt, buildRevalidationPrompt } from "./designPrompt";
 import { validateDesign } from "../design/designValidator";
 
 /**
@@ -30,43 +30,72 @@ const DEFAULT_URL = "https://aiconductor.vercel.app";
 // direct browser fetch.
 const PROXY_PATH = "/aiconductor";
 
+// How many times we ask the model to fix an invalid design before giving up.
+const MAX_ATTEMPTS = 3;
+
 /**
- * Extract a JSON document hidden inside model output that might be wrapped in
- * prose or code fences. Tolerates common LLM mistakes so valid responses still
- * come through; anything unparseable becomes a validation error downstream.
+ * Pass 1 fallback: regex-based JSON recovery.
+ *
+ * Tries increasingly aggressive extractions/repairs on the raw model text
+ * before giving up:
+ *   1. strip code fences and parse
+ *   2. isolate the first `{...}` block and parse
+ *   3. same, then repair common LLM JSON mistakes (trailing commas, BOM,
+ *      unquoted keys, single-quoted strings, raw newlines inside strings)
  */
-function extractJson(text) {
+function regexRepairJson(text) {
   if (!text) return null;
 
-  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/);
-  if (fenced) {
-    try {
-      return JSON.parse(fenced[1]);
-    } catch {
-      // fall through
-    }
-  }
+  const candidates = [];
 
+  // 1. Content inside a code fence.
+  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fenced) candidates.push(fenced[1]);
+
+  // 2. The whole trimmed text when it already looks like JSON.
   const trimmed = text.trim();
-  if (trimmed.startsWith("{")) {
-    try {
-      return JSON.parse(trimmed);
-    } catch {
-      // fall through
-    }
-  }
+  if (trimmed.startsWith("{")) candidates.push(trimmed);
 
+  // 3. The outermost `{...}` block found anywhere in the text.
   const firstBrace = trimmed.indexOf("{");
   const lastBrace = trimmed.lastIndexOf("}");
   if (firstBrace >= 0 && lastBrace > firstBrace) {
-    try {
-      return JSON.parse(trimmed.slice(firstBrace, lastBrace + 1));
-    } catch {
-      // fall through
-    }
+    candidates.push(trimmed.slice(firstBrace, lastBrace + 1));
+  }
+
+  for (const candidate of candidates) {
+    const parsed = parseJsonLenient(candidate);
+    if (parsed) return parsed;
   }
 
   return null;
+}
+
+function parseJsonLenient(text) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    // fall through to repair
+  }
+
+  const repaired = text
+    .replace(/^\uFEFF/, "")
+    .replace(/,\s*]/g, "]") // trailing comma in arrays
+    .replace(/,\s*}/g, "}") // trailing comma in objects
+    // unquoted keys: { foo: 1, "bar": 2 } -> { "foo": 1, "bar": 2 }
+    .replace(/([{,]\s*)([A-Za-z_$][\w$]*)(\s*:)/g, '$1"$2"$3')
+    // single-quoted strings -> double-quoted
+    .replace(/:\s*'((?:[^'\\]|\\.)*)'/g, ': "$1"')
+    .replace(/\[\s*'((?:[^'\\]|\\.)*)'\s*\]/g, '["$1"]')
+    // backtick-quoted strings -> double-quoted (LLMs like emphasis ticks)
+    .replace(/:\s*`((?:[^`\\]|\\.)*)`/g, ': "$1"')
+    .replace(/\[\s*`((?:[^`\\]|\\.)*)`\s*\]/g, '["$1"]');
+
+  try {
+    return JSON.parse(repaired);
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -135,8 +164,14 @@ async function fetchAiconductor(url, token, model, prompt) {
 /**
  * Generates a {@link Design} for the given natural-language prompt.
  *
+ * Failure handling is layered:
+ *   1. regexRepairJson() recovers parseable JSON from loose model output
+ *   2. validateDesign() checks the schema
+ *   3. if validation fails, the model is re-prompted with the exact errors
+ *      and the previous (invalid) design, up to MAX_ATTEMPTS times total
+ *
  * Returns the validated, normalized design. Throws an Error with a
- * human-readable message when the AI call or validation fails.
+ * human-readable message when all attempts fail.
  *
  * @param {string} userPrompt
  * @returns {Promise<import("../design/designTypes").Design>}
@@ -155,30 +190,38 @@ export async function generateDesign(userPrompt) {
   const isDefault = !configuredUrl || configuredUrl === DEFAULT_URL;
   const primaryUrl = isDefault ? PROXY_PATH : configuredUrl;
 
-  let text;
-  try {
-    text = await fetchAiconductor(primaryUrl, token, model, prompt);
-  } catch (error) {
-    if (!isDefault && error.isNetworkError) {
-      text = await fetchAiconductor(PROXY_PATH, token, model, prompt);
-    } else {
-      throw error;
+  let previousOutput = "";
+  let errors = [];
+
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    const requestPrompt =
+      attempt === 1 ? prompt : buildRevalidationPrompt(userPrompt, previousOutput, errors);
+
+    let text;
+    try {
+      text = await fetchAiconductor(primaryUrl, token, model, requestPrompt);
+    } catch (error) {
+      if (!isDefault && error.isNetworkError) {
+        text = await fetchAiconductor(PROXY_PATH, token, model, requestPrompt);
+      } else {
+        throw error;
+      }
     }
+    previousOutput = text;
+
+    const parsed = regexRepairJson(text);
+    if (parsed === null) {
+      throw new Error(
+        "AI response was not recoverable JSON. The model should return only a Design JSON document.",
+      );
+    }
+
+    const result = validateDesign(parsed);
+    if (result.ok) return result.design;
+    errors = result.errors;
   }
 
-  const parsed = extractJson(text);
-  if (parsed === null) {
-    throw new Error(
-      "AI response was not valid JSON. The model should return only a Design JSON document.",
-    );
-  }
-
-  const result = validateDesign(parsed);
-  if (!result.ok) {
-    throw new Error(
-      `AI returned an invalid design: ${result.errors.slice(0, 5).join("; ")}`,
-    );
-  }
-
-  return result.design;
+  throw new Error(
+    `AI returned an invalid design after ${MAX_ATTEMPTS} attempts: ${errors.slice(0, 6).join("; ")}`,
+  );
 }
