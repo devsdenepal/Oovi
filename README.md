@@ -2,6 +2,8 @@
 
 Oovi turns natural-language prompts into **fully editable graphic designs** — not flattened images. Every headline, shape, and illustration the AI produces remains a live object on a Fabric.js canvas: selectable, movable, resizable, and re-editable.
 
+![Oovi editor generating a design](docs/screenshot.png)
+
 **Prompt → composition plan → validated Design DSL → editable Fabric.js canvas.**
 
 ## Features
