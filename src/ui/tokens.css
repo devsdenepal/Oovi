@@ -1,0 +1,77 @@
+/* ══════════════════════════════════════════════════════════════
+   OOVI BRAND TOKENS — the single rulebook for color, type, spacing,
+   radius, elevation, motion and layering.
+   Customize the brand by editing THIS file only. Everything in
+   style.css consumes these variables; no hex/font lives there.
+   Spacing/radius/elevation tokens are defined here and adopted by all
+   new code; pre-existing padding/margin literals migrate in Goal 8.
+   Light theme only — no dark mode.
+   ══════════════════════════════════════════════════════════════ */
+
+:root {
+  /* ── Brand ── */
+  --oovi-brand: #4f46e5;
+  --oovi-brand-strong: #4338ca;
+  --oovi-brand-soft: #eef0ff;
+  --oovi-brand-line: #d7dbff;
+  --oovi-logo-a: #6d5cff;
+  --oovi-logo-b: #00c4cc;
+
+  /* ── Surfaces / ink / lines ── */
+  --oovi-bg: #eef0f4;
+  --oovi-surface: #ffffff;
+  --oovi-surface-2: #f5f6fa;
+  --oovi-ink: #1b2030;
+  --oovi-ink-2: #6b7288;
+  --oovi-line: #e3e6ee;
+  --oovi-line-strong: #d3d8e3;
+
+  /* ── Status ── */
+  --oovi-ok: #16a34a;
+  --oovi-warn: #b45309;
+  --oovi-bad: #dc2626;
+
+  /* ── Workspace + code ── */
+  --oovi-workspace: #262a36;
+  --oovi-workspace-dot: #3d4257;
+  --oovi-code-bg: #0f1420;
+  --oovi-code-ink: #b8e0b8;
+
+  /* ── Type ── */
+  --oovi-font-ui: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --oovi-font-mono: "Cascadia Code", Consolas, monospace;
+  --oovi-text-xs: 12px;
+  --oovi-text-sm: 13px;
+  --oovi-text-md: 14px;
+  --oovi-text-lg: 16px;
+  --oovi-text-xl: 20px;
+
+  /* ── Spacing (4px base) ── */
+  --oovi-sp-1: 4px;
+  --oovi-sp-2: 8px;
+  --oovi-sp-3: 12px;
+  --oovi-sp-4: 16px;
+  --oovi-sp-5: 20px;
+  --oovi-sp-6: 24px;
+
+  /* ── Radius ── */
+  --oovi-r-sm: 8px;
+  --oovi-r-md: 12px;
+  --oovi-r-lg: 16px;
+  --oovi-r-pill: 999px;
+
+  /* ── Elevation ── */
+  --oovi-shadow-sm: 0 1px 2px rgba(16, 24, 40, 0.06), 0 4px 16px rgba(16, 24, 40, 0.08);
+  --oovi-shadow-lg: 0 8px 32px rgba(16, 24, 40, 0.16);
+  --oovi-shadow-pop: 0 8px 24px rgba(0, 0, 0, 0.35);
+
+  /* ── Motion ── */
+  --oovi-dur-fast: 120ms;
+  --oovi-dur-med: 200ms;
+
+  /* ── Layering ── */
+  --oovi-z-dock: 10;
+  --oovi-z-toast: 1080;
+  --oovi-z-ctx: 1090;
+  --oovi-z-preview: 1200;
+}

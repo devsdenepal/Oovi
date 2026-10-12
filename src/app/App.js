@@ -1,4 +1,7 @@
-import { generateDesign } from "../ai/aiClient";
+import { generateDesign, generatePatch, planDesign, componentDesign } from "../ai/aiClient";
+import { assetUrl, fetchAssetDataUrl, fetchAssetViaBackend } from "../ai/pollinations";
+import { searchPhotos, triggerDownload } from "../ai/unsplash";
+import { isMockEnabled, mockAssetDataUrl } from "../ai/mockProvider";
 import { validateDesign } from "../design/designValidator";
 import { DEFAULT_PRESET_ID, DESIGN_PRESETS, getPreset } from "../design/presets";
 import { buildSemanticSvg } from "../reference/svg/semanticSvg";
@@ -11,6 +14,7 @@ import { TopBar } from "../components/TopBar";
 import { ContextToolbar } from "../components/ContextToolbar";
 import { DesignTypeSelect } from "../components/DesignTypeSelect";
 import { InsertPanel } from "../components/InsertPanel";
+import { AssistantPanel } from "../components/AssistantPanel";
 import { notify } from "../ui/toasts";
 import { ReferenceUpload } from "../components/ReferenceUpload";
 import { InfluenceSlider } from "../components/InfluenceSlider";
@@ -31,6 +35,15 @@ import { DebugTabs } from "../components/DebugTabs";
 const EXAMPLE_PROMPT =
   "Create a modern product announcement for our new AI assistant. Include the company name header, a bold headline, supporting body text, a decorative rounded rectangle, and a footer with the website.";
 
+function probeImage(src) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve({ w: img.naturalWidth, h: img.naturalHeight });
+    img.onerror = () => reject(new Error("image probe failed"));
+    img.src = src;
+  });
+}
+
 export class App {
   /**
    * @param {Object} mounts element ids: topbar, prompt, generate, designType, insert, toolbar, layers, canvas, json, contextbar
@@ -40,11 +53,15 @@ export class App {
     this.state = {
       design: null,
       generating: false,
+      assisting: false,
+      removing: false,
       title: "Untitled design",
       preview: false,
     };
     this.leftTabs = opts.leftTabs || null;
     this._saveTimer = null;
+    this.aiIds = new Set();
+    this._preview = null;
 
     this.referenceAnalysis = null;
     this.referenceInfluence = 0.8;
@@ -64,7 +81,18 @@ export class App {
     });
     this.insertPanel = new InsertPanel(document.getElementById(mounts.insert), {
       onInsert: (type, fill) => this.editor.addElementOfType(type, fill),
+      onImage: (src, w, h) => this.editor.addImageElement(src, w, h),
       onBackground: (color) => this.editor.setBackground(color),
+      onPhotoSearch: (query) => searchPhotos(query),
+      onPhoto: (photo) => this.onPhotoInsert(photo),
+    });
+    this.assistant = new AssistantPanel(document.getElementById(mounts.assistant), {
+      onSend: (message) => this.onAssistantSend(message),
+      onSuggestion: (sug) => this.onSuggestion(sug),
+      onApply: () => this.onApplyProposal(),
+      onCancel: () => this.onCancelProposal(),
+      onTogglePreview: () => this.onTogglePreview(),
+      onRegenerate: () => this.onAssistantRegenerate(),
     });
 
     this.referenceUpload = new ReferenceUpload(
@@ -82,12 +110,36 @@ export class App {
     );
     this.debugTabs = new DebugTabs(document.getElementById(mounts.debug));
 
-    this.layersPanel = new LayersPanel(document.getElementById(mounts.layers), (id) =>
-      this.editor.selectById(id),
-    );
+    this.layersPanel = new LayersPanel(document.getElementById(mounts.layers), {
+      onSelect: (id) => this.editor.selectById(id),
+      onRename: (id, name) => {
+        if (!this.editor.renameById(id, name)) this.layersPanel.refresh();
+      },
+      onVisibility: (id) => this.editor.toggleVisibilityById(id),
+      onLock: (id) => this.editor.toggleLockById(id),
+      onDuplicate: (id) => this.editor.duplicateById(id),
+      onDelete: (id) => this.editor.deleteById(id),
+      onReorder: (dragId, targetId, place) => this.editor.reorderLayer(dragId, targetId, place),
+      onGroup: () => {
+        const id = this.editor.groupActive();
+        if (id) notify(`Grouped into ${id}.`, "success");
+      },
+      onUngroup: () => this.editor.ungroupActive(),
+    });
 
     this.properties = new Toolbar(document.getElementById(mounts.toolbar), {
       onPropChange: (prop, value) => this.editor.setActiveProperty(prop, value),
+      onCommand: (cmd) => this.onCommand(cmd),
+      onArtboardProp: (key, value) => this.onArtboardProp(key, value),
+      getArtboard: () => {
+        const c = this.editor.canvas;
+        if (!c) return null;
+        return {
+          background: this.editor.toDesign()?.canvas?.background,
+          width: c.width,
+          height: c.height,
+        };
+      },
     });
 
     this.topbar = new TopBar(document.getElementById(mounts.topbar), {
@@ -95,7 +147,7 @@ export class App {
       onRedo: () => this.onRedo(),
       onZoom: (mode) => this.onZoom(mode),
       onPreview: () => this.togglePreview(),
-      onExport: () => this.editor.exportPng(),
+      onExport: (format) => this.exportDesign(format),
       onTitle: (title) => this.onTitle(title),
       onTab: (tab) => this.onTab(tab),
     });
@@ -104,6 +156,7 @@ export class App {
       onDuplicate: () => this.editor.duplicateActive(),
       onDelete: () => this.editor.deleteActive(),
       onToggleLock: () => this.onToggleLock(),
+      onRemoveBackground: () => this.onRemoveBackground(),
     });
 
     this.jsonContainer = document.getElementById(mounts.json);
@@ -116,16 +169,28 @@ export class App {
 
     // Subscribe editor -> panels/toolbar.
     this.editor.layersCallback = (layers, activeIds) => {
-      this.layersPanel.render(layers, activeIds);
+      const a = this.editor.canvas?.getActiveObject();
+      this.layersPanel.render(layers, activeIds, {
+        canGroup: !!a && a.type === "activeSelection" && a.getObjects().length > 1,
+        canUngroup: !!a && (a.elementType || a.type) === "group",
+        aiIds: this.aiIds,
+      });
     };
     this.editor.selectionCallback = (objects) => {
       this.properties.setSelection(objects);
       this._renderJsonPreview();
       this._syncContextBar(objects);
+      this._updateAssistantContext(objects);
       const first = objects && objects[0];
       if (this.devRole) this.devRole.textContent = first ? String(first.elementRole || "—") : "—";
     };
-    this.editor.onDirty = () => this.scheduleSave();
+    this.editor.onDirty = () => {
+      this.scheduleSave();
+      if (this._preview?.active && this._preview.clean) {
+        this._preview.clean = false;
+        this.assistant.setToggleEnabled(false);
+      }
+    };
   }
 
   async boot() {
@@ -150,9 +215,42 @@ export class App {
     this._refreshChrome();
     this.setSaveState("saved");
     document.getElementById("clear-canvas-btn")?.addEventListener("click", () => this.onClear());
+    document.getElementById("sidebar-toggle")?.addEventListener("click", () => this.toggleSidebar());
+    // Clicking any sidebar tab while collapsed re-opens the sidebar.
+    document.querySelectorAll("[data-ltab]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        if (document.getElementById("app").classList.contains("side-collapsed")) this.setSidebar(true);
+      });
+    });
+    try {
+      if (window.localStorage.getItem("oovi.sidebar") === "collapsed") this.setSidebar(false);
+    } catch {
+      // private mode: sidebar simply starts open
+    }
     document.getElementById("exit-preview")?.addEventListener("click", () => this.togglePreview(false));
+    this.assistant.pushAssistant("Select something, then describe a change. Offline? Add ?mock=1 to the URL.");
+    this._updateAssistantContext([]);
     window.addEventListener("keydown", (event) => {
       if (event.key === "Escape" && this.state.preview) this.togglePreview(false);
+    });
+    // Single-key insert shortcuts (T/R/O/L/P). Typing fields, modifiers
+    // and preview mode are excluded; the canvas handler ignores the rest.
+    window.addEventListener("keydown", (event) => {
+      if (event.ctrlKey || event.metaKey || event.altKey) return;
+      const t = event.target;
+      if (
+        t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement ||
+        t instanceof HTMLSelectElement || t.isContentEditable
+      ) {
+        return;
+      }
+      if (this.state.preview) return;
+      const k = event.key.toLowerCase();
+      if (k === "t") this.insertPanel.insert("text");
+      else if (k === "r") this.insertPanel.insert("rectangle");
+      else if (k === "o") this.insertPanel.insert("circle");
+      else if (k === "l") this.insertPanel.insert("line");
+      else if (k === "p") this.insertPanel.focusSearch();
     });
   }
 
@@ -163,9 +261,19 @@ export class App {
       return;
     }
     if (this.state.generating) return;
+    // Reference path keeps the unchanged semantic pipeline (constraint).
+    if (this.referenceAnalysis && this.referenceInfluence > 0) {
+      await this.onGenerateDirect(prompt);
+      return;
+    }
+    await this.onGenerateArchitected(prompt);
+  }
 
+  /** Direct whole-design path (reference mode + plan-fallback). Unchanged. */
+  async onGenerateDirect(prompt) {
     this.state.generating = true;
     this.generateButton.setLoading(true);
+    this._clearPreviewUI();
 
     try {
       const options = { canvas: { width: this.designPreset.width, height: this.designPreset.height } };
@@ -214,6 +322,133 @@ export class App {
     }
   }
 
+  /**
+   * Architected path: plan once, then stream components one by one —
+   * DSL text/shapes through the existing pipeline, icons/logos/photos
+   * through Pollinations. Each component is its own undo entry.
+   */
+  async onGenerateArchitected(prompt) {
+    const canvas = { width: this.designPreset.width, height: this.designPreset.height };
+    this.state.generating = true;
+    this._clearPreviewUI();
+    const status = (msg) => this.generateButton.setLoading(true, msg);
+    try {
+      status("Planning the build…");
+      let plan;
+      try {
+        plan = await planDesign(prompt, canvas);
+      } catch (error) {
+        console.warn("[architect] plan failed, falling back to direct:", error.message);
+        this.assistant.pushAssistant("Plan failed — falling back to one-shot generation.");
+        this.state.generating = false;
+        return await this.onGenerateDirect(prompt);
+      }
+
+      this.editor.loadDesign({ canvas: { ...canvas, background: plan.palette.background }, elements: [] });
+      this._updateCanvasMeta(canvas);
+      this._renderJsonPreview();
+      this.scheduleSave();
+      this._refreshChrome();
+      if (plan.warnings.length) {
+        this.assistant.pushAssistant(`Plan notes: ${plan.warnings.join("; ")}`);
+      }
+      this.assistant.pushAssistant(`Plan: ${plan.components.length} components (${plan.source}).`);
+
+      let done = 0;
+      let failed = 0;
+      let appliedTotal = 0;
+      for (const component of plan.components) {
+        done += 1;
+        if (component.kind === "image") {
+          status(`Component ${done}/${plan.components.length}: fetching ${component.id}…`);
+          if (await this._generateImageComponent(component)) appliedTotal += 1;
+          else failed += 1;
+        } else {
+          status(`Component ${done}/${plan.components.length}: building ${component.id}…`);
+          try {
+            const { elements } = await componentDesign(component, canvas, plan.palette);
+            const res = this.editor.applyPatchOps(elements.map((element) => ({ op: "add", element })));
+            appliedTotal += res.applied.length;
+            this.assistant.pushAssistant(`+ ${component.id} (${res.applied.length} pieces)`);
+          } catch (error) {
+            failed += 1;
+            this.assistant.pushAssistant(`${component.id} skipped: ${error.message}`, "error");
+          }
+        }
+        this._renderJsonPreview();
+        this._refreshChrome();
+      }
+
+      this.state.design = this.editor.toDesign();
+      this.debugTabs.set({
+        design: this.state.design,
+        analysis: this.referenceAnalysis,
+        svg: "",
+        semantic: null,
+        warnings: [],
+      });
+      if (appliedTotal === 0) {
+        const message = `All ${done} components failed — see the assistant log for reasons.`;
+        this.generateButton.setError(message);
+        notify(message, "error");
+      } else {
+        const message = `Built ${done - failed}/${done} components (${appliedTotal} pieces) — every element is editable.`;
+        this.generateButton.setSuccess(message);
+        notify(message, failed > 0 ? "info" : "success");
+      }
+      this.scheduleSave();
+    } catch (error) {
+      const message = `Generation failed: ${error.message}`;
+      this.generateButton.setError(message);
+      notify(message, "error");
+      console.error(error);
+    } finally {
+      this.state.generating = false;
+    }
+  }
+
+  async _generateImageComponent(component) {
+    const box = component.box;
+    if (isMockEnabled()) {
+      const src = mockAssetDataUrl(component.describe, box);
+      this.editor.addImageElement(src, box.width, box.height, box);
+      this.assistant.pushAssistant(`+ ${component.id} (image, mock)`);
+      return true;
+    }
+    const assetOpts = { width: box.width, height: box.height, asset: component.asset };
+    // 1. Backend first — the secret key never leaves the server.
+    try {
+      const src = await fetchAssetViaBackend(component.describe, assetOpts);
+      const dims = await probeImage(src).catch(() => ({ w: box.width, h: box.height }));
+      this.editor.addImageElement(src, dims.w, dims.h, box);
+      this.assistant.pushAssistant(`+ ${component.id} (image)`);
+      return true;
+    } catch (error) {
+      console.warn("[architect] backend unavailable, trying direct:", error.message);
+    }
+    // 2. Keyless direct fetch (dataURL: export-safe).
+    try {
+      const url = assetUrl(component.describe, assetOpts);
+      const src = await fetchAssetDataUrl(url);
+      const dims = await probeImage(src).catch(() => ({ w: box.width, h: box.height }));
+      this.editor.addImageElement(src, dims.w, dims.h, box);
+      this.assistant.pushAssistant(`+ ${component.id} (image)`);
+      return true;
+    } catch (error) {
+      console.warn("[architect] asset fetch failed, hotlinking:", error.message);
+      try {
+        const url = assetUrl(component.describe, { width: box.width, height: box.height, asset: component.asset });
+        this.editor.addImageElement(url, box.width, box.height, box);
+        this.assistant.pushAssistant(`+ ${component.id} (image, hotlinked — export may warn)`);
+        notify("Image hotlinked: PNG export may be blocked by the provider.", "error");
+        return true;
+      } catch (error2) {
+        this.assistant.pushAssistant(`${component.id} skipped: ${error2.message}`, "error");
+        return false;
+      }
+    }
+  }
+
   onReferenceAnalysis(analysis) {
     this.referenceAnalysis = analysis;
   }
@@ -233,6 +468,7 @@ export class App {
     this.editor.resizeCanvas(width, height);
     this._updateCanvasMeta({ width, height });
     this._renderJsonPreview();
+    this.properties.setSelection(this.editor.canvas?.getActiveObjects() || []);
     this.scheduleSave();
     const message = `Canvas: ${label} ${width} × ${height}.`;
     this.generateButton.setStatus(message, "");
@@ -248,7 +484,10 @@ export class App {
   }
 
   onClear() {
+    // Native confirm matches the Regenerate precedent; Goal 5 custom dialog replaces both.
+    if (!window.confirm("Clear the canvas? Everything is removed (one undo brings it back).")) return;
     this.editor.clear();
+    this._clearPreviewUI();
     this.generateButton.setStatus("Canvas cleared.", "");
     notify("Canvas cleared.", "info");
     this.scheduleSave();
@@ -295,6 +534,298 @@ export class App {
     notify(locked ? "Selection locked." : "Selection unlocked.", "info");
   }
 
+  async onRemoveBackground() {
+    if (this.state.removing) {
+      notify("Background removal already running.", "info");
+      return;
+    }
+    this.state.removing = true;
+    notify("Removing background… (first run downloads the model)", "info");
+    try {
+      const ok = await this.editor.removeBackgroundActive();
+      if (ok) {
+        notify("Background removed.", "success");
+        this._renderJsonPreview();
+        this.scheduleSave();
+        this._refreshChrome();
+      } else {
+        notify("Select a single loaded image first.", "error");
+      }
+    } catch (error) {
+      notify(`Background removal failed: ${error.message}`, "error");
+      console.error(error);
+    } finally {
+      this.state.removing = false;
+    }
+  }
+
+  onCommand(cmd) {
+    if (cmd === "remove-bg") {
+      this.onRemoveBackground();
+      return;
+    }
+    const [action, arg] = String(cmd).split("-");
+    if (action === "align") this.editor.alignActive(arg);
+    else if (action === "distribute") this.editor.distributeActive(arg);
+    else if (action === "order") this.editor.orderActive(arg);
+    else return;
+    this._refreshChrome();
+  }
+
+  onArtboardProp(key, value) {
+    const c = this.editor.canvas;
+    if (!c) return;
+    if (key === "background") {
+      this.editor.setBackground(value);
+      return;
+    }
+    if (key === "width" || key === "height") {
+      const n = Math.round(Number(value));
+      if (!Number.isFinite(n)) return;
+      const width = key === "width" ? Math.min(4096, Math.max(64, n)) : c.width;
+      const height = key === "height" ? Math.min(4096, Math.max(64, n)) : c.height;
+      this.editor.resizeCanvas(width, height);
+      this._updateCanvasMeta({ width, height });
+      this._renderJsonPreview();
+      this.properties.setSelection(c.getActiveObjects());
+      this.scheduleSave();
+    }
+  }
+
+  _updateAssistantContext(objects) {
+    const list = objects || [];
+    if (list.length === 1) {
+      const o = list[0];
+      const kind = o.elementType || o.type;
+      const isText = kind === "text" || o.type === "i-text" || o.type === "textbox";
+      this.assistant.setContext({
+        label: `Editing: ${o.designId || kind}`,
+        suggestions: isText
+          ? [
+              { label: "Bigger", kind: "ai", text: "make it bigger" },
+              { label: "Center", kind: "ai", text: "center it" },
+              { label: "Blue", kind: "ai", text: "make it blue" },
+            ]
+          : [
+              { label: "Center", kind: "ai", text: "center it" },
+              { label: "To front", kind: "cmd", cmd: "order-front" },
+              { label: "To back", kind: "cmd", cmd: "order-back" },
+            ],
+      });
+    } else if (list.length > 1) {
+      this.assistant.setContext({
+        label: `Editing: ${list.length} objects`,
+        suggestions: [
+          { label: "Distribute", kind: "cmd", cmd: "distribute-x" },
+          { label: "Align center", kind: "cmd", cmd: "align-center" },
+          { label: "Group", kind: "cmd", cmd: "group" },
+        ],
+      });
+    } else {
+      this.assistant.setContext({
+        label: "Whole design",
+        suggestions: [
+          { label: "Add headline", kind: "ai", text: "add a headline" },
+          { label: "Add button", kind: "ai", text: "add a button" },
+          { label: "Bigger headline", kind: "ai", text: "make it bigger" },
+        ],
+      });
+    }
+  }
+
+  onSuggestion(sug) {
+    if (!sug) return;
+    if (sug.kind === "ai") {
+      this.onAssistantSend(sug.text || sug.label);
+      return;
+    }
+    if (sug.cmd === "group") {
+      const id = this.editor.groupActive();
+      if (id) notify(`Grouped into ${id}.`, "success");
+      this._refreshChrome();
+      return;
+    }
+    const [action, arg] = String(sug.cmd || "").split("-");
+    if (action === "order") this.editor.orderActive(arg);
+    else if (action === "distribute") this.editor.distributeActive(arg);
+    else if (action === "align") this.editor.alignActive(arg);
+    else return;
+    this._refreshChrome();
+  }
+
+  async onAssistantSend(message) {
+    const text = String(message || "").trim();
+    if (!text || this.state.assisting) return;
+    this._clearPreviewUI();
+    this.state.assisting = true;
+    this.assistant.setBusy(true);
+    this.assistant.pushUser(text);
+    try {
+      const design = this.editor.toDesign();
+      if (!design || !(design.elements || []).length) {
+        this.assistant.pushAssistant("Generate or add something first, then ask for changes.", "error");
+        return;
+      }
+      const selectedIds = (this.editor.canvas?.getActiveObjects() || [])
+        .map((o) => o.designId)
+        .filter((id) => typeof id === "string");
+      const { ops, errors, note, source } = await generatePatch(text, { design, selectedIds });
+      if (!ops.length) {
+        this.assistant.pushAssistant(note || errors.join("; ") || "No changes proposed.", errors.length ? "error" : "");
+        if (errors.length) notify(`Assistant: ${errors[0]}`, "error");
+        return;
+      }
+      const { applied, changedIds } = this.editor.applyPatchOps(ops);
+      this._renderJsonPreview();
+      this._refreshChrome();
+      this.scheduleSave();
+      this.aiIds = new Set(changedIds);
+      this.layersPanel.refresh({ aiIds: this.aiIds });
+      this._preview = { active: true, showingAfter: true, clean: true };
+      this.assistant.showProposal({ lines: applied, errors, note, source });
+      this._positionGhost(true);
+      notify(`Assistant proposed ${applied.length} change(s).`, "info");
+    } catch (error) {
+      this.assistant.pushAssistant(`Failed: ${error.message}`, "error");
+      notify(`Assistant failed: ${error.message}`, "error");
+      console.error(error);
+    } finally {
+      this.state.assisting = false;
+      this.assistant.setBusy(false);
+    }
+  }
+
+  onApplyProposal() {
+    if (!this._preview?.active) return;
+    this._clearPreviewUI();
+    this.assistant.pushAssistant("Applied. Undo is available (Ctrl+Z).");
+    notify("AI changes applied.", "success");
+  }
+
+  async onCancelProposal() {
+    if (!this._preview?.active) return;
+    await this.editor.history.undo();
+    this._clearPreviewUI();
+    this.assistant.pushAssistant("Discarded.");
+    this.scheduleSave();
+    this._refreshChrome();
+  }
+
+  async onTogglePreview() {
+    if (!this._preview?.active) return;
+    if (this._preview.showingAfter) {
+      await this.editor.history.undo();
+      this._preview.showingAfter = false;
+      this.assistant.setToggleLabel(false);
+    } else {
+      await this.editor.history.redo();
+      this._preview.showingAfter = true;
+      this.assistant.setToggleLabel(true);
+    }
+  }
+
+  onAssistantRegenerate() {
+    // Native confirm is the Goal-5-dialog predecessor (logged in DECISIONS).
+    if (!window.confirm("Replace the whole design? Your current edits stay one undo away.")) return;
+    this.onGenerate();
+  }
+
+  _positionGhost(show) {
+    const overlay = document.getElementById("ghost-overlay");
+    if (!overlay) return;
+    if (!show) {
+      overlay.hidden = true;
+      return;
+    }
+    const holder = document.getElementById(this.editor.holderId);
+    const main = holder?.closest(".canvas-area");
+    if (!holder || !main) return;
+    const hr = holder.getBoundingClientRect();
+    const mr = main.getBoundingClientRect();
+    overlay.style.left = `${hr.left - mr.left}px`;
+    overlay.style.top = `${hr.top - mr.top}px`;
+    overlay.style.width = `${hr.width}px`;
+    overlay.style.height = `${hr.height}px`;
+    overlay.hidden = false;
+  }
+
+  _clearPreviewUI() {
+    this._preview = null;
+    this.aiIds = new Set();
+    this.layersPanel.refresh({ aiIds: this.aiIds });
+    this.assistant.clearProposal();
+    this._positionGhost(false);
+  }
+
+  toggleSidebar() {
+    const collapsed = document.getElementById("app").classList.contains("side-collapsed");
+    this.setSidebar(collapsed);
+  }
+
+  /** @param {boolean} open true = sidebar visible */
+  setSidebar(open) {
+    document.getElementById("app").classList.toggle("side-collapsed", !open);
+    const btn = document.getElementById("sidebar-toggle");
+    if (btn) {
+      const icon = btn.querySelector("svg, i");
+      if (icon) icon.className = open ? "fa-solid fa-angles-left" : "fa-solid fa-angles-right";
+      btn.title = open ? "Collapse sidebar" : "Expand sidebar";
+      btn.setAttribute("aria-label", open ? "Collapse sidebar" : "Expand sidebar");
+      btn.setAttribute("aria-expanded", String(open));
+    }
+    try {
+      window.localStorage.setItem("oovi.sidebar", open ? "open" : "collapsed");
+    } catch {
+      // ignore
+    }
+    requestAnimationFrame(() => this.editor.fitToContainer());
+  }
+
+  async exportDesign(format = "png") {
+    const c = this.editor.canvas;
+    if (!c || c.getObjects().length === 0) {
+      notify("Nothing to export yet.", "error");
+      return;
+    }
+    const slug =
+      this.state.title.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "design";
+    try {
+      if (format === "jpg") await this.editor.exportJpg(`${slug}.jpg`);
+      else if (format === "svg") await this.editor.exportSvg(`${slug}.svg`);
+      else if (format === "pdf") await this.editor.exportPdf(`${slug}.pdf`);
+      else await this.editor.exportPng(`${slug}.png`);
+      notify(`Exported ${slug}.${format}.`, "success");
+    } catch (error) {
+      notify(`Export failed: ${error.message}`, "error");
+      console.error(error);
+    }
+  }
+
+  async onPhotoInsert(photo) {
+    if (!photo?.full) return;
+    notify(`Fetching photo by ${photo.photographer || "Unknown"}…`, "info");
+    try {
+      triggerDownload(photo); // best-effort credit, never blocks
+      let src;
+      try {
+        src = await fetchAssetDataUrl(photo.full);
+      } catch (error) {
+        console.warn("[photos] direct fetch failed, hotlinking:", error.message);
+        this.editor.addImageElement(photo.full, 800, 600);
+        this.assistant.pushAssistant(`Photo by ${photo.photographer || "Unknown"} on Unsplash (hotlinked — export may warn).`);
+        notify("Photo hotlinked: PNG export may be blocked.", "error");
+        return;
+      }
+      const dims = await probeImage(src).catch(() => ({ w: 800, h: 600 }));
+      this.editor.addImageElement(src, dims.w, dims.h);
+      this.assistant.pushAssistant(`Photo by ${photo.photographer || "Unknown"} on Unsplash.`);
+      notify("Photo inserted.", "success");
+    } catch (error) {
+      notify(`Photo failed: ${error.message}`, "error");
+      console.error(error);
+    }
+  }
+
   togglePreview(force) {
     const on = force !== undefined ? force : !this.state.preview;
     this.state.preview = on;
@@ -333,8 +864,11 @@ export class App {
       this.contextbar.hide();
       return;
     }
-    this.contextbar.show(rect.x + rect.width / 2 - 66, rect.y - 48, {
+    const selected = this.editor.canvas?.getActiveObjects() || [];
+    const isImage = selected.length === 1 && (selected[0].elementType || selected[0].type) === "image";
+    this.contextbar.show(rect.x + rect.width / 2 - 84, rect.y - 48, {
       locked: this.editor.isActiveLocked(),
+      isImage,
     });
   }
 
@@ -347,7 +881,7 @@ export class App {
     });
   }
 
-  /** @param {"saved"|"saving"|"unsaved"} state */
+  /** @param {"saved"|"saving"|"unsaved"|"error"} state */
   setSaveState(state) {
     this.topbar.setSaveState(state);
   }
@@ -370,7 +904,7 @@ export class App {
       window.localStorage.setItem("oovi.draft.v1", JSON.stringify(payload));
       this.setSaveState("saved");
     } catch {
-      this.setSaveState("unsaved");
+      this.setSaveState("error");
     }
   }
 

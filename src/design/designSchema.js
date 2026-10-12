@@ -17,7 +17,7 @@ export const CANVAS_WIDTH = 1080;
 export const CANVAS_HEIGHT = 1080;
 export const MAX_ELEMENTS = 30;
 
-export const ELEMENT_TYPES = ["text", "rectangle", "circle", "line", "group"];
+export const ELEMENT_TYPES = ["text", "rectangle", "circle", "line", "group", "image"];
 
 /**
  * Field rules per element type.
@@ -51,6 +51,10 @@ export const ELEMENT_SCHEMA = {
   },
   group: {
     required: ["id", "type", "x", "y", "children"],
+    defaults: {},
+  },
+  image: {
+    required: ["id", "type", "x", "y", "width", "height", "src"],
     defaults: {},
   },
 };

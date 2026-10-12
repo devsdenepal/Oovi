@@ -1,4 +1,8 @@
 import { buildDesignPrompt, buildRevalidationPrompt } from "./designPrompt";
+import { buildPlanPrompt, buildComponentPrompt } from "./architectPrompt";
+import { buildPatchPrompt } from "./patchPrompt";
+import { validatePatch } from "./patch";
+import { isMockEnabled, mockDesign, mockPatch, mockPlan, mockComponent } from "./mockProvider";
 import {
   buildSemanticDesignPrompt,
   buildSemanticRevalidationPrompt,
@@ -269,6 +273,13 @@ async function generateSemantic(userPrompt, analysis, influence) {
 export async function generateDesign(userPrompt, options = {}) {
   const { referenceAnalysis, referenceInfluence = 1, canvas } = options;
 
+  if (isMockEnabled()) {
+    const raw = mockDesign(userPrompt, canvas);
+    const check = validateDesign(raw);
+    if (!check.ok) throw new Error(`Mock produced invalid design: ${check.errors.slice(0, 3).join("; ")}`);
+    return { design: check.design, semanticDesign: null, warnings: [], canvas: check.design.canvas, source: "mock" };
+  }
+
   if (referenceAnalysis && referenceInfluence > 0) {
     return generateSemantic(userPrompt, referenceAnalysis, referenceInfluence);
   }
@@ -318,4 +329,158 @@ export async function generateDesign(userPrompt, options = {}) {
   throw new Error(
     `AI returned an invalid design after ${MAX_ATTEMPTS} attempts: ${errors.slice(0, 6).join("; ")}`,
   );
+}
+
+/**
+ * Assistant edit path (Goal 4): natural-language request → validated
+ * PATCH against the live design (changed props only, never a redesign).
+ *
+ * @param {string} message
+ * @param {{design: import("../design/designTypes").Design, selectedIds?: string[]}} context
+ * @returns {Promise<{ops: Array, errors: string[], note: string, source: "mock"|"ai"}>}
+ */
+export async function generatePatch(message, context) {
+  const { design, selectedIds = [] } = context;
+  if (!message || !message.trim()) throw new Error("Describe the change first.");
+  if (!design) throw new Error("Generate or open a design first.");
+
+  if (isMockEnabled()) {
+    const { ops, note } = mockPatch(message, design, selectedIds);
+    const { ops: valid, errors } = validatePatch({ ops }, design);
+    return { ops: valid, errors, note, source: "mock" };
+  }
+
+  const configuredUrl = (import.meta.env.VITE_AICONDUCTOR_URL || "").trim().replace(/\/+$/, "");
+  const token = import.meta.env.VITE_AICONDUCTOR_TOKEN;
+  const model = import.meta.env.VITE_AICONDUCTOR_MODEL;
+  const isDefault = !configuredUrl || configuredUrl === DEFAULT_URL;
+  const primaryUrl = isDefault ? PROXY_PATH : configuredUrl;
+
+  const text = await fetchWithFallback(primaryUrl, token, model, buildPatchPrompt(message, design, selectedIds));
+  const parsed = regexRepairJson(text);
+  if (parsed === null) {
+    throw new Error("AI response was not recoverable JSON. Ask again, more specifically.");
+  }
+  const { ops, errors } = validatePatch(parsed, design);
+  return { ops, errors, note: "", source: "ai" };
+}
+
+function sanitizeBox(box, canvas, warnings, id) {
+  if (!box || typeof box !== "object") return null;
+  const num = (v, fb) => (typeof v === "number" && Number.isFinite(v) ? v : fb);
+  const width = Math.min(1024, Math.max(32, Math.round(num(box.width, 256))));
+  const height = Math.min(1024, Math.max(32, Math.round(num(box.height, 256))));
+  const x = Math.min(Math.max(0, Math.round(num(box.x, 0))), Math.max(0, canvas.width - 32));
+  const y = Math.min(Math.max(0, Math.round(num(box.y, 0))), Math.max(0, canvas.height - 32));
+  return { x, y, width, height };
+}
+
+function sanitizePlan(raw, canvas) {
+  const warnings = [];
+  const palette = {
+    background: "#FFFFFF",
+    ink: "#111111",
+    accent: "#4F46E5",
+    ...((raw && raw.palette) || {}),
+  };
+  const seen = new Set();
+  const components = [];
+  for (const c of (raw?.components || []).slice(0, 10)) {
+    if (!c || typeof c !== "object") continue;
+    const id = String(c.id || "").trim().toLowerCase().replace(/[^a-z0-9-_]+/g, "-");
+    if (!id || seen.has(id)) {
+      warnings.push("plan: dropped a duplicate or empty component id");
+      continue;
+    }
+    seen.add(id);
+    const kind = c.kind === "image" ? "image" : "dsl";
+    let box = c.box && typeof c.box === "object" ? sanitizeBox(c.box, canvas, warnings, id) : null;
+    if (!box && kind === "dsl") {
+      box = { x: 0, y: 0, width: canvas.width, height: canvas.height };
+      warnings.push(`plan: "${id}" got no box — full canvas assumed`);
+    }
+    if (!box) {
+      warnings.push(`plan: image component "${id}" needs a box`);
+      continue;
+    }
+    components.push({
+      id,
+      kind,
+      describe: String(c.describe || id).slice(0, 300),
+      asset: ["icon", "logo", "illustration", "photo"].includes(c.asset) ? c.asset : "illustration",
+      ...(box ? { box } : {}),
+    });
+  }
+  return { palette, components, warnings };
+}
+
+function gatewayEnv() {
+  const configuredUrl = (import.meta.env.VITE_AICONDUCTOR_URL || "").trim().replace(/\/+$/, "");
+  const token = import.meta.env.VITE_AICONDUCTOR_TOKEN;
+  const model = import.meta.env.VITE_AICONDUCTOR_MODEL;
+  const isDefault = !configuredUrl || configuredUrl === DEFAULT_URL;
+  return { primaryUrl: isDefault ? PROXY_PATH : configuredUrl, token, model };
+}
+
+/**
+ * Architect pass 1: natural-language request → build plan (palette +
+ * ordered components, each routed dsl|image with a fixed box).
+ */
+export async function planDesign(userPrompt, canvas) {
+  if (isMockEnabled()) {
+    const clean = sanitizePlan(mockPlan(userPrompt, canvas), canvas);
+    return { ...clean, source: "mock" };
+  }
+  const { primaryUrl, token, model } = gatewayEnv();
+  let errors = [];
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    const requestPrompt =
+      attempt === 1
+        ? buildPlanPrompt(userPrompt, canvas)
+        : `${buildPlanPrompt(userPrompt, canvas)}\n\n[Correction]\nYour previous response was not usable JSON (${errors.join("; ")}). Return ONLY the JSON plan.`;
+    const text = await fetchWithFallback(primaryUrl, token, model, requestPrompt);
+    const parsed = regexRepairJson(text);
+    if (parsed === null) {
+      errors = ["unrecoverable JSON"];
+      continue;
+    }
+    const clean = sanitizePlan(parsed, canvas);
+    if (clean.components.length === 0) {
+      errors = ["plan had no usable components"];
+      continue;
+    }
+    return { ...clean, source: "ai" };
+  }
+  throw new Error(`Could not plan the design: ${errors.slice(0, 3).join("; ")}`);
+}
+
+/**
+ * Architect pass 2: one DSL component → validated elements.
+ * @returns {Promise<{elements: Array, source: "mock"|"ai"}>}
+ */
+export async function componentDesign(component, canvas, palette) {
+  if (isMockEnabled()) {
+    const elements = mockComponent(component, canvas);
+    const check = validateDesign({ canvas, elements });
+    if (!check.ok) throw new Error(`Mock component invalid: ${check.errors.slice(0, 2).join("; ")}`);
+    return { elements: check.design.elements, source: "mock" };
+  }
+  const { primaryUrl, token, model } = gatewayEnv();
+  let errors = [];
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    const requestPrompt =
+      attempt === 1
+        ? buildComponentPrompt(component, canvas, palette)
+        : `${buildComponentPrompt(component, canvas, palette)}\n\n[Correction]\nYour previous response failed (${errors.join("; ")}). Return ONLY {"elements":[...]}.`;
+    const text = await fetchWithFallback(primaryUrl, token, model, requestPrompt);
+    const parsed = regexRepairJson(text);
+    if (parsed === null || !Array.isArray(parsed.elements)) {
+      errors = ["unrecoverable JSON"];
+      continue;
+    }
+    const check = validateDesign({ canvas, elements: parsed.elements });
+    if (check.ok) return { elements: check.design.elements, source: "ai" };
+    errors = check.errors;
+  }
+  throw new Error(`Component "${component.id}" failed: ${errors.slice(0, 3).join("; ")}`);
 }

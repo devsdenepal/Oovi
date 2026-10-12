@@ -1,4 +1,4 @@
-import { Canvas, FabricText, Rect, Circle, Line, Group } from "fabric";
+import { Canvas, Textbox, Rect, Circle, Line, Group, FabricImage } from "fabric";
 
 /**
  * Fabric.js renderer.
@@ -12,10 +12,8 @@ import { Canvas, FabricText, Rect, Circle, Line, Group } from "fabric";
  *    PSD, DOM) requires no changes to src/ai or src/design.
  *
  * Element types handled via a switch to make adding types trivial:
- *   supported now: text, rectangle, circle, line, group
+ *   supported now: text, rectangle, circle, line, group, image
  */
-
-const DEFAULT_OPACITY = 1;
 
 /**
  * @param {import("../design/designTypes").Design} design
@@ -38,13 +36,29 @@ export function createFabricCanvas(design) {
 }
 
 function commonOptions(element) {
+  const locked = element.locked === true;
   return {
     left: element.x,
     top: element.y,
     originX: "left",
     originY: "top",
     angle: element.angle ?? 0,
-    opacity: element.opacity ?? DEFAULT_OPACITY,
+    opacity: element.opacity ?? 1,
+    visible: element.visible ?? true,
+    lockMovementX: locked,
+    lockMovementY: locked,
+    lockRotation: locked,
+    lockScalingX: locked,
+    lockScalingY: locked,
+    hasControls: !locked,
+    locked,
+    // Oovi selection identity (mirrors --oovi-brand; the canvas API
+    // cannot consume CSS vars): accent outline + roomier handles.
+    transparentCorners: false,
+    cornerColor: "#4F46E5",
+    cornerStrokeColor: "#FFFFFF",
+    cornerSize: 14,
+    borderColor: "#4F46E5",
     designId: element.id,
     elementRole: element.role || null,
     elementType: element.type,
@@ -52,7 +66,9 @@ function commonOptions(element) {
 }
 
 function createText(element) {
-  const text = new FabricText(element.content, {
+  // Textbox (not FabricText) so the DSL width is a real wrap width —
+  // this is what makes the inspector width row meaningful for text.
+  const text = new Textbox(element.content, {
     ...commonOptions(element),
     fontSize: element.fontSize,
     fontWeight: element.fontWeight ?? 400,
@@ -60,8 +76,8 @@ function createText(element) {
     fontFamily: element.fontFamily || "Arial",
     textAlign: element.textAlign || "left",
     lineHeight: element.lineHeight ?? 1.2,
+    charSpacing: element.charSpacing || 0,
     editable: true,
-    // Keep the reported width matching the DSL width so exported JSON is stable.
     width: element.width,
   });
   return text;
@@ -130,6 +146,8 @@ function createObject(element) {
       return createLine(element);
     case "group":
       return createGroup(element);
+    case "image":
+      return createImagePlaceholder(element);
     default:
       console.warn(`[fabricRenderer] unknown element type: ${element.type}`);
       return null;
@@ -144,6 +162,74 @@ function createObject(element) {
  */
 export function createDesignObject(element) {
   return createObject(element);
+}
+
+/**
+ * Image placeholder: a dashed box at the DSL rect carrying the pending
+ * source. The real pixels arrive via hydrateImages() (async, after the
+ * sync render pass), so generation/rendering never blocks on network.
+ * A failed load keeps the placeholder — layout never breaks.
+ * @param {import("../design/designTypes").DesignElement} element
+ */
+function createImagePlaceholder(element) {
+  const holder = new Rect({
+    ...commonOptions(element),
+    width: Math.max(1, element.width),
+    height: Math.max(1, element.height),
+    fill: "#E5E7EB",
+    stroke: "#9AA1B5",
+    strokeWidth: 1,
+    strokeDashArray: [6, 4],
+  });
+  holder.isImagePlaceholder = true;
+  holder.pendingSrc = element.src;
+  return holder;
+}
+
+/**
+ * Swaps every pending image placeholder on the canvas for its loaded
+ * pixels (stretched exactly to the DSL box), preserving stack order.
+ * @param {fabric.Canvas} canvas
+ * @param {() => void} [onSettled] called once per swapped image
+ */
+export function hydrateImages(canvas, onSettled) {
+  const pending = canvas
+    .getObjects()
+    .filter((o) => o.isImagePlaceholder && typeof o.pendingSrc === "string" && o.pendingSrc);
+  pending.forEach((holder) => {
+    FabricImage.fromURL(holder.pendingSrc, { crossOrigin: "anonymous" })
+      .then((img) => {
+        if (!img || typeof img.set !== "function" || typeof img.render !== "function") {
+          throw new Error(`unusable image object (${img?.constructor?.name || typeof img})`);
+        }
+        img.set({
+          left: holder.left,
+          top: holder.top,
+          originX: "left",
+          originY: "top",
+          angle: holder.angle || 0,
+          opacity: holder.opacity ?? 1,
+          designId: holder.designId,
+          elementRole: holder.elementRole || null,
+          elementType: "image",
+        });
+        img.designSrc = holder.pendingSrc;
+        img.set({
+          scaleX: holder.width / Math.max(1, img.width || 1),
+          scaleY: holder.height / Math.max(1, img.height || 1),
+        });
+        if (typeof img.setCoords === "function") img.setCoords();
+        const index = Math.max(0, canvas.getObjects().indexOf(holder));
+        canvas.remove(holder);
+        if (typeof canvas.insertAt === "function") canvas.insertAt(index, img);
+        else canvas.add(img);
+        canvas.requestRenderAll();
+        onSettled?.();
+      })
+      .catch(() => {
+        console.warn("[fabricRenderer] image failed to load; placeholder kept");
+      });
+  });
 }
 
 /**
@@ -203,6 +289,9 @@ function objectToDsl(obj) {
     y: obj.top,
     angle: obj.angle,
     opacity: obj.opacity,
+    // Sparse: only present when non-default, keeping AI output clean.
+    visible: obj.visible === false ? false : undefined,
+    locked: obj.locked === true ? true : undefined,
   };
 
   switch (obj.elementType || obj.type) {
@@ -214,6 +303,8 @@ function objectToDsl(obj) {
       base.fill = obj.fill;
       base.textAlign = obj.textAlign;
       base.lineHeight = obj.lineHeight;
+      base.fontFamily = obj.fontFamily;
+      base.charSpacing = obj.charSpacing;
       delete base.angle; // text keeps its own angle handling
       break;
     case "rectangle":
@@ -234,6 +325,11 @@ function objectToDsl(obj) {
       break;
     case "group":
       base.children = obj.getObjects().map(objectToDsl);
+      break;
+    case "image":
+      base.width = Math.round((obj.width || 0) * (obj.scaleX || 1));
+      base.height = Math.round((obj.height || 0) * (obj.scaleY || 1));
+      base.src = obj.designSrc || obj.pendingSrc || "";
       break;
   }
 

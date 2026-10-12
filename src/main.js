@@ -1,4 +1,5 @@
 import "bootstrap/dist/css/bootstrap.min.css";
+import "./ui/tokens.css";
 import "./style.css";
 import { App } from "./app/App";
 import { initLeftTabs } from "./ui/leftTabs";
@@ -19,6 +20,7 @@ const app = new App(
     insert: "insert-mount",
     reference: "reference-mount",
     influence: "influence-mount",
+    assistant: "assistant-mount",
     debug: "debug-tabs-mount",
     toolbar: "toolbar-mount",
     layers: "layers-mount",
