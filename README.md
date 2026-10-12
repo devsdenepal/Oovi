@@ -1,6 +1,6 @@
 # Oovi
 
-AI-powered editable graphic design system.
+AI-powered editable graphic design system. 
 
 **Natural language prompt → Generative AI → Design JSON → validated → Fabric.js → fully editable canvas.**
 
