@@ -1,10 +1,16 @@
 import { buildDesignPrompt, buildRevalidationPrompt } from "./designPrompt";
+import {
+  buildSemanticDesignPrompt,
+  buildSemanticRevalidationPrompt,
+} from "./semanticPrompt";
+import { validateSemanticDesign } from "../layout/semanticValidator";
+import { resolveSemanticDesign } from "../layout/layoutEngine";
 import { validateDesign } from "../design/designValidator";
 
 /**
  * AI service abstraction.
  *
- * generateDesign(userPrompt) -> Design
+ * generateDesign(userPrompt, { referenceAnalysis, referenceInfluence }) -> { design, semanticDesign, warnings, canvas }
  *
  * The AI provider is configurable via environment variables:
  *
@@ -162,6 +168,89 @@ async function fetchAiconductor(url, token, model, prompt) {
 }
 
 /**
+ * Fetches model text from the AI Conductor endpoint, transparently falling
+ * back to the same-origin proxy when a custom provider fails on CORS/network.
+ */
+async function fetchWithFallback(primaryUrl, token, model, prompt) {
+  const configuredUrl = (import.meta.env.VITE_AICONDUCTOR_URL || "").trim().replace(/\/+$/, "");
+  const isDefault = !configuredUrl || configuredUrl === DEFAULT_URL;
+  try {
+    return await fetchAiconductor(primaryUrl, token, model, prompt);
+  } catch (error) {
+    if (!isDefault && error.isNetworkError) {
+      return await fetchAiconductor(PROXY_PATH, token, model, prompt);
+    }
+    throw error;
+  }
+}
+
+/**
+ * Semantic pipeline (reference-based). The model outputs a semantic DSL,
+ * which is validated, laid out by the constraint engine, then validated a
+ * second time as a pixel Design.
+ */
+async function generateSemantic(userPrompt, analysis, influence) {
+  const configuredUrl = (import.meta.env.VITE_AICONDUCTOR_URL || "").trim().replace(/\/+$/, "");
+  const token = import.meta.env.VITE_AICONDUCTOR_TOKEN;
+  const model = import.meta.env.VITE_AICONDUCTOR_MODEL;
+  const isDefault = !configuredUrl || configuredUrl === DEFAULT_URL;
+  const primaryUrl = isDefault ? PROXY_PATH : configuredUrl;
+
+  let previousSemantic = null;
+  let errors = [];
+
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    const requestPrompt =
+      attempt === 1
+        ? buildSemanticDesignPrompt(userPrompt, { analysis, influence })
+        : buildSemanticRevalidationPrompt(userPrompt, previousSemantic, errors, { analysis, influence });
+
+    const text = await fetchWithFallback(primaryUrl, token, model, requestPrompt);
+
+    const parsed = regexRepairJson(text);
+    if (parsed === null) {
+      throw new Error(
+        "AI response was not recoverable JSON. The model should return only a semantic Design JSON document.",
+      );
+    }
+
+    const validated = validateSemanticDesign(parsed);
+    if (!validated.ok) {
+      previousSemantic = parsed;
+      errors = validated.errors;
+      continue;
+    }
+    previousSemantic = validated.semantic;
+
+    let resolved;
+    try {
+      resolved = resolveSemanticDesign(validated.semantic, {
+        defaultCanvas: { width: analysis.canvas.width, height: analysis.canvas.height },
+      });
+    } catch (error) {
+      errors = [`Layout error: ${error.message}`];
+      continue;
+    }
+
+    const design = { canvas: resolved.canvas, elements: resolved.elements };
+    const check = validateDesign(design);
+    if (check.ok) {
+      return {
+        design: check.design,
+        semanticDesign: validated.semantic,
+        warnings: resolved.warnings,
+        canvas: resolved.canvas,
+      };
+    }
+    errors = check.errors;
+  }
+
+  throw new Error(
+    `AI returned an invalid semantic design after ${MAX_ATTEMPTS} attempts: ${errors.slice(0, 6).join("; ")}`,
+  );
+}
+
+/**
  * Generates a {@link Design} for the given natural-language prompt.
  *
  * Failure handling is layered:
@@ -174,9 +263,16 @@ async function fetchAiconductor(url, token, model, prompt) {
  * human-readable message when all attempts fail.
  *
  * @param {string} userPrompt
- * @returns {Promise<import("../design/designTypes").Design>}
+ * @param {{referenceAnalysis?: import("../reference/analysisTypes").ReferenceDesignAnalysis, referenceInfluence?: number}} [options]
+ * @returns {Promise<{ design: import("../design/designTypes").Design, semanticDesign: object|null, warnings: string[], canvas: {width:number, height:number, background:string} }>}
  */
-export async function generateDesign(userPrompt) {
+export async function generateDesign(userPrompt, options = {}) {
+  const { referenceAnalysis, referenceInfluence = 1 } = options;
+
+  if (referenceAnalysis && referenceInfluence > 0) {
+    return generateSemantic(userPrompt, referenceAnalysis, referenceInfluence);
+  }
+
   const configuredUrl = (import.meta.env.VITE_AICONDUCTOR_URL || "").trim().replace(/\/+$/, "");
   const token = import.meta.env.VITE_AICONDUCTOR_TOKEN;
   const model = import.meta.env.VITE_AICONDUCTOR_MODEL;
@@ -197,16 +293,7 @@ export async function generateDesign(userPrompt) {
     const requestPrompt =
       attempt === 1 ? prompt : buildRevalidationPrompt(userPrompt, previousOutput, errors);
 
-    let text;
-    try {
-      text = await fetchAiconductor(primaryUrl, token, model, requestPrompt);
-    } catch (error) {
-      if (!isDefault && error.isNetworkError) {
-        text = await fetchAiconductor(PROXY_PATH, token, model, requestPrompt);
-      } else {
-        throw error;
-      }
-    }
+    const text = await fetchWithFallback(primaryUrl, token, model, requestPrompt);
     previousOutput = text;
 
     const parsed = regexRepairJson(text);
@@ -217,7 +304,14 @@ export async function generateDesign(userPrompt) {
     }
 
     const result = validateDesign(parsed);
-    if (result.ok) return result.design;
+    if (result.ok) {
+      return {
+        design: result.design,
+        semanticDesign: null,
+        warnings: [],
+        canvas: result.design.canvas,
+      };
+    }
     errors = result.errors;
   }
 

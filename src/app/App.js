@@ -1,16 +1,21 @@
 import { generateDesign } from "../ai/aiClient";
 import { validateDesign } from "../design/designValidator";
+import { buildSemanticSvg } from "../reference/svg/semanticSvg";
 import { CanvasEditor } from "../editor/Canvas";
 import { LayersPanel } from "../editor/LayersPanel";
 import { Toolbar } from "../editor/Toolbar";
 import { PromptInput } from "../components/PromptInput";
 import { GenerateButton } from "../components/GenerateButton";
+import { ReferenceUpload } from "../components/ReferenceUpload";
+import { InfluenceSlider } from "../components/InfluenceSlider";
+import { DebugTabs } from "../components/DebugTabs";
 
 /**
  * App - the UI coordination layer.
  *
  * Owns the DOM wiring and the generate pipeline:
- *   prompt -> generateDesign() -> validated design -> CanvasEditor.loadDesign()
+ *   prompt (+ optional reference analysis) -> generateDesign()
+ *     -> validated design -> CanvasEditor.loadDesign()
  *
  * The App is the only module that knows about both the AI side and the
  * editor side. It does so through their public APIs and the shared Design
@@ -30,6 +35,9 @@ export class App {
       generating: false,
     };
 
+    this.referenceAnalysis = null;
+    this.referenceInfluence = 0.8;
+
     this.editor = new CanvasEditor(mounts.canvasHolder);
 
     this.promptInput = new PromptInput(document.getElementById(mounts.prompt));
@@ -37,6 +45,21 @@ export class App {
       document.getElementById(mounts.generate),
       () => this.onGenerate(),
     );
+
+    this.referenceUpload = new ReferenceUpload(
+      document.getElementById(mounts.reference),
+      { onAnalysis: (analysis) => this.onReferenceAnalysis(analysis) },
+    );
+    this.influenceSlider = new InfluenceSlider(
+      document.getElementById(mounts.influence),
+      {
+        defaultValue: this.referenceInfluence,
+        onChange: (value) => {
+          this.referenceInfluence = value;
+        },
+      },
+    );
+    this.debugTabs = new DebugTabs(document.getElementById(mounts.debug));
 
     this.layersPanel = new LayersPanel(document.getElementById(mounts.layers), (id) =>
       this.editor.selectById(id),
@@ -105,22 +128,54 @@ export class App {
     this.generateButton.setLoading(true);
 
     try {
-      const design = await generateDesign(prompt);
-      const check = validateDesign(design); // safety net (also normalizes)
+      const options = {};
+      if (this.referenceAnalysis && this.referenceInfluence > 0) {
+        options.referenceAnalysis = this.referenceAnalysis;
+        options.referenceInfluence = this.referenceInfluence;
+        this.generateButton.setLoading(true, "Borrowing layout from the reference…");
+      }
+
+      const result = await generateDesign(prompt, options);
+      const check = validateDesign(result.design); // safety net (also normalizes)
       if (!check.ok) {
         throw new Error(check.errors.slice(0, 3).join("; "));
       }
 
       this.state.design = check.design;
       this.editor.loadDesign(check.design);
+      this._updateCanvasMeta(check.design.canvas);
       this._renderJsonPreview();
-      this.generateButton.setSuccess("Design generated - every element is editable.");
+      this.debugTabs.set({
+        design: check.design,
+        analysis: this.referenceAnalysis,
+        svg: this.referenceAnalysis ? buildSemanticSvg(this.referenceAnalysis) : "",
+        semantic: result.semanticDesign,
+        warnings: result.warnings,
+      });
+      if (result.warnings && result.warnings.length) {
+        this.generateButton.setSuccess(
+          `Design generated - every element is editable. ${result.warnings.length} layout warning(s), see Pipeline tab.`,
+        );
+      } else {
+        this.generateButton.setSuccess("Design generated - every element is editable.");
+      }
     } catch (error) {
       this.generateButton.setError(`Generation failed: ${error.message}`);
       console.error(error);
+      this.debugTabs.set({ ...this.debugTabs.state, warnings: [`Generation failed: ${error.message}`] });
     } finally {
       this.state.generating = false;
     }
+  }
+
+  onReferenceAnalysis(analysis) {
+    this.referenceAnalysis = analysis;
+  }
+
+  _updateCanvasMeta(canvas) {
+    if (!canvas) return;
+    const meta = document.querySelector(".canvas-meta");
+    if (meta) meta.textContent = `${canvas.width} × ${canvas.height}`;
   }
 
   onClear() {

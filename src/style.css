@@ -27,7 +27,7 @@ body {
 #app {
   display: flex;
   flex-direction: column;
-  height: 100vh;
+  min-height: 100vh;
   max-width: 1500px;
   margin: 0 auto;
   padding: 12px 16px;
@@ -397,6 +397,146 @@ body {
   line-height: 1.5;
   color: #b8e0b8;
   white-space: pre;
+}
+
+/* ---------- reference upload + influence ---------- */
+.prompt-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 220px;
+  max-width: 300px;
+}
+
+.reference-upload,
+.influence-slider {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.reference-upload .panel-title,
+.influence-slider .panel-title {
+  margin: 0;
+}
+
+.muted {
+  color: var(--muted);
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.file-drop {
+  display: inline-block;
+  background: var(--panel);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  font-size: 13px;
+  padding: 10px 12px;
+  cursor: pointer;
+  text-align: center;
+  transition: border-color 0.15s ease;
+}
+
+.file-drop:hover {
+  border-color: var(--accent);
+}
+
+.reference-status {
+  font-size: 11px;
+  color: var(--muted);
+  min-height: 14px;
+  line-height: 1.35;
+}
+
+.reference-status-loading {
+  color: var(--accent-strong);
+}
+
+.reference-status-success {
+  color: var(--success);
+}
+
+.reference-status-error {
+  color: var(--danger);
+}
+
+.influence-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.influence-row input[type="range"] {
+  flex: 1;
+  accent-color: var(--accent);
+}
+
+.influence-label {
+  font-size: 12px;
+  color: var(--text);
+  min-width: 84px;
+  text-align: right;
+  text-transform: capitalize;
+}
+
+/* ---------- debug tabs ---------- */
+.debug-section {
+  padding-top: 2px;
+}
+
+.debug-tabs {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.debug-tabs-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.debug-tabs-nav {
+  display: flex;
+  gap: 6px;
+}
+
+.debug-tab-btn {
+  background: var(--panel-2);
+  color: var(--muted);
+}
+
+.debug-tab-btn:hover {
+  color: var(--text);
+  background: var(--border);
+}
+
+.debug-tab-btn-active {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+.debug-tab-panel {
+  margin: 0;
+  padding: 12px;
+  max-height: 280px;
+  overflow: auto;
+  font-family: "Cascadia Code", Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  color: #b8e0b8;
+  white-space: pre;
+}
+
+.debug-hidden {
+  display: none;
 }
 
 /* ---------- responsive ---------- */

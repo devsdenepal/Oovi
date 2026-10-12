@@ -31,12 +31,14 @@ async function loadTesseract() {
 /**
  * Recognizes text in the analysis bitmap and attributes words to regions.
  *
- * @param {HTMLCanvasElement} canvas   - analysis-resolution canvas
- * @param {import("../analysisTypes").TextRegionAnalysis[]} regions - original-px regions
- * @param {{scale:number}} opts
+ * All coordinates are in ANALYSIS-bitmap px. The caller is responsible for
+ * scaling the returned region boxes back to the original image.
+ *
+ * @param {HTMLCanvasElement} canvas - analysis-resolution canvas
+ * @param {import("../analysisTypes").TextRegionAnalysis[]} regions
  * @returns {Promise<{status:string, regions:import("../analysisTypes").TextRegionAnalysis[], units:number, notes?:string}>}
  */
-export async function recognizeText(canvas, regions, opts) {
+export async function recognizeText(canvas, regions) {
   const Tesseract = await loadTesseract();
   if (!Tesseract || !Tesseract.createWorker) {
     return {
@@ -47,25 +49,14 @@ export async function recognizeText(canvas, regions, opts) {
     };
   }
 
-  // Downscale to the analysis bitmap the mask detectors already used.
-  const scale = opts.scale || 1;
-  const w = Math.round(canvas.width / scale);
-  const h = Math.round(canvas.height / scale);
-  const work = document.createElement("canvas");
-  work.width = Math.max(1, w);
-  work.height = Math.max(1, h);
-  const workCtx = work.getContext("2d", { willReadFrequently: true });
-  workCtx.drawImage(canvas, 0, 0, work.width, work.height);
-
   let data;
   let worker = null;
   try {
-    worker = await Tesseract.createWorker("eng", 1, {
-      logger: () => {},
-    });
-    const result = await worker.recognize(work);
+    worker = await Tesseract.createWorker("eng", 1, { logger: () => {} });
+    const result = await worker.recognize(canvas);
     data = result?.data || null;
   } catch {
+    // Fall back to region-only whenever OCR fails (no network / no lang data).
     try {
       if (worker && typeof worker.terminate === "function") await worker.terminate();
     } catch {
@@ -102,10 +93,10 @@ export async function recognizeText(canvas, regions, opts) {
     const bbox = word.bbox || word;
     words.push({
       text: t,
-      x: bbox.x0 * scale,
-      y: bbox.y0 * scale,
-      width: Math.abs((bbox.x1 ?? bbox.x0 + 1) - bbox.x0) * scale,
-      height: Math.abs((bbox.y1 ?? bbox.y0 + 1) - bbox.y0) * scale,
+      x: bbox.x0,
+      y: bbox.y0,
+      width: Math.abs((bbox.x1 ?? bbox.x0 + 1) - bbox.x0),
+      height: Math.abs((bbox.y1 ?? bbox.y0 + 1) - bbox.y0),
       confidence: word.confidence || 0,
     });
   }

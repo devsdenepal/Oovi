@@ -143,8 +143,14 @@ function createObject(element) {
  * @param {import("../design/designTypes").Design} design
  */
 export function renderDesign(canvas, design) {
+  const { width, height, background } = design.canvas;
+  if (canvas.width !== width || canvas.height !== height) {
+    canvas.setDimensions({ width, height });
+    canvas.elementWidth = width;
+    canvas.elementHeight = height;
+  }
   canvas.clear();
-  canvas.backgroundColor = design.canvas.background;
+  canvas.backgroundColor = background;
 
   const objects = [];
   for (const element of design.elements) {

@@ -4,6 +4,9 @@ import { App } from "./app/App";
 const app = new App({
   prompt: "prompt-mount",
   generate: "generate-mount",
+  reference: "reference-mount",
+  influence: "influence-mount",
+  debug: "debug-tabs-mount",
   toolbar: "toolbar-mount",
   layers: "layers-mount",
   canvasHolder: "canvas-holder",
