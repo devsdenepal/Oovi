@@ -361,8 +361,6 @@ body {
 
 #canvas-holder canvas {
   display: block;
-  max-width: 100%;
-  height: auto;
 }
 
 .canvas-meta {

@@ -13,6 +13,7 @@ export class Toolbar {
    * @param {() => void} handlers.onRedo
    * @param {() => void} handlers.onDuplicate
    * @param {() => void} handlers.onDelete
+   * @param {() => void} handlers.onExport
    * @param {(prop: string, value: string) => void} handlers.onPropChange
    * @param {() => Object} handlers.getDesign   - returns current enabled state info
    */
@@ -29,6 +30,7 @@ export class Toolbar {
       <div class="toolbar-row">
         <button data-action="regenerate" class="btn btn-primary">Regenerate</button>
         <button data-action="clear" class="btn">Clear Canvas</button>
+        <button data-action="export" class="btn" title="Export the design as a PNG">⇩ Export PNG</button>
       </div>
       <div class="toolbar-row">
         <button data-action="undo" class="btn" title="Undo (Ctrl+Z)">↩ Undo</button>
@@ -54,6 +56,7 @@ export class Toolbar {
       const handlers = {
         regenerate: () => this.handlers.onRegenerate(),
         clear: () => this.handlers.onClear(),
+        export: () => this.handlers.onExport(),
         undo: () => this.handlers.onUndo(),
         redo: () => this.handlers.onRedo(),
         duplicate: () => this.handlers.onDuplicate(),

@@ -13,6 +13,8 @@ import { ActiveSelection } from "fabric";
  *   - duplicateActive()           duplicate selected objects
  *   - deleteActive()              delete selected objects
  *   - toDesign()                  current canvas state as Design DSL
+ *   - fitToContainer()            CSS-shrink canvas to fit the viewport
+ *   - exportPng()                 download current design as full-res PNG
  *
  * Only App talks to the editor; the editor itself knows Fabric.js and the
  * Design DSL but never the AI layer.
@@ -27,6 +29,7 @@ export class CanvasEditor {
     this.selectionCallback = null;
     this.suppressHistory = false;
     this._removeListeners = [];
+    this._resizeDebounce = null;
   }
 
   /**
@@ -37,6 +40,16 @@ export class CanvasEditor {
     this.history = new HistoryManager(this.canvas);
     this._wireEvents();
     this.loadDesign(design);
+
+    this._removeListeners.push(() => {
+      if (this._resizeDebounce) cancelAnimationFrame(this._resizeDebounce);
+    });
+    const onResize = () => {
+      if (this._resizeDebounce) cancelAnimationFrame(this._resizeDebounce);
+      this._resizeDebounce = requestAnimationFrame(() => this.fitToContainer());
+    };
+    window.addEventListener("resize", onResize);
+    this._removeListeners.push(() => window.removeEventListener("resize", onResize));
   }
 
   loadDesign(design) {
@@ -46,6 +59,7 @@ export class CanvasEditor {
     this.history.snapshot();
     this.canvas.fire("history:change");
     this._syncLayers();
+    requestAnimationFrame(() => this.fitToContainer());
   }
 
   clear() {
@@ -57,6 +71,64 @@ export class CanvasEditor {
     this.canvas.fire("history:change");
     this._syncLayers();
     this._syncSelection();
+  }
+
+  /**
+   * Fits the design canvas into the visible canvas area by CSS-scaling the
+   * holder. The Fabric coordinate space stays at the native design size, so
+   * pointer math and PNG export are unaffected.
+   */
+  fitToContainer() {
+    const c = this.canvas;
+    const holder = document.getElementById(this.holderId);
+    if (!c || !holder) return;
+
+    const area = holder.closest(".canvas-area");
+    if (!area) return;
+
+    // Frame padding + canvas-meta line leave room to breathe.
+    const availW = Math.max(200, area.clientWidth - 48);
+    const availH = Math.max(200, area.clientHeight - 64);
+
+    const scale = Math.min(
+      1, // never upscale beyond native size
+      availW / c.width,
+      availH / c.height,
+    );
+    const fitScale = Number(scale.toFixed(3));
+
+    holder.style.width = `${Math.round(c.width * fitScale)}px`;
+    holder.style.height = `${Math.round(c.height * fitScale)}px`;
+
+    const canvasEl = c.getElement ? c.getElement() : holder.querySelector("canvas");
+    if (canvasEl) {
+      canvasEl.style.transform = `scale(${fitScale})`;
+      canvasEl.style.transformOrigin = "0 0";
+    }
+
+    this.fitScale = fitScale;
+  }
+
+  /**
+   * Exports the full design as a PNG at native resolution, regardless of the
+   * current on-screen fit scale. Triggers a browser download.
+   */
+  exportPng() {
+    const c = this.canvas;
+    if (!c || c.getObjects().length === 0) return;
+
+    const dataUrl = c.toDataURL({
+      format: "png",
+      multiplier: 1,
+      enableRetinaScaling: true,
+    });
+
+    const link = document.createElement("a");
+    link.href = dataUrl;
+    link.download = "design.png";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
   }
 
   _wireEvents() {

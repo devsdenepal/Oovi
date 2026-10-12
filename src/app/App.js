@@ -45,6 +45,7 @@ export class App {
     this.toolbar = new Toolbar(document.getElementById(mounts.toolbar), {
       onRegenerate: () => this.onGenerate(),
       onClear: () => this.onClear(),
+      onExport: () => this.editor.exportPng(),
       onUndo: () => this.editor.history.undo(),
       onRedo: () => this.editor.history.redo(),
       onDuplicate: () => this.editor.duplicateActive(),
