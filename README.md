@@ -1,23 +1,23 @@
-# Oovi — AI Design Studio
+# Oovi: AI Design Studio
 
-Oovi turns natural-language prompts into **fully editable graphic designs** — not flattened images. Every headline, shape, and illustration the AI produces remains a live object on a Fabric.js canvas: selectable, movable, resizable, and re-editable.
+Oovi turns natural-language prompts into **fully editable graphic designs**. Not flattened images. Every headline, shape, and illustration the AI produces remains a live object on a Fabric.js canvas: selectable, movable, resizable, and re-editable.
 
 ![Oovi editor generating a design](docs/screenshot.png)
 
-**Prompt → composition plan → validated Design DSL → editable Fabric.js canvas.**
+**From prompt to composition plan to validated Design DSL to an editable Fabric.js canvas.**
 
 ## Features
 
-- **AI generation that stays editable** — an architect planner produces a deliberate layout (palette, sections, boxes), then each component is generated as structured Design DSL or AI imagery. Nothing is ever baked into a single bitmap.
-- **Home dashboard** — prompt-first hero, size presets, recent designs with thumbnails, rename, duplicate, trash with restore, and one-click open in a new tab.
-- **Full editor** — select, drag, resize, rotate, inline text editing, multi-select, layers panel, context toolbar, and AI-assisted edits.
-- **Reliable undo/redo** — post-state history where the current canvas is always on top; empty floors are no-ops and new edits clear the redo stack.
-- **Imagery, server-side** — AI illustrations via Pollinations and photo search via Unsplash, both proxied through the backend so API keys never reach the browser.
-- **Background removal** — one-click subject isolation for local images.
-- **Export** — PNG, JPG, SVG, and PDF.
-- **Autosave + Postgres persistence** — designs save to a local Postgres database with debounced autosave and soft-delete trash.
-- **Layout quality gate** — every generation is scored on coverage, balance, contrast, hierarchy, and hero presence, with findings reported in the assistant panel.
-- **Offline mock mode** — `?mock=1` (or `VITE_MOCK_AI=1`) runs the full pipeline with zero network calls.
+- **AI generation that stays editable**: an architect planner produces a deliberate layout (palette, sections, boxes), then each component is generated as structured Design DSL or AI imagery. Nothing is ever baked into a single bitmap.
+- **Home dashboard**: prompt-first hero, size presets, recent designs with thumbnails, rename, duplicate, trash with restore, and one-click open in a new tab.
+- **Full editor**: select, drag, resize, rotate, inline text editing, multi-select, layers panel, context toolbar, and AI-assisted edits.
+- **Reliable undo/redo**: post-state history where the current canvas is always on top; empty floors are no-ops and new edits clear the redo stack.
+- **Imagery, server-side**: AI illustrations via Pollinations and photo search via Unsplash, both proxied through the backend so API keys never reach the browser.
+- **Background removal**: one-click subject isolation for local images.
+- **Export**: PNG, JPG, SVG, and PDF.
+- **Autosave + Postgres persistence**: designs save to a local Postgres database with debounced autosave and soft-delete trash.
+- **Layout quality gate**: every generation is scored on coverage, balance, contrast, hierarchy, and hero presence, with findings reported in the assistant panel.
+- **Offline mock mode**: `?mock=1` (or `VITE_MOCK_AI=1`) runs the full pipeline with zero network calls.
 
 ## Quickstart
 
@@ -26,10 +26,10 @@ Oovi turns natural-language prompts into **fully editable graphic designs** — 
 ```bash
 npm install
 
-# Terminal 1 — API + persistence layer (http://localhost:3001)
+# Terminal 1: API + persistence layer (http://localhost:3001)
 npm run dev:api
 
-# Terminal 2 — editor UI (http://localhost:5173)
+# Terminal 2: editor UI (http://localhost:5173)
 npm run dev
 ```
 
@@ -46,14 +46,14 @@ Then open `http://localhost:5173`, describe a design on the home page, and it op
 
 ```text
 User prompt
-  → Architect plan (sections, palette, theme, boxes)      src/ai/architectPrompt.js
-  → Per-component DSL  ·  Pollinations / Unsplash images  src/ai/aiClient.js, api/
-  → validateDesign() (structural)                         src/design/designValidator.js
-  → evaluateDesign() (quality report, non-mutating)       src/ai/quality.js
-  → Fabric.js render (editable objects, history-tracked)  src/renderer/fabricRenderer.js
+  > Architect plan (sections, palette, theme, boxes)      src/ai/architectPrompt.js
+  > Per-component DSL  ·  Pollinations / Unsplash images  src/ai/aiClient.js, api/
+  > validateDesign() (structural)                         src/design/designValidator.js
+  > evaluateDesign() (quality report, non-mutating)       src/ai/quality.js
+  > Fabric.js render (editable objects, history-tracked)  src/renderer/fabricRenderer.js
 ```
 
-The **Design DSL** is the contract between AI and canvas — a plain-JSON document of canvas + elements:
+The **Design DSL** is the contract between AI and canvas: a plain-JSON document of canvas + elements:
 
 ```json
 {
@@ -85,14 +85,14 @@ Copy `.env.example` to `.env`. Keys are **server-only** unless prefixed `VITE_`:
 | `PGHOST / PGPORT / PGUSER / PGPASSWORD / PGDATABASE` | Server only | Postgres connection (`server/index.js`) |
 | `VITE_MOCK_AI=1` | Browser | Offline mode, no network calls |
 
-> Never put a secret in a `VITE_`-prefixed variable — those are bundled into the client. The browser holds no image or database credentials.
+> Never put a secret in a `VITE_`-prefixed variable. Those are bundled into the client. The browser holds no image or database credentials.
 
 ## Project structure
 
 ```text
 src/
   ai/            AI client, architect/component prompts, mock provider, quality gate
-  app/           App.js — orchestration (generation, persistence, history, panels)
+  app/           App.js: orchestration (generation, persistence, history, panels)
   components/    Dashboard, TopBar, InsertPanel, AssistantPanel, DebugTabs, …
   design/        DSL schema, validator, canvas presets, design types
   editor/        Fabric canvas wrapper, HistoryManager, layers, toolbar
