@@ -3,52 +3,102 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Oovi - AI Editable Graphic Design Demo</title>
+    <title>Oovi — AI Design Studio</title>
+    <script src="https://kit.fontawesome.com/1364c3c233.js" crossorigin="anonymous"></script>
   </head>
   <body>
-    <div id="app">
-      <header class="app-header">
-        <h1>Oovi</h1>
-        <span class="app-subtitle">Natural language → Design JSON → editable Fabric.js canvas</span>
-      </header>
+    <div id="app" class="d-flex flex-column vh-100">
+      <!-- Top bar is rendered by src/components/TopBar.js -->
+      <nav class="bg-white border-bottom flex-shrink-0">
+        <div id="topbar-mount"></div>
+      </nav>
 
-      <section class="prompt-section">
-        <div class="prompt-controls">
-          <div id="reference-mount"></div>
-          <div id="influence-mount"></div>
+      <!-- ══ Main 3-column studio ══ -->
+      <div class="container-fluid flex-grow-1 overflow-hidden py-2">
+        <div class="row g-2 h-100 overflow-auto overflow-lg-hidden">
+          <!-- Left: ONE tab sidebar (Insert / AI Reference / Layers / Pipeline) -->
+          <div class="col-12 col-lg-3 col-xl-3 col-xxl-2">
+            <aside class="sidebar-left">
+              <div class="left-tabs" role="tablist" aria-label="Sidebar">
+                <button class="left-tab" type="button" role="tab" data-ltab="insert"><i class="fa-solid fa-plus"></i><span>Insert</span></button>
+                <button class="left-tab" type="button" role="tab" data-ltab="reference"><i class="fa-solid fa-wand-magic-sparkles"></i><span>AI Ref</span></button>
+                <button class="left-tab" type="button" role="tab" data-ltab="layers"><i class="fa-solid fa-layer-group"></i><span>Layers</span></button>
+                <button class="left-tab" type="button" role="tab" data-ltab="pipeline"><i class="fa-solid fa-diagram-project"></i><span>Pipe</span></button>
+              </div>
+              <div class="left-panels">
+                <section data-lpanel="insert" aria-label="Insert">
+                  <p class="text-secondary small">No AI needed — drop text and shapes straight onto the canvas.</p>
+                  <div id="insert-mount"></div>
+                </section>
+                <section data-lpanel="reference" aria-label="AI Reference" hidden>
+                  <p class="text-secondary small">Attach inspiration — only its layout analysis is sent to the AI, never the raw image.</p>
+                  <div id="reference-mount"></div>
+                  <div id="influence-mount"></div>
+                </section>
+                <section data-lpanel="layers" aria-label="Layers" hidden>
+                  <div id="layers-mount"></div>
+                </section>
+                <section data-lpanel="pipeline" aria-label="Pipeline" hidden>
+                  <p class="text-secondary small mb-2">Read-only artifacts: Design · Analysis · Semantic SVG · Semantic DSL.</p>
+                  <div id="debug-tabs-mount"></div>
+                </section>
+              </div>
+            </aside>
+          </div>
+
+          <!-- Center: canvas + floating AI dock -->
+          <div class="col-12 col-lg-6 col-xl-6 col-xxl-8">
+            <main class="canvas-area card shadow-sm overflow-hidden position-relative h-100">
+              <div class="card-header canvas-head bg-white d-flex align-items-center gap-3 py-2">
+                <div id="designtype-mount" class="flex-shrink-0"></div>
+                <span class="text-secondary small text-truncate d-none d-xl-block">Click select · drag move · double-click text to edit · ⌫ delete</span>
+                <button id="clear-canvas-btn" class="btn btn-sm btn-outline-secondary ms-auto flex-shrink-0" title="Clear the canvas"><i class="fa-solid fa-eraser"></i> Clear</button>
+              </div>
+              <div class="canvas-frame d-flex justify-content-center align-items-center overflow-auto p-4">
+                <div id="canvas-holder" class="bg-white">
+                  <canvas id="design-canvas"></canvas>
+                </div>
+              </div>
+              <div id="contextbar-mount"></div>
+              <div class="ai-dock card shadow-lg position-absolute start-50 translate-middle-x bottom-0 mb-2 p-2">
+                <div class="d-flex gap-2 align-items-stretch">
+                  <div id="prompt-mount" class="ai-prompt flex-grow-1"></div>
+                  <div id="generate-mount" class="ai-generate"></div>
+                </div>
+                <div class="text-secondary text-center mt-1 ai-dock-hint">Prompt → Design JSON → validated → editable canvas. Nothing is flattened.</div>
+              </div>
+            </main>
+          </div>
+
+          <!-- Right: properties + developer (single scroll) -->
+          <div class="col-12 col-lg-3 col-xl-3 col-xxl-2">
+            <aside class="inspector">
+              <section class="card shadow-sm">
+                <div class="card-body">
+                  <h2 class="panel-title">Properties</h2>
+                  <div id="toolbar-mount"></div>
+                </div>
+              </section>
+              <details class="card shadow-sm developer" id="developer">
+                <summary class="developer-summary">Developer</summary>
+                <div class="card-body d-flex flex-column gap-2">
+                  <div class="dev-row"><span>role</span><code id="dev-role">—</code></div>
+                  <aside class="json-area d-flex flex-column gap-2" id="json-area">
+                    <div class="d-flex align-items-center justify-content-between">
+                      <h2 class="panel-title mb-0">Design JSON</h2>
+                      <button id="json-toggle" class="btn btn-sm btn-outline-secondary">Show JSON</button>
+                    </div>
+                    <div class="json-body json-hidden">
+                      <pre id="json-preview" class="json-preview mb-0">{}</pre>
+                    </div>
+                  </aside>
+                </div>
+              </details>
+            </aside>
+          </div>
         </div>
-        <div id="prompt-mount"></div>
-        <div id="generate-mount"></div>
-      </section>
-
-      <section class="workspace">
-        <aside class="sidebar">
-          <div id="layers-mount"></div>
-          <div id="toolbar-mount"></div>
-        </aside>
-
-        <main class="canvas-area">
-          <div class="canvas-frame">
-            <div id="canvas-holder">
-              <canvas id="design-canvas"></canvas>
-            </div>
-            <div class="canvas-meta">1080 × 1080</div>
-          </div>
-        </main>
-
-        <aside class="json-area" id="json-area">
-          <div class="json-toggle-row">
-            <button id="json-toggle" class="btn btn-small">Hide JSON</button>
-          </div>
-          <div class="json-body">
-            <pre id="json-preview" class="json-preview">{} </pre>
-          </div>
-        </aside>
-      </section>
-
-      <section class="debug-section">
-        <div id="debug-tabs-mount"></div>
-      </section>
+      </div>
+      <button id="exit-preview" class="btn btn-dark" hidden><i class="fa-solid fa-xmark"></i> Exit preview</button>
     </div>
     <script type="module" src="/src/main.js"></script>
   </body>

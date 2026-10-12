@@ -1,11 +1,13 @@
-import { analyzeReferenceImage } from "../reference/analyzeReference";
-
 /**
  * ReferenceUpload - lets the user attach an inspiration image. The image is
  * analyzed locally (colors, layout, text regions, shapes, decorations, OCR)
  * into a ReferenceDesignAnalysis that the semantic pipeline borrows from.
  *
  * The raw image is never sent to the text LLM - only the analysis is.
+ *
+ * The analysis engine (../reference/analyzeReference + detectors) is
+ * dynamic-import()ed on first upload so it ships in a separate chunk and
+ * never blocks initial page load.
  */
 
 export class ReferenceUpload {
@@ -50,8 +52,10 @@ export class ReferenceUpload {
   }
 
   async loadFile(file) {
-    this._setStatus(`Analyzing “${file.name}”…`, "loading");
+    this._setStatus("Loading analysis engine…", "loading");
     try {
+      const { analyzeReferenceImage } = await import("../reference/analyzeReference");
+      this._setStatus(`Analyzing “${file.name}”…`, "loading");
       const analysis = await analyzeReferenceImage(file, { runOcr: true });
       this.currentAnalysis = analysis;
       this.fileName = file.name;

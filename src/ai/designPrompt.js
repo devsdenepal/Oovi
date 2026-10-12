@@ -18,15 +18,17 @@ const buildElementDocs = () => {
     .join("\n");
 };
 
-export function buildSystemInstruction() {
+export function buildSystemInstruction(canvas = { width: CANVAS_WIDTH, height: CANVAS_HEIGHT }) {
+  const width = Number(canvas?.width) || CANVAS_WIDTH;
+  const height = Number(canvas?.height) || CANVAS_HEIGHT;
   return [
     "You are a graphic design layout engine.",
     "",
     "Convert the user's natural-language request into a structured Design JSON document.",
     "",
     `Canvas coordinates are pixels.`,
-    `Canvas size is ${CANVAS_WIDTH}x${CANVAS_HEIGHT}.`,
-    `All elements must stay fully inside the canvas (x >= 0, y >= 0, and x + width <= ${CANVAS_WIDTH}, y + height <= ${CANVAS_HEIGHT}).`,
+    `Canvas size is ${width}x${height}.`,
+    `All elements must stay fully inside the canvas (x >= 0, y >= 0, and x + width <= ${width}, y + height <= ${height}).`,
     "",
     "Every element must have an id (unique, lowercase, no spaces), a type, and x/y coordinates.",
     "Use a semantic role value for each element where sensible: header, headline, body, footer, decoration, button, tagline, label.",
@@ -41,7 +43,7 @@ export function buildSystemInstruction() {
     "Group elements require: children (array of elements).",
     "",
     "Design JSON shape:",
-    '{"canvas":{"width":1080,"height":1080,"background":"#FFFFFF"},"elements":[...]}',
+    `{"canvas":{"width":${width},"height":${height},"background":"#FFFFFF"},"elements":[...]}`,
     "",
     "The background must be a valid CSS color.",
     "Produce a clean, modern, minimal layout. Balance the composition. Keep at least a header, a headline, some body text, and a footer.",
@@ -59,8 +61,8 @@ export function buildSystemInstruction() {
  * Matches the deepgyan convention: a [System] block followed by the user
  * request, joined into one prompt.
  */
-export function buildDesignPrompt(userPrompt) {
-  const system = buildSystemInstruction();
+export function buildDesignPrompt(userPrompt, canvas) {
+  const system = buildSystemInstruction(canvas);
   return `[System]\n${system}\n\n[User]\n${userPrompt}`;
 }
 
@@ -69,8 +71,8 @@ export function buildDesignPrompt(userPrompt) {
  * previously-invalid output and the exact validation errors, asking for a
  * corrected Design JSON.
  */
-export function buildRevalidationPrompt(userPrompt, previousOutput, errors) {
-  const system = buildSystemInstruction();
+export function buildRevalidationPrompt(userPrompt, previousOutput, errors, canvas) {
+  const system = buildSystemInstruction(canvas);
   const cappedOutput = String(previousOutput).slice(0, 12000);
   const errorList = errors.map((e) => `- ${e}`).join("\n");
 

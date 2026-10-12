@@ -42,7 +42,7 @@ export class LayersPanel {
 
       const icon = document.createElement("span");
       icon.className = "layer-icon";
-      icon.textContent = layerIcon(obj.elementType || obj.type);
+      icon.innerHTML = `<i class="${layerIcon(obj.elementType || obj.type)}"></i>`;
 
       const name = document.createElement("span");
       name.className = "layer-name";
@@ -63,16 +63,16 @@ export class LayersPanel {
 function layerIcon(type) {
   switch (type) {
     case "text":
-      return "T";
+      return "fa-solid fa-font";
     case "rectangle":
-      return "▭";
+      return "fa-solid fa-square";
     case "circle":
-      return "◯";
+      return "fa-solid fa-circle";
     case "line":
-      return "/";
+      return "fa-solid fa-minus";
     case "group":
-      return "⊞";
+      return "fa-solid fa-object-group";
     default:
-      return "◈";
+      return "fa-solid fa-shapes";
   }
 }

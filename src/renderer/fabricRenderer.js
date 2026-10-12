@@ -137,6 +137,16 @@ function createObject(element) {
 }
 
 /**
+ * Creates a single editable Fabric object from a Design DSL element.
+ * Used by the editor for manual inserts (text/shapes) without AI.
+ * @param {import("../design/designTypes").DesignElement} element
+ * @returns {fabric.Object|null}
+ */
+export function createDesignObject(element) {
+  return createObject(element);
+}
+
+/**
  * Renders a valid Design onto an empty canvas, in document order
  * (first element = bottom-most layer).
  * @param {fabric.Canvas} canvas

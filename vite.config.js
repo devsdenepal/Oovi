@@ -23,4 +23,19 @@ export default defineConfig({
     port: 4173,
     proxy: aiProxy,
   },
+  build: {
+    minify: "esbuild",
+    cssMinify: true,
+    sourcemap: false,
+    chunkSizeWarningLimit: 600,
+    rollupOptions: {
+      output: {
+        // Fabric is the heaviest static dep: isolate it for long-term caching.
+        // (tesseract.js already splits via dynamic import in ocrProvider.)
+        manualChunks: {
+          fabric: ["fabric"],
+        },
+      },
+    },
+  },
 });

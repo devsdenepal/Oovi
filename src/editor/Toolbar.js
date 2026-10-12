@@ -1,21 +1,16 @@
 /**
- * Toolbar - regeneration, clear, canvas operations, and a properties
- * panel for editing the selected object directly (text edit, size, color).
+ * Toolbar - properties panel for editing the selected object directly
+ * (text edit, size, color). Goal 1: action buttons (undo/redo/duplicate/
+ * delete/regenerate/clear/export) moved to TopBar + ContextToolbar;
+ * this component owns selection properties only. (Adaptive per-type
+ * controls arrive in Goal 2.)
  */
 
 export class Toolbar {
   /**
    * @param {HTMLElement} container
    * @param {Object} handlers
-   * @param {() => void} handlers.onRegenerate
-   * @param {() => void} handlers.onClear
-   * @param {() => void} handlers.onUndo
-   * @param {() => void} handlers.onRedo
-   * @param {() => void} handlers.onDuplicate
-   * @param {() => void} handlers.onDelete
-   * @param {() => void} handlers.onExport
    * @param {(prop: string, value: string) => void} handlers.onPropChange
-   * @param {() => Object} handlers.getDesign   - returns current enabled state info
    */
   constructor(container, handlers) {
     this.container = container;
@@ -27,18 +22,6 @@ export class Toolbar {
 
   _build() {
     this.container.innerHTML = `
-      <div class="toolbar-row">
-        <button data-action="regenerate" class="btn btn-primary">Regenerate</button>
-        <button data-action="clear" class="btn">Clear Canvas</button>
-        <button data-action="export" class="btn" title="Export the design as a PNG">⇩ Export PNG</button>
-      </div>
-      <div class="toolbar-row">
-        <button data-action="undo" class="btn" title="Undo (Ctrl+Z)">↩ Undo</button>
-        <button data-action="redo" class="btn" title="Redo (Ctrl+Y)">↪ Redo</button>
-        <button data-action="duplicate" class="btn" title="Duplicate (Ctrl+D)">⧉ Duplicate</button>
-        <button data-action="delete" class="btn btn-danger" title="Delete (Del)">🗑 Delete</button>
-      </div>
-      <div class="toolbar-row hint">Double-click text on canvas to edit it · Shift-click to multi-select · Ctrl+A select all</div>
       <div class="properties-panel">
         <div class="panel-title">Properties</div>
         <div id="prop-empty" class="prop-empty">Select an element to edit it here.</div>
@@ -48,22 +31,6 @@ export class Toolbar {
 
     this.propEmpty = this.container.querySelector("#prop-empty");
     this.propFields = this.container.querySelector("#prop-fields");
-
-    this.container.addEventListener("click", (event) => {
-      const btn = event.target.closest("[data-action]");
-      if (!btn) return;
-      const action = btn.dataset.action;
-      const handlers = {
-        regenerate: () => this.handlers.onRegenerate(),
-        clear: () => this.handlers.onClear(),
-        export: () => this.handlers.onExport(),
-        undo: () => this.handlers.onUndo(),
-        redo: () => this.handlers.onRedo(),
-        duplicate: () => this.handlers.onDuplicate(),
-        delete: () => this.handlers.onDelete(),
-      };
-      handlers[action]?.();
-    });
 
     this.propFields.addEventListener("change", (event) => {
       const field = event.target.closest("[data-prop]");
@@ -77,15 +44,6 @@ export class Toolbar {
    */
   setSelection(objects) {
     this.activeObjects = objects || [];
-    let disabled = { undo: false, redo: false, duplicate: true, delete: true };
-    if (this.handlers.getEnabledState) {
-      disabled = { ...disabled, ...this.handlers.getEnabledState() };
-    }
-    this.container.querySelector('[data-action="duplicate"]').disabled = disabled.duplicate;
-    this.container.querySelector('[data-action="delete"]').disabled = disabled.delete;
-    this.container.querySelector('[data-action="undo"]').disabled = disabled.undo;
-    this.container.querySelector('[data-action="redo"]').disabled = disabled.redo;
-
     this._renderProperties();
   }
 

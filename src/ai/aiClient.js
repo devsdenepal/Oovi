@@ -263,11 +263,11 @@ async function generateSemantic(userPrompt, analysis, influence) {
  * human-readable message when all attempts fail.
  *
  * @param {string} userPrompt
- * @param {{referenceAnalysis?: import("../reference/analysisTypes").ReferenceDesignAnalysis, referenceInfluence?: number}} [options]
+ * @param {{referenceAnalysis?: import("../reference/analysisTypes").ReferenceDesignAnalysis, referenceInfluence?: number, canvas?: {width:number, height:number}}} [options]
  * @returns {Promise<{ design: import("../design/designTypes").Design, semanticDesign: object|null, warnings: string[], canvas: {width:number, height:number, background:string} }>}
  */
 export async function generateDesign(userPrompt, options = {}) {
-  const { referenceAnalysis, referenceInfluence = 1 } = options;
+  const { referenceAnalysis, referenceInfluence = 1, canvas } = options;
 
   if (referenceAnalysis && referenceInfluence > 0) {
     return generateSemantic(userPrompt, referenceAnalysis, referenceInfluence);
@@ -277,7 +277,7 @@ export async function generateDesign(userPrompt, options = {}) {
   const token = import.meta.env.VITE_AICONDUCTOR_TOKEN;
   const model = import.meta.env.VITE_AICONDUCTOR_MODEL;
 
-  const prompt = buildDesignPrompt(userPrompt);
+  const prompt = buildDesignPrompt(userPrompt, canvas);
 
   // The default AI Conductor endpoint has no CORS headers, so route it
   // straight through the same-origin proxy. Custom providers configured via
@@ -291,7 +291,7 @@ export async function generateDesign(userPrompt, options = {}) {
 
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     const requestPrompt =
-      attempt === 1 ? prompt : buildRevalidationPrompt(userPrompt, previousOutput, errors);
+      attempt === 1 ? prompt : buildRevalidationPrompt(userPrompt, previousOutput, errors, canvas);
 
     const text = await fetchWithFallback(primaryUrl, token, model, requestPrompt);
     previousOutput = text;
