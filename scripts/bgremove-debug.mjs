@@ -5,7 +5,7 @@ const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
 const logs = [];
 page.on('pageerror', (e) => logs.push('PAGEERROR: ' + e.message));
 page.on('console', (m) => { if (m.type() === 'error' || m.type() === 'warning') logs.push(m.type().toUpperCase() + ': ' + m.text().slice(0, 300)); });
-await page.goto('http://localhost:5173/?mock=1', { waitUntil: 'networkidle' });
+await page.goto('http://localhost:5173/?mock=1#/design/new', { waitUntil: 'networkidle' });
 await page.waitForSelector('#canvas-holder', { timeout: 20000 });
 await page.waitForTimeout(1000);
 await page.click('[data-ltab="reference"]');

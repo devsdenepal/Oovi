@@ -1,4 +1,5 @@
 import { generateDesign, generatePatch, planDesign, componentDesign } from "../ai/aiClient";
+import { evaluateDesign } from "../ai/quality";
 import { assetUrl, fetchAssetDataUrl, fetchAssetViaBackend } from "../ai/pollinations";
 import { searchPhotos, triggerDownload } from "../ai/unsplash";
 import { isMockEnabled, mockAssetDataUrl } from "../ai/mockProvider";
@@ -16,6 +17,7 @@ import { DesignTypeSelect } from "../components/DesignTypeSelect";
 import { InsertPanel } from "../components/InsertPanel";
 import { AssistantPanel } from "../components/AssistantPanel";
 import { notify } from "../ui/toasts";
+import { projects } from "../storage/projects";
 import { ReferenceUpload } from "../components/ReferenceUpload";
 import { InfluenceSlider } from "../components/InfluenceSlider";
 import { DebugTabs } from "../components/DebugTabs";
@@ -60,6 +62,10 @@ export class App {
     };
     this.leftTabs = opts.leftTabs || null;
     this._saveTimer = null;
+    this._persistTimer = null;
+    this._lastPersisted = "";
+    this._dirtySincePersist = false;
+    this.projectId = opts.projectId || null;
     this.aiIds = new Set();
     this._preview = null;
 
@@ -150,6 +156,7 @@ export class App {
       onExport: (format) => this.exportDesign(format),
       onTitle: (title) => this.onTitle(title),
       onTab: (tab) => this.onTab(tab),
+      onHome: () => this.onHome(),
     });
 
     this.contextbar = new ContextToolbar(document.getElementById(mounts.contextbar), {
@@ -230,12 +237,26 @@ export class App {
     document.getElementById("exit-preview")?.addEventListener("click", () => this.togglePreview(false));
     this.assistant.pushAssistant("Select something, then describe a change. Offline? Add ?mock=1 to the URL.");
     this._updateAssistantContext([]);
+    let pending = "";
+    try {
+      pending = window.sessionStorage.getItem("oovi.pendingPrompt") || "";
+      window.sessionStorage.removeItem("oovi.pendingPrompt");
+    } catch {
+      pending = "";
+    }
+    if (pending) this.promptInput.value = pending;
+    if (this.projectId) await this.loadProject();
     window.addEventListener("keydown", (event) => {
       if (event.key === "Escape" && this.state.preview) this.togglePreview(false);
     });
     // Single-key insert shortcuts (T/R/O/L/P). Typing fields, modifiers
     // and preview mode are excluded; the canvas handler ignores the rest.
     window.addEventListener("keydown", (event) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
+        event.preventDefault();
+        this.persistNow();
+        return;
+      }
       if (event.ctrlKey || event.metaKey || event.altKey) return;
       const t = event.target;
       if (
@@ -357,18 +378,22 @@ export class App {
       let done = 0;
       let failed = 0;
       let appliedTotal = 0;
+      const renderedIds = [];
       for (const component of plan.components) {
         done += 1;
         if (component.kind === "image") {
           status(`Component ${done}/${plan.components.length}: fetching ${component.id}…`);
-          if (await this._generateImageComponent(component)) appliedTotal += 1;
-          else failed += 1;
+          if (await this._generateImageComponent(component)) {
+            appliedTotal += 1;
+            renderedIds.push(component.id);
+          } else failed += 1;
         } else {
           status(`Component ${done}/${plan.components.length}: building ${component.id}…`);
           try {
-            const { elements } = await componentDesign(component, canvas, plan.palette);
+            const { elements } = await componentDesign(component, canvas, plan);
             const res = this.editor.applyPatchOps(elements.map((element) => ({ op: "add", element })));
             appliedTotal += res.applied.length;
+            renderedIds.push(component.id);
             this.assistant.pushAssistant(`+ ${component.id} (${res.applied.length} pieces)`);
           } catch (error) {
             failed += 1;
@@ -387,6 +412,27 @@ export class App {
         semantic: null,
         warnings: [],
       });
+      const report = evaluateDesign(this.state.design, {
+        plannedIds: plan.components.map((c) => c.id),
+        renderedIds,
+        expectHero: plan.components.some((c) => c.kind === "image"),
+        components: plan.components,
+      });
+      const top = [...report.issues]
+        .sort((a, b) => (a.severity === b.severity ? 0 : a.severity === "error" ? -1 : 1))
+        .slice(0, 4);
+      this.assistant.pushAssistant(
+        `Quality ${report.score}/100${top.length ? ": " + top.map((i) => i.message).join(" ") : " — clean."}`,
+      );
+      if (report.issues.length) {
+        this.debugTabs.set({
+          ...this.debugTabs.state,
+          warnings: [
+            ...(this.debugTabs.state.warnings || []),
+            ...report.issues.slice(0, 8).map((i) => `${i.severity}: ${i.message}`),
+          ],
+        });
+      }
       if (appliedTotal === 0) {
         const message = `All ${done} components failed — see the assistant log for reasons.`;
         this.generateButton.setError(message);
@@ -451,6 +497,35 @@ export class App {
 
   onReferenceAnalysis(analysis) {
     this.referenceAnalysis = analysis;
+  }
+
+  async loadProject() {
+    try {
+      const row = await projects.get(this.projectId);
+      this.state.title = row.title || "Untitled design";
+      this.topbar.setTitle(this.state.title);
+      document.title = `${this.state.title} — Oovi`;
+      const design = row.design;
+      if (design && Array.isArray(design.elements) && design.elements.length) {
+        const check = validateDesign(design);
+        if (!check.ok) throw new Error(check.errors.slice(0, 2).join("; "));
+        this.state.design = check.design;
+        this.editor.loadDesign(check.design);
+        this._updateCanvasMeta(check.design.canvas);
+        this._renderJsonPreview();
+        this.debugTabs.set({ design: check.design, analysis: null, svg: "", semantic: null, warnings: [] });
+      }
+      this._lastPersisted = this.persistKey();
+      this._dirtySincePersist = false;
+      this.setSaveState("saved");
+    } catch (error) {
+      notify(`Couldn't open project: ${error.message}`, "error");
+      console.error(error);
+    }
+  }
+
+  onHome() {
+    window.location.hash = "#/";
   }
 
   onDesignTypeChange(id) {
@@ -890,6 +965,49 @@ export class App {
     this.setSaveState("unsaved");
     if (this._saveTimer) window.clearTimeout(this._saveTimer);
     this._saveTimer = window.setTimeout(() => this.saveDraftNow(), 800);
+    // Library persist (debounced harder; skips when nothing changed).
+    this._dirtySincePersist = true;
+    if (this._persistTimer) window.clearTimeout(this._persistTimer);
+    this._persistTimer = window.setTimeout(() => this.persistNow(), 2500);
+  }
+
+  persistKey() {
+    try {
+      return `${this.state.title}\n${JSON.stringify(this.editor.toDesign())}`;
+    } catch {
+      return "";
+    }
+  }
+
+  async persistNow() {
+    if (!this.editor.canvas) return;
+    const key = this.persistKey();
+    if (!key || key === this._lastPersisted) return;
+    try {
+      const design = this.editor.toDesign();
+      let thumbnail = null;
+      try {
+        thumbnail = this.editor.canvas.toDataURL({ format: "png", multiplier: 0.25 });
+      } catch {
+        thumbnail = null;
+      }
+      if (!this.projectId) {
+        const row = await projects.create({ title: this.state.title, design });
+        this.projectId = row.id;
+        try {
+          window.history.replaceState(null, "", `#/design/${row.id}`);
+        } catch {
+          // non-fatal: hash stays at /design/new
+        }
+      } else {
+        await projects.update(this.projectId, { title: this.state.title, design, thumbnail });
+      }
+      this._lastPersisted = key;
+      this._dirtySincePersist = false;
+    } catch (error) {
+      console.error("[persist]", error.message);
+      notify(`Couldn't save to library: ${error.message}`, "error");
+    }
   }
 
   saveDraftNow() {

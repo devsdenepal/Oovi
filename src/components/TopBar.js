@@ -18,6 +18,7 @@ export class TopBar {
    * @param {(format: "png"|"jpg"|"svg"|"pdf") => void} handlers.onExport
    * @param {(title: string) => void} handlers.onTitle
    * @param {(tab: "design"|"code"|"pipeline") => void} handlers.onTab
+   * @param {() => void} handlers.onHome
    */
   constructor(container, handlers) {
     this.handlers = handlers;
@@ -25,7 +26,7 @@ export class TopBar {
     this.container.classList.add("oovi-topbar");
     this.container.innerHTML = `
       <div class="tb-brand">
-        <span class="logo" aria-hidden="true"><i class="fa-solid fa-pen-nib"></i></span>
+        <button class="logo logo-btn" data-tb="home" title="Back to dashboard" aria-label="Back to dashboard"><i class="fa-solid fa-pen-nib"></i></button>
         <span class="tb-title-wrap">
           <input id="doc-title" class="tb-title" value="Untitled design" maxlength="80" aria-label="Design title" spellcheck="false" />
           <small class="tb-sub">AI Editable Studio · <span class="canvas-meta">1200 × 630</span></small>
@@ -95,6 +96,7 @@ export class TopBar {
       else if (action === "zoom-100") this.handlers.onZoom("actual");
       else if (action === "preview") this.handlers.onPreview();
       else if (action === "export-menu") this.exportMenu.hidden = !this.exportMenu.hidden;
+      else if (action === "home") this.handlers.onHome();
     });
 
     this.titleInput.addEventListener("change", () => {

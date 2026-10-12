@@ -21,6 +21,8 @@ body { background: var(--oovi-bg); }
   color: var(--oovi-surface); font-size: 15px; flex: 0 0 32px;
   background: linear-gradient(135deg, var(--oovi-logo-a), var(--oovi-logo-b));
 }
+.logo-btn { border: 0; cursor: pointer; padding: 0; }
+.logo-btn:hover { filter: brightness(1.08); }
 
 /* ── Shared headings (JS components render .panel-title) ── */
 .panel-title {
@@ -481,6 +483,8 @@ summary:focus-visible, a:focus-visible {
   padding: 7px 10px; border-radius: 6px; cursor: pointer; color: var(--oovi-ink);
 }
 .tb-export-menu button:hover { background: var(--oovi-surface-2); }
+
+#view-home[hidden], #app[hidden] { display: none !important; }
 
 /* ── Toasts (bottom-right updates) ── */
 #toast-zone { z-index: var(--oovi-z-toast); }

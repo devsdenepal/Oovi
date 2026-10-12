@@ -736,7 +736,10 @@ export class CanvasEditor {
     c.on("object:removed", () => this._handleMutation());
     c.on("object:modified", () => this._handleMutation());
     c.on("text:changed", () => this._handleMutation());
-    c.on("history:change", () => this._syncLayers());
+    c.on("history:change", () => {
+      this._syncLayers();
+      this._syncSelection();
+    });
 
     c.on("selection:created", () => this._syncLayers());
     c.on("selection:updated", () => this._syncLayers());

@@ -6,14 +6,19 @@
   "description": "AI-powered editable graphic design system - natural language to editable Fabric.js canvas",
   "scripts": {
     "dev": "vite",
+    "dev:api": "node server/index.js",
     "build": "vite build",
     "preview": "vite preview"
   },
   "dependencies": {
     "@imgly/background-removal": "^1.7.0",
     "bootstrap": "^5.3.8",
+    "dotenv": "^18.0.7",
+    "express": "^5.3.0",
     "fabric": "^6.5.1",
+    "inherits": "^2.0.4",
     "jspdf": "^4.2.1",
+    "pg": "^8.23.1",
     "tesseract.js": "^7.0.0"
   },
   "devDependencies": {

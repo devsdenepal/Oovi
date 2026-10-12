@@ -2,6 +2,44 @@
 
 Conservative option wins every tie. Newest entries first.
 
+## Live-fire review fixes (sparse/left-bunched/hallucinated poster)
+- Balance is measured, not assumed: inked-mass left/right ratio <0.35
+  (at ≥25% coverage) warns. Theme can't ride DSL shapes, so textured
+  styles now FORCE hero + one decoration to image kind with the style
+  baked into describe. Facts rule: model must use request facts only,
+  "TBA" placeholders instead of inventions (not programmatically
+  verifiable — stated limit).
+- Placeholders caught structurally: per-component box fill <15% warns
+  (thin) or nothing-inside warns (empty); hero-role boxes <15% canvas
+  warn regardless of kind. Header >60% of headline warns.
+- Gate stays report-only (spec forbids touching intent); no auto-fix
+  pass exists by decision, not omission.
+
+## AI design quality (composition planning + gate)
+- Root cause of sparse posters: the planner optimized for nothing (no
+  sections, density, hierarchy, or theme channel) and nothing evaluated
+  the result. Fixed the process: section checklist (adapted, never
+  padded), hero minimums, coverage/headline/contrast rules, theme string
+  propagated to every component + image describe, roles with floors
+  (headline size, details size), sibling boxes for alignment context.
+- Quality gate REPORTS only (`src/ai/quality.js`, pure + node-tested):
+  no auto-mutation, per spec — intentional overlap/bleed/asymmetry
+  preserved (only text-on-text, out-of-canvas text, tiny type and
+  failing contrast are errors). Score = 100 - 12*errors - 4*warns.
+- Group-child coords assume group-relative storage (true after renderer
+  round-trips; AI-fresh groups conventionally use 0,0 origins).
+- Probes needed re-routing after hash navigation landed (scripts open
+  `#/design/new`; dashboard probes use `#/`).
+
+## Trash instead of hard delete
+- Dashboard delete is soft (`deleted_at`); Trash section restores,
+  destroys forever, or empties. Duplicate ignores trashed rows.
+- Skew learned the hard way: my first probe wiped 2 live user rows with
+  hard DELETEs. Probes now scope every destructive step to titled rows
+  they created. No autosave window: persists debounce at 2.5s (Canva-like
+  cadence); navigating away sooner can lose the tail — accepted, no
+  beacon hack (sendBeacon is POST-only, doesn't fit PUT).
+
 ## UI polish pass (no new features)
 - Workspace-dark vs no-dark-mode rule: dark *mode* (full theme) stays
   out; the dark dotted canvas surround is one documented surface token

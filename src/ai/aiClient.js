@@ -383,6 +383,7 @@ function sanitizePlan(raw, canvas) {
     accent: "#4F46E5",
     ...((raw && raw.palette) || {}),
   };
+  const style = String((raw && raw.style) || "").slice(0, 200);
   const seen = new Set();
   const components = [];
   for (const c of (raw?.components || []).slice(0, 10)) {
@@ -411,7 +412,7 @@ function sanitizePlan(raw, canvas) {
       ...(box ? { box } : {}),
     });
   }
-  return { palette, components, warnings };
+  return { palette, style, components, warnings };
 }
 
 function gatewayEnv() {
@@ -458,7 +459,8 @@ export async function planDesign(userPrompt, canvas) {
  * Architect pass 2: one DSL component → validated elements.
  * @returns {Promise<{elements: Array, source: "mock"|"ai"}>}
  */
-export async function componentDesign(component, canvas, palette) {
+export async function componentDesign(component, canvas, plan) {
+  const palette = plan.palette;
   if (isMockEnabled()) {
     const elements = mockComponent(component, canvas);
     const check = validateDesign({ canvas, elements });
@@ -470,8 +472,8 @@ export async function componentDesign(component, canvas, palette) {
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     const requestPrompt =
       attempt === 1
-        ? buildComponentPrompt(component, canvas, palette)
-        : `${buildComponentPrompt(component, canvas, palette)}\n\n[Correction]\nYour previous response failed (${errors.join("; ")}). Return ONLY {"elements":[...]}.`;
+        ? buildComponentPrompt(component, canvas, plan)
+        : `${buildComponentPrompt(component, canvas, plan)}\n\n[Correction]\nYour previous response failed (${errors.join("; ")}). Return ONLY {"elements":[...]}.`;
     const text = await fetchWithFallback(primaryUrl, token, model, requestPrompt);
     const parsed = regexRepairJson(text);
     if (parsed === null || !Array.isArray(parsed.elements)) {

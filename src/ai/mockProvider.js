@@ -130,14 +130,15 @@ export function mockPlan(prompt, canvas) {
   const h = canvas?.height || 630;
   return {
     palette: { background: "#FFFFFF", ink: "#111111", accent: "#4F46E5" },
+    style: "clean modern",
     components: [
-      { id: "header", kind: "dsl", describe: "Company name header text" },
-      { id: "headline", kind: "dsl", describe: "Bold product headline" },
+      { id: "header", kind: "dsl", role: "header", describe: "Company name header text" },
+      { id: "headline", kind: "dsl", role: "headline", describe: "Bold product headline" },
       {
-        id: "brand-icon", kind: "image", asset: "icon", describe: "flat rocket icon",
+        id: "brand-icon", kind: "image", role: "decoration", asset: "icon", describe: "flat rocket icon",
         box: { x: Math.max(0, w - 200), y: 48, width: 128, height: 128 },
       },
-      { id: "footer", kind: "dsl", describe: "Footer text with website" },
+      { id: "footer", kind: "dsl", role: "footer", describe: "Footer text with website" },
     ],
   };
 }

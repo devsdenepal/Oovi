@@ -8,6 +8,21 @@
 
 const MAX_HISTORY = 50;
 
+/**
+ * Custom DSL props that must survive history round-trips. fabric's
+ * toObject() drops unknown props by default, which used to revive
+ * anonymous objects (blank preview/layers, dead selectById/patches).
+ */
+const HISTORY_PROPS = [
+  "designId",
+  "elementRole",
+  "elementType",
+  "locked",
+  "designSrc",
+  "pendingSrc",
+  "isImagePlaceholder",
+];
+
 export class HistoryManager {
   /**
    * @param {fabric.Canvas} canvas
@@ -21,7 +36,7 @@ export class HistoryManager {
 
   snapshot() {
     if (this.saving) return;
-    const state = JSON.stringify(this.canvas.toObject());
+    const state = JSON.stringify(this.canvas.toObject(HISTORY_PROPS));
     if (this.undoStack[this.undoStack.length - 1] === state) return;
     this.undoStack.push(state);
     if (this.undoStack.length > MAX_HISTORY) this.undoStack.shift();
@@ -29,7 +44,8 @@ export class HistoryManager {
   }
 
   canUndo() {
-    return this.undoStack.length > 0;
+    // The top entry is the current state — undo needs a state beneath it.
+    return this.undoStack.length > 1;
   }
 
   canRedo() {
@@ -40,23 +56,22 @@ export class HistoryManager {
     this.saving = true;
     this.canvas.discardActiveObject();
     try {
-      await new Promise((resolve) => {
-        this.canvas.loadFromJSON(state, () => {
-          this.canvas.renderAll();
-          resolve();
-        });
-      });
+      // fabric 6: loadFromJSON returns a promise (2nd arg is a per-object
+      // reviver, not a completion callback). Await the real completion.
+      await this.canvas.loadFromJSON(state);
+      this.canvas.renderAll();
     } finally {
       this.saving = false;
     }
   }
 
   async undo() {
-    const state = this.undoStack.pop();
-    if (!state) return;
-    const current = JSON.stringify(this.canvas.toObject());
+    // Pop the current state onto redo, restore the entry beneath it.
+    // With fewer than 2 entries there is no earlier state: no-op.
+    if (this.undoStack.length < 2) return;
+    const current = this.undoStack.pop();
     this.redoStack.push(current);
-    await this.restore(state);
+    await this.restore(this.undoStack[this.undoStack.length - 1]);
     this.canvas.fire("history:change");
   }
 

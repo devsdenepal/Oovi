@@ -6,7 +6,7 @@ const browser = await chromium.launch();
 const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, acceptDownloads: true });
 const page = await ctx.newPage();
 page.on('pageerror', (e) => console.log('PAGEERROR:', e.message));
-await page.goto('http://localhost:5173', { waitUntil: 'networkidle' });
+await page.goto('http://localhost:5173/#/design/new', { waitUntil: 'networkidle' });
 await page.waitForSelector('#canvas-holder', { timeout: 20000 });
 await page.waitForTimeout(1000);
 

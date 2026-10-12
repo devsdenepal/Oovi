@@ -17,7 +17,15 @@ const aiProxy = {
 export default defineConfig({
   server: {
     port: 5173,
-    proxy: aiProxy,
+    proxy: {
+      ...aiProxy,
+      // Local API backend (server/index.js). Falls through to Vite's
+      // 404 when the backend isn't running — callers degrade gracefully.
+      "/api": {
+        target: "http://localhost:3001",
+        changeOrigin: true,
+      },
+    },
   },
   preview: {
     port: 4173,
