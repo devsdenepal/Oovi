@@ -3,6 +3,41 @@ import { HistoryManager } from "./HistoryManager";
 import { ActiveSelection } from "fabric";
 
 /**
+ * Flattens the canvas object tree for the layers panel, top-most first at
+ * each level, so nested group children are listed after their parent.
+ * @param {fabric.Object[]} objects bottom-most first (canvas order)
+ * @param {Array<{obj: fabric.Object, depth: number}>} out
+ * @param {number} depth
+ */
+function flattenLayers(objects, out = [], depth = 0) {
+  const stack = [...objects].reverse();
+  for (const obj of stack) {
+    out.push({ obj, depth });
+    if (typeof obj.getObjects === "function" && obj.getObjects().length > 0) {
+      flattenLayers(obj.getObjects(), out, depth + 1);
+    }
+  }
+  return out;
+}
+
+/**
+ * Finds an object by designId anywhere in the object tree (including inside
+ * groups), mirroring how the layers panel can now select group children.
+ * @param {fabric.Object[]} objects
+ * @param {string} id
+ */
+function findById(objects, id) {
+  for (const obj of objects) {
+    if (obj.designId === id) return obj;
+    if (typeof obj.getObjects === "function") {
+      const nested = findById(obj.getObjects(), id);
+      if (nested) return nested;
+    }
+  }
+  return null;
+}
+
+/**
  * Editor coordinate layer.
  *
  * Wraps a Fabric canvas and exposes a small API used by the App:
@@ -100,10 +135,19 @@ export class CanvasEditor {
     holder.style.width = `${Math.round(c.width * fitScale)}px`;
     holder.style.height = `${Math.round(c.height * fitScale)}px`;
 
-    const canvasEl = c.getElement ? c.getElement() : holder.querySelector("canvas");
-    if (canvasEl) {
-      canvasEl.style.transform = `scale(${fitScale})`;
-      canvasEl.style.transformOrigin = "0 0";
+    // Scale BOTH fabric canvases. Fabric's pointer math computes the CSS scale
+    // from the *upper* (interactive) canvas bounding rect, so if the transform
+    // is only applied to the lower (render) canvas, clicks are mapped with no
+    // fit-scale compensation and hit at the wrong position. Scaling both keeps
+    // the render and hit-testing in sync at the cursor.
+    const els = [c.lowerCanvasEl, c.upperCanvasEl].filter(Boolean);
+    if (els.length === 0) {
+      const fallback = c.getElement ? c.getElement() : holder.querySelector("canvas");
+      if (fallback) els.push(fallback);
+    }
+    for (const el of els) {
+      el.style.transform = `scale(${fitScale})`;
+      el.style.transformOrigin = "0 0";
     }
 
     this.fitScale = fitScale;
@@ -174,9 +218,11 @@ export class CanvasEditor {
 
   _syncLayers() {
     if (!this.layersCallback) return;
-    // getObjects() returns bottom-most first; the layers panel shows
-    // top-most first, matching the spec order (Footer on top of Rectangle...).
-    const layers = [...this.canvas.getObjects()].reverse();
+    // getObjects() returns bottom-most first; flattenLayers reverses at each
+    // level so the panel shows top-most first, matching the spec order
+    // (Footer on top of Rectangle...). Group children are nested under their
+    // parent group.
+    const layers = flattenLayers(this.canvas.getObjects());
     const activeIds = new Set(this.canvas.getActiveObjects().map((o) => o.designId));
     this.layersCallback(layers, activeIds);
   }
@@ -235,7 +281,7 @@ export class CanvasEditor {
   }
 
   selectById(id) {
-    const obj = this.canvas.getObjects().find((o) => o.designId === id);
+    const obj = findById(this.canvas.getObjects(), id);
     if (!obj) return;
     this.canvas.discardActiveObject();
     this.canvas.setActiveObject(obj);

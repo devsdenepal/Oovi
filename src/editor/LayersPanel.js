@@ -19,13 +19,14 @@ export class LayersPanel {
   }
 
   /**
-   * @param {fabric.Object[]} objects top-most first
+   * @param {Array<{obj: fabric.Object, depth: number}>} items top-most first
+   *        at each nesting level; group children follow their parent group
    * @param {Set<string>} activeIds
    */
-  render(objects, activeIds) {
+  render(items, activeIds) {
     this.listEl.innerHTML = "";
 
-    if (objects.length === 0) {
+    if (items.length === 0) {
       const empty = document.createElement("li");
       empty.className = "layer-empty";
       empty.textContent = "Nothing on canvas yet";
@@ -33,10 +34,11 @@ export class LayersPanel {
       return;
     }
 
-    for (const obj of objects) {
+    for (const { obj, depth } of items) {
       const li = document.createElement("li");
       li.className = "layer-item";
       if (activeIds.has(obj.designId)) li.classList.add("active");
+      li.style.paddingLeft = `${8 + depth * 16}px`;
 
       const icon = document.createElement("span");
       icon.className = "layer-icon";

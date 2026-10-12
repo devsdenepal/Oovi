@@ -108,6 +108,12 @@ function createGroup(element) {
     ...commonOptions(element),
     originX: "left",
     originY: "top",
+    // Allow selecting the individual children (text/rect/…) under the cursor
+    // instead of always selecting the whole group. Both flags are required:
+    // subTargetCheck makes hit-testing descend into children, interactive
+    // makes the innermost child under the pointer the selection target.
+    subTargetCheck: true,
+    interactive: true,
   });
   return group;
 }
