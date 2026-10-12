@@ -1,125 +1,122 @@
-# Oovi
+# Oovi — AI Design Studio
 
-AI-powered editable graphic design system. 
+Oovi turns natural-language prompts into **fully editable graphic designs** — not flattened images. Every headline, shape, and illustration the AI produces remains a live object on a Fabric.js canvas: selectable, movable, resizable, and re-editable.
 
-**Natural language prompt → Generative AI → Design JSON → validated → Fabric.js → fully editable canvas.**
+**Prompt → composition plan → validated Design DSL → editable Fabric.js canvas.**
 
-No flattened image is ever generated. The AI produces a *structured design document*, and Fabric.js maintains an editable representation (click, drag, resize, rotate, double-click to edit text, delete, duplicate, undo/redo, multi-select, layers panel).
+## Features
 
-## Pipeline
+- **AI generation that stays editable** — an architect planner produces a deliberate layout (palette, sections, boxes), then each component is generated as structured Design DSL or AI imagery. Nothing is ever baked into a single bitmap.
+- **Home dashboard** — prompt-first hero, size presets, recent designs with thumbnails, rename, duplicate, trash with restore, and one-click open in a new tab.
+- **Full editor** — select, drag, resize, rotate, inline text editing, multi-select, layers panel, context toolbar, and AI-assisted edits.
+- **Reliable undo/redo** — post-state history where the current canvas is always on top; empty floors are no-ops and new edits clear the redo stack.
+- **Imagery, server-side** — AI illustrations via Pollinations and photo search via Unsplash, both proxied through the backend so API keys never reach the browser.
+- **Background removal** — one-click subject isolation for local images.
+- **Export** — PNG, JPG, SVG, and PDF.
+- **Autosave + Postgres persistence** — designs save to a local Postgres database with debounced autosave and soft-delete trash.
+- **Layout quality gate** — every generation is scored on coverage, balance, contrast, hierarchy, and hero presence, with findings reported in the assistant panel.
+- **Offline mock mode** — `?mock=1` (or `VITE_MOCK_AI=1`) runs the full pipeline with zero network calls.
 
-```text
-User prompt
-  → Generative AI API (POST {AICONDUCTOR_URL}/generate)
-  → Design JSON / Design DSL
-  → validateDesign() (src/design/designValidator.js)
-  → fabricRenderer.renderDesign() (src/renderer/fabricRenderer.js)
-  → editable Fabric.js canvas
-```
+## Quickstart
 
-Modules are separated so the renderer can be swapped without touching the AI layer, and image-generation / design-memory features can be added later:
-
-```text
-src/
-  ai/            aiClient.js, designPrompt.js
-  design/        designSchema.js, designValidator.js, designTypes.js
-  renderer/      fabricRenderer.js   (Design DSL <-> Fabric.js only)
-  editor/        Canvas.js, LayersPanel.js, Toolbar.js, HistoryManager.js
-  components/    PromptInput.js, GenerateButton.js
-  app/           App.js             (wiring & pipeline orchestration)
-```
-
-## Setup
+**Prerequisites:** Node.js 18+, and PostgreSQL for design persistence.
 
 ```bash
 npm install
-npm run dev          # http://localhost:5173
+
+# Terminal 1 — API + persistence layer (http://localhost:3001)
+npm run dev:api
+
+# Terminal 2 — editor UI (http://localhost:5173)
+npm run dev
 ```
 
-Configure the AI provider via `.env` (a working `.env` ships for the AI Conductor Vercel deployment; see `.env.example`):
+Create the database once (defaults in `.env`, see [Configuration](#configuration)):
 
-```env
-VITE_AICONDUCTOR_URL=https://aiconductor.vercel.app
-VITE_AICONDUCTOR_TOKEN=your-token-here
-VITE_AICONDUCTOR_MODEL=aiconductor
+```bash
+createdb oovi
+node scripts/db-probe.mjs   # verifies schema + connectivity
 ```
 
-The AI Conductor contract (used by other projects like deepgyan) is:
+Then open `http://localhost:5173`, describe a design on the home page, and it opens in the editor.
+
+## How it works
 
 ```text
-POST {URL}/generate
-  headers: { "Content-Type": "application/json", "Authorization": "Bearer <token>" }
-  body:    { "prompt": "[System]\n<layout-engine instructions>\n\n[User]\n<your request>" }
-  returns: { "success": true, "text": "<model output>" }
+User prompt
+  → Architect plan (sections, palette, theme, boxes)      src/ai/architectPrompt.js
+  → Per-component DSL  ·  Pollinations / Unsplash images  src/ai/aiClient.js, api/
+  → validateDesign() (structural)                         src/design/designValidator.js
+  → evaluateDesign() (quality report, non-mutating)       src/ai/quality.js
+  → Fabric.js render (editable objects, history-tracked)  src/renderer/fabricRenderer.js
 ```
 
-> Note: for this demo the provider is called straight from the browser, so the token is visible to anyone opening the page. For anything beyond a local demo, proxy the call through a private backend (Vercel serverless function, etc.) and keep the token server-side.
-
-## Example prompt (pre-filled)
-
-```text
-Create a modern product announcement for our new AI assistant. Include the
-company name header, a bold headline, supporting body text, a decorative
-rounded rectangle, and a footer with the website.
-```
-
-## Design JSON schema
-
-The AI is told (see `src/ai/designPrompt.js`) to return only this shape:
+The **Design DSL** is the contract between AI and canvas — a plain-JSON document of canvas + elements:
 
 ```json
 {
-  "canvas": { "width": 1080, "height": 1080, "background": "#FFFFFF" },
+  "canvas": { "width": 1080, "height": 1080, "background": "#14101F" },
   "elements": [
-    {
-      "id": "headline",
-      "type": "text",
-      "role": "headline",
-      "content": "The Future Starts Now",
-      "x": 80,
-      "y": 220,
-      "width": 850,
-      "fontSize": 72,
-      "fontWeight": 700,
-      "fill": "#111111"
-    },
-    {
-      "id": "shape",
-      "type": "rectangle",
-      "role": "decoration",
-      "x": 760,
-      "y": 350,
-      "width": 220,
-      "height": 220,
-      "fill": "#222222",
-      "cornerRadius": 20
-    }
+    { "id": "headline", "type": "text", "role": "headline",
+      "content": "Ship Something Spooky", "x": 64, "y": 100,
+      "width": 560, "fontSize": 84, "fontWeight": 800, "fill": "#FFFFFF" },
+    { "id": "hero", "type": "image", "role": "hero",
+      "x": 700, "y": 80, "width": 440, "height": 440, "src": "…" }
   ]
 }
 ```
 
-Element types supported by the renderer (extensible via the `createObject` switch):
+Element types: `text`, `rectangle`, `circle`, `line`, `image`, `group`. Every rendered Fabric object keeps its DSL `id` as `obj.designId`, so AI edits, history snapshots, and export all round-trip through the same document.
+
+Routes are hash-based: `#/` dashboard, `#/design/new` blank canvas, `#/design/<id>` saved design.
+
+## Configuration
+
+Copy `.env.example` to `.env`. Keys are **server-only** unless prefixed `VITE_`:
+
+| Variable | Where | Purpose |
+|---|---|---|
+| `VITE_AICONDUCTOR_URL` | Browser | AI gateway endpoint (via same-origin proxy) |
+| `VITE_AICONDUCTOR_TOKEN` | Browser | Gateway token for local demo use |
+| `POLLINATIONS_KEY` | Server only | AI image generation (`api/asset.js`) |
+| `UNSPLASH_ACCESS_KEY` | Server only | Photo search (`api/photos.js`) |
+| `PGHOST / PGPORT / PGUSER / PGPASSWORD / PGDATABASE` | Server only | Postgres connection (`server/index.js`) |
+| `VITE_MOCK_AI=1` | Browser | Offline mode, no network calls |
+
+> Never put a secret in a `VITE_`-prefixed variable — those are bundled into the client. The browser holds no image or database credentials.
+
+## Project structure
 
 ```text
-text       -> FabricText (editable)
-rectangle  -> Rect
-circle     -> Circle
-line       -> Line
-group      -> Group
+src/
+  ai/            AI client, architect/component prompts, mock provider, quality gate
+  app/           App.js — orchestration (generation, persistence, history, panels)
+  components/    Dashboard, TopBar, InsertPanel, AssistantPanel, DebugTabs, …
+  design/        DSL schema, validator, canvas presets, design types
+  editor/        Fabric canvas wrapper, HistoryManager, layers, toolbar
+  layout/        Layout engine, semantic validation, type scale
+  reference/     Reference-image analysis (color, OCR, shapes, layout)
+  renderer/      Design DSL ↔ Fabric.js (only place that touches Fabric)
+  storage/       REST client for /api/designs
+  ui/            Hash router, design shell, toasts, brand tokens
+server/          Local API (stdlib node:http): designs CRUD, trash, asset/photo proxy
+api/             Shared serverless handlers (Vercel + local server)
+scripts/         Probe scripts per flow (db, api, history, quality, trash, …)
 ```
 
-Every rendered Fabric object keeps its DSL `id` as `obj.designId`.
+Supporting docs: `AGENT.md` (agent working agreement), `DESIGN.md` (visual identity + token rules), `DECISIONS.md` (decision log).
 
-## Editing
+## Scripts
 
-- **Click** to select · **drag** to move · **handles** to resize/rotate
-- **Double-click** a text to edit it inline (or edit via the Properties panel)
-- **Delete / Backspace** removes; **Ctrl+D** duplicates; **Shift+click** multi-select; **Ctrl+A** selects all
-- **Ctrl+Z / Ctrl+Y** (or Ctrl+Shift+Z) undo/redo
-- **Layers** panel clicks select the matching object (top-most first)
-- **Properties** panel edits content, font size, weight, and color of the selection
-- **JSON preview** shows the live Design DSL as you edit — no AI call needed
+| Command | Purpose |
+|---|---|
+| `npm run dev` | Vite dev server (`:5173`, proxies `/api` → `:3001`) |
+| `npm run dev:api` | Local API + Postgres backend (`:3001`) |
+| `npm run build` | Production build |
+| `npm run preview` | Preview the production build |
+| `node scripts/quality-check.mjs` | Quality-gate fixture suite |
+| `node scripts/db-probe.mjs` | Database connectivity check |
 
-## Future-proofing
+## Tech stack
 
-The boundaries are already in place for: image-generation APIs (extend `src/ai`), SVG/PSD import (new readers → Design DSL), brand kits (schema extension), design memory/RAG (persist/retrieve `Design` documents), templates, multiple canvas sizes, PNG/SVG/PDF export (renderer `canvasToDesign` / `canvas.toDataURL`), and AI *editing* commands (same pipeline, prompt = current design + edit instruction).
+Vanilla JavaScript, [Fabric.js](https://fabricjs.com/) canvas, Vite build, Node.js stdlib HTTP API, PostgreSQL (`pg`), Pollinations + Unsplash for imagery, `@imgly/background-removal` and jsPDF loaded lazily. No frontend framework, no hidden dependencies.
