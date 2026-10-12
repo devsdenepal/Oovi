@@ -1,0 +1,414 @@
+:root {
+  --bg: #101014;
+  --panel: #1a1a21;
+  --panel-2: #202028;
+  --border: #2c2c36;
+  --text: #e8e8ee;
+  --muted: #9a9aa6;
+  --accent: #6c6cff;
+  --accent-strong: #8a8aff;
+  --danger: #ff5c5c;
+  --success: #4ade80;
+  --radius: 10px;
+  font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+}
+
+#app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  max-width: 1500px;
+  margin: 0 auto;
+  padding: 12px 16px;
+  gap: 12px;
+}
+
+/* ---------- header ---------- */
+.app-header {
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+  padding: 4px 2px 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.app-header h1 {
+  margin: 0;
+  font-size: 22px;
+  letter-spacing: 0.02em;
+}
+
+.app-subtitle {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+/* ---------- prompt section ---------- */
+.prompt-section {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 12px;
+  align-items: end;
+}
+
+.prompt-input {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.prompt-input label {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+
+.prompt-input textarea {
+  width: 100%;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+  padding: 10px 12px;
+  resize: vertical;
+  min-height: 64px;
+}
+
+.prompt-input textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.generate-button {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.gen-status {
+  font-size: 12px;
+  color: var(--muted);
+  max-width: 340px;
+}
+
+.gen-status-loading {
+  color: var(--accent-strong);
+}
+
+.gen-status-success {
+  color: var(--success);
+}
+
+.gen-status-error {
+  color: var(--danger);
+}
+
+/* ---------- workspace ---------- */
+.workspace {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 300px 1fr 340px;
+  gap: 12px;
+  min-height: 0;
+}
+
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+}
+
+/* ---------- layers ---------- */
+.layers-panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 45%;
+  overflow-y: auto;
+}
+
+.panel-title {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+
+.layers-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.layer-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  font-size: 13px;
+}
+
+.layer-item:hover {
+  background: var(--panel-2);
+}
+
+.layer-item.active {
+  background: var(--panel-2);
+  border-color: var(--accent);
+}
+
+.layer-icon {
+  width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--border);
+  border-radius: 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.layer-empty {
+  color: var(--muted);
+  font-size: 13px;
+  padding: 8px;
+}
+
+/* ---------- toolbar ---------- */
+.toolbar {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow-y: auto;
+}
+
+.toolbar-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.toolbar-row.hint {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+/* ---------- props ---------- */
+.properties-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.prop-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.prop-row {
+  display: grid;
+  grid-template-columns: 84px 1fr;
+  gap: 8px;
+  align-items: center;
+  font-size: 13px;
+}
+
+.prop-row label {
+  color: var(--muted);
+}
+
+.prop-row input[type="text"],
+.prop-row input[type="number"],
+.prop-row select,
+.prop-row textarea {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  padding: 6px 8px;
+  font: inherit;
+  font-size: 13px;
+  width: 100%;
+}
+
+.prop-row input[type="color"] {
+  width: 48px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel-2);
+}
+
+.prop-row input:disabled {
+  opacity: 0.55;
+}
+
+.prop-empty {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.hidden {
+  display: none !important;
+}
+
+/* ---------- buttons ---------- */
+.btn {
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 14px;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.btn:hover {
+  background: var(--border);
+}
+
+.btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.btn-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.btn-primary:hover {
+  background: var(--accent-strong);
+}
+
+.btn-danger {
+  color: var(--danger);
+}
+
+.btn-lg {
+  padding: 12px 22px;
+  font-size: 15px;
+}
+
+.btn-small {
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
+/* ---------- canvas ---------- */
+.canvas-area {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  min-height: 0;
+  overflow: auto;
+}
+
+.canvas-frame {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: center;
+  padding: 16px;
+}
+
+#canvas-holder {
+  position: relative;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+#canvas-holder canvas {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+.canvas-meta {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* ---------- json preview ---------- */
+.json-area {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+}
+
+.json-toggle-row {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.json-body {
+  flex: 1;
+  overflow: auto;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.json-preview {
+  margin: 0;
+  padding: 12px;
+  font-family: "Cascadia Code", Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  color: #b8e0b8;
+  white-space: pre;
+}
+
+/* ---------- responsive ---------- */
+@media (max-width: 1200px) {
+  .workspace {
+    grid-template-columns: 260px 1fr;
+  }
+
+  .json-area {
+    grid-column: 1 / -1;
+    max-height: 260px;
+  }
+}

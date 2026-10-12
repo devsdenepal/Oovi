@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Oovi - AI Editable Graphic Design Demo</title>
+  </head>
+  <body>
+    <div id="app">
+      <header class="app-header">
+        <h1>Oovi</h1>
+        <span class="app-subtitle">Natural language → Design JSON → editable Fabric.js canvas</span>
+      </header>
+
+      <section class="prompt-section">
+        <div id="prompt-mount"></div>
+        <div id="generate-mount"></div>
+      </section>
+
+      <section class="workspace">
+        <aside class="sidebar">
+          <div id="layers-mount"></div>
+          <div id="toolbar-mount"></div>
+        </aside>
+
+        <main class="canvas-area">
+          <div class="canvas-frame">
+            <div id="canvas-holder">
+              <canvas id="design-canvas"></canvas>
+            </div>
+            <div class="canvas-meta">1080 × 1080</div>
+          </div>
+        </main>
+
+        <aside class="json-area" id="json-area">
+          <div class="json-toggle-row">
+            <button id="json-toggle" class="btn btn-small">Hide JSON</button>
+          </div>
+          <div class="json-body">
+            <pre id="json-preview" class="json-preview">{} </pre>
+          </div>
+        </aside>
+      </section>
+    </div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
