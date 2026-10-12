@@ -140,7 +140,7 @@ export const RegionRole = Object.freeze({
 
 /**
  * @typedef {Object} ReferenceDesignAnalysis
- * @property {{kind:string, fileName?:string, width:number, height:number, aspectRatio:number}} source
+ * @property {{kind:string, fileName?:string, width:number, height:number, aspectRatio:number, hasBackgroundImage:boolean}} source
  * @property {{width:number, height:number, aspectRatio:number}} canvas
  * @property {PaletteAnalysis} palette
  * @property {LayoutAnalysis} layout

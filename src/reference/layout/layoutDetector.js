@@ -254,30 +254,60 @@ function kebab(s) {
 }
 
 /**
- * Detects large image-like blobs (dense pixel areas that look like a photo).
+ * Detects prominent photo-like visual areas while IGNORING background fills
+ * and asset imagery (characters, icons, product cutouts, small art).
+ *
+ * Heuristics:
+ *  - a blob filling >= 55% of the canvas (or >= 40% while touching 3+ frame
+ *    edges) is a background image - it is skipped and reported via the
+ *    `backgroundImage` flag so callers can suppress imagery entirely
+ *  - blobs under 10% of the canvas area are icons/avatars/small art - skipped
+ *  - of the remaining dense blobs only the single largest is kept as a hero
+ *    visual area; extra photos/characters are treated as disposable assets
+ *
  * @param {CanvasRenderingContext2D} ctx
  * @param {number} width
  * @param {number} height
  * @param {{r,g,b}} background
- * @returns {Array<{x,y,width,height,color,role}>} image candidates in analysis px
+ * @returns {{images: Array<{x,y,width,height,color,role,relArea}>, backgroundImage: boolean}}
  */
 export function detectImageBlobs(ctx, width, height, background) {
   const mask = buildMask(ctx, width, height, background, 6);
   const comps = labelComponents(mask.grid, mask.rows, mask.cols);
-  const out = [];
-  const minArea = mask.width * mask.height * 0.08;
+  const { cellW, cellH } = mask;
+  const marginX = Math.max(1, cellW * 0.5);
+  const marginY = Math.max(1, cellH * 0.5);
+
+  const candidates = [];
+  let backgroundImage = false;
+
   for (const comp of comps) {
     const px = componentToPx(comp, mask);
-    const area = px.width * px.height;
-    if (area < minArea || comp.dens < 0.35) continue;
-    out.push({
+    const relArea = (px.width * px.height) / Math.max(1, width * height);
+
+    let edges = 0;
+    if (px.x <= marginX) edges++;
+    if (px.x + px.width >= width - marginX) edges++;
+    if (px.y <= marginY) edges++;
+    if (px.y + px.height >= height - marginY) edges++;
+
+    if (relArea >= 0.55 || (edges >= 3 && relArea >= 0.4)) {
+      backgroundImage = true;
+      continue;
+    }
+    // Background separated: keep only the dominant non-covering visual.
+    if (relArea < 0.1 || comp.dens < 0.35) continue;
+    candidates.push({
       x: Math.round(px.x),
       y: Math.round(px.y),
       width: Math.round(px.width),
       height: Math.round(px.height),
       color: averageColor(ctx, width, height, px, background),
       role: "image",
+      relArea: Math.round(relArea * 100) / 100,
     });
   }
-  return out;
+
+  candidates.sort((a, b) => b.width * b.height - a.width * a.height);
+  return { images: candidates.slice(0, 1), backgroundImage };
 }

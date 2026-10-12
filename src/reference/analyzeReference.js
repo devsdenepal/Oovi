@@ -74,6 +74,9 @@ function buildSummary(analysis) {
   lines.push(
     `Reference image: ${canvas.width}x${canvas.height}px (aspect ${canvas.aspectRatio.toFixed(2)}${source.fileName ? `, "${source.fileName}"` : ""}).`,
   );
+  if (source.hasBackgroundImage) {
+    lines.push("Full-bleed background image detected and ignored for layout (flat background assumed).");
+  }
   lines.push(
     `Palette: background ${palette.background}, primary ${palette.primary}, accent ${palette.accent}${palette.dominant.length ? `, dominant ${palette.dominant.map((d) => d.hex).join(", ")}` : ""} (${palette.isLight ? "light" : "dark"} background).`,
   );
@@ -139,7 +142,9 @@ export async function analyzeReferenceImage(image, options = {}) {
   const layoutRaw = await detectLayout(ctx, width, height, backgroundRgb);
   let textRegions = await detectTextRegions(ctx, width, height, backgroundRgb);
   const shapes = await detectShapes(ctx, width, height, backgroundRgb);
-  const imageBlobs = await detectImageBlobs(ctx, width, height, backgroundRgb);
+  const blobResult = await detectImageBlobs(ctx, width, height, backgroundRgb);
+  const imageBlobs = blobResult.images;
+  const hasBackgroundImage = blobResult.backgroundImage;
 
   // --- OCR (optional, fills text content) ---
   let ocr = {
@@ -155,10 +160,15 @@ export async function analyzeReferenceImage(image, options = {}) {
     }
   }
 
-  const visualRegions = layoutRaw.regions.filter((r) => r.role.includes("visual"));
+  const visualRegions = hasBackgroundImage
+    ? []
+    : layoutRaw.regions.filter((r) => r.role.includes("visual"));
   const decorations = await detectDecorations(ctx, width, height, backgroundRgb, textRegions, shapes);
 
-  // --- image areas: visual column slots + dense blobs, deduped ---
+  // --- image areas: visual column slots + the single hero blob, deduped ---
+  // Background/asset imagery (characters, icons, photos) is deliberately
+  // ignored: it cannot be reproduced by the layout engine and only pollutes
+  // the composition guide. At most one prominent visual area is kept.
   const imageAreas = [];
   for (const v of visualRegions) {
     imageAreas.push({ id: `image_slot_${imageAreas.length + 1}`, role: "image", ...v });
@@ -208,6 +218,7 @@ export async function analyzeReferenceImage(image, options = {}) {
     width: srcW,
     height: srcH,
     aspectRatio: Math.round((srcW / Math.max(1, srcH)) * 100) / 100,
+    hasBackgroundImage,
   };
   const analysis = {
     version: SEMANTIC_ANALYSIS_VERSION,

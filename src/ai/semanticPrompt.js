@@ -129,6 +129,13 @@ export function buildSemanticReferenceGuide(analysis, influence = 1) {
   if (ocr.status === "ok" || ocr.status === "region_only") {
     lines.push(`  OCR status: ${ocr.status}.`);
   }
+  const hasBg = analysis.source && analysis.source.hasBackgroundImage;
+  lines.push(
+    "  Imagery rule: ignore ALL background / photographic / character / icon assets from the reference (they cannot be reproduced)." +
+      (hasBg
+        ? " The reference sits on a full-bleed background image - mirror its layout, palette and type on a simple flat background."
+        : " Reproduce the reference's layout, palette and type scale with text, buttons and shapes only."),
+  );
   lines.push(
     "  Rules: mirror the reference's layout and palette, but use the NEW content and message from the user's request. Never reproduce the reference's own words.",
   );
