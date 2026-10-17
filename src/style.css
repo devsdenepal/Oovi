@@ -202,10 +202,10 @@ body { background: var(--oovi-bg); }
 .layer-ai-badge { margin-left: auto; }
 
 /* ── Prompt (JS: .prompt-input > label + textarea) ── */
-.prompt-input { display: flex; flex-direction: column; }
+.prompt-input { display: flex; flex-direction: column; min-width: 0; }
 .prompt-input label { display: none; }
 .prompt-input textarea {
-  width: 100%; background: var(--oovi-surface-2); border: 1px solid var(--oovi-line);
+  width: 100%; min-width: 0; background: var(--oovi-surface-2); border: 1px solid var(--oovi-line);
   border-radius: 11px; font: inherit; font-size: 13.5px; line-height: 1.45;
   padding: 10px 12px; resize: none; min-height: 44px; max-height: 96px;
 }
@@ -233,7 +233,7 @@ body { background: var(--oovi-bg); }
 .reference-status-success { color: var(--oovi-ok); }
 .reference-status-error { color: var(--oovi-bad); }
 .influence-row { display: flex; align-items: center; gap: 10px; }
-.influence-row input[type="range"] { flex: 1; accent-color: var(--oovi-brand); }
+.influence-row input[type="range"] { flex: 1; min-width: 0; accent-color: var(--oovi-brand); }
 .influence-label { font-size: 12px; min-width: 96px; text-align: right; text-transform: capitalize; font-weight: 550; }
 
 /* ── Layers (JS: .layers-panel, .layer-item…) ── */
@@ -342,11 +342,12 @@ body { background: var(--oovi-bg); }
 .left-tab svg { width: 15px; height: 15px; }
 .left-tab:hover { background: var(--oovi-surface-2); color: var(--oovi-ink); }
 .left-tab-active { background: var(--oovi-brand-soft); color: var(--oovi-brand-strong); border-color: var(--oovi-brand-line); }
-.left-panels { flex: 1; min-width: 0; overflow-y: auto; padding: 2px; }
+.left-panels { flex: 1; min-width: 0; min-height: 0; overflow-y: auto; padding: 2px; }
 .left-panels section.flash { border-radius: 8px; }
 
 /* ── Right inspector (single scroll column) ── */
 .inspector { overflow-y: auto; }
+.inspector { min-height: 0; overflow-y: auto; }
 .inspector .card { flex-shrink: 0; }
 [data-lpanel][hidden] { display: none !important; }
 section.flash, details.flash { box-shadow: 0 0 0 3px var(--oovi-brand-soft); border-color: var(--oovi-brand); }
@@ -485,6 +486,11 @@ summary:focus-visible, a:focus-visible {
 .tb-export-menu button:hover { background: var(--oovi-surface-2); }
 
 #view-home[hidden], #app[hidden] { display: none !important; }
+
+/* Page-level safety net: nothing in the studio scrolls the page itself
+   horizontally (the canvas frame owns its scroll). Without this, any
+   transient wide element shifts the whole grid and reads as a "cut" rail. */
+body { overflow-x: clip; }
 
 /* ── Toasts (bottom-right updates) ── */
 #toast-zone { z-index: var(--oovi-z-toast); }

@@ -68,9 +68,10 @@ export function textBox(el) {
 
 /**
  * Flattened absolute boxes (groups offset by their origin).
- * NOTE: assumes group children are stored group-relative (true after a
- * renderer round-trip; AI-fresh groups conventionally use a 0,0 origin,
- * for which the same math holds).
+ * NOTE on frames: live group children serialize CENTER-relative (Fabric
+ * native: a child emitted at x becomes left = x - groupW/2). AI plans pack
+ * children from 0, so rebasing each group to its min child restores the
+ * packed origin exactly; exotic packing degrades gracefully.
  */
 export function elementBoxes(elements, ox = 0, oy = 0) {
   const out = [];
@@ -78,7 +79,20 @@ export function elementBoxes(elements, ox = 0, oy = 0) {
     if (!el || typeof el !== "object") continue;
     const kind = el.type;
     if (kind === "group" && Array.isArray(el.children)) {
-      out.push(...elementBoxes(el.children, ox + clampNum(el.x, 0), oy + clampNum(el.y, 0)));
+      let minX = Infinity;
+      let minY = Infinity;
+      for (const k of el.children) {
+        if (!k || typeof k !== "object") continue;
+        minX = Math.min(minX, clampNum(k.x, 0));
+        minY = Math.min(minY, clampNum(k.y, 0));
+        if (k.type === "line") {
+          minX = Math.min(minX, clampNum(k.x2, 0));
+          minY = Math.min(minY, clampNum(k.y2, 0));
+        }
+      }
+      if (!Number.isFinite(minX)) minX = 0;
+      if (!Number.isFinite(minY)) minY = 0;
+      out.push(...elementBoxes(el.children, ox + clampNum(el.x, 0) - minX, oy + clampNum(el.y, 0) - minY));
       continue;
     }
     let box = null;
@@ -97,7 +111,7 @@ export function elementBoxes(elements, ox = 0, oy = 0) {
         h: Math.abs(clampNum(el.y2, 0) - clampNum(el.y, 0)) + pad * 2,
       };
     }
-    if (box) out.push({ id: el.id, role: el.role, kind, box });
+    if (box) out.push({ id: el.id, role: el.role, kind, box, fill: el.fill, fontSize: el.fontSize, fontWeight: el.fontWeight, gradient: el.gradient });
   }
   return out;
 }
@@ -110,7 +124,7 @@ function intersect(a, b) {
 
 /**
  * @param {object} design validated Design JSON
- * @param {{plannedIds?: string[], renderedIds?: string[], expectHero?: boolean}} [opts]
+ * @param {{plannedIds?: string[], renderedIds?: string[], expectHero?: boolean, palette?: {background?: string, ink?: string, accent?: string}}} [opts]
  * @returns {{score: number, issues: Array<{severity: "error"|"warn", code: string, message: string}>}}
  */
 export function evaluateDesign(design, opts = {}) {
@@ -210,13 +224,113 @@ export function evaluateDesign(design, opts = {}) {
     }
   }
 
-  // 6. Contrast of text against the background.
+  // 6. Contrast of text against its LOCAL backdrop (bar, disc, gradient —
+  // never just the canvas, which is how same-ink-on-same-bar dissolves go
+  // uncaught). Document order is bottom-first, so the nearest solid shape
+  // below the text's center wins; artwork gets one capped notice instead
+  // of per-glyph noise.
   for (const t of texts) {
-    const el = (design.elements || []).find((e) => e.id === t.id) || {};
-    const ratio = contrastRatio(el.fill, canvas.background);
-    if (ratio === null) continue;
-    if (ratio < 3) err("contrast", `"${t.id}" contrast ${ratio.toFixed(1)}:1 is unreadable.`);
-    else if (ratio < 4.5) warn("contrast", `"${t.id}" contrast ${ratio.toFixed(1)}:1 is weak.`);
+    const fill = t.fill;
+    if (typeof fill !== "string") continue;
+    const cx = t.box.x + t.box.w / 2;
+    const cy = t.box.y + t.box.h / 2;
+    const selfIdx = boxes.indexOf(t);
+    let bed = null;
+    for (let k = selfIdx - 1; k >= 0; k--) {
+      const b = boxes[k];
+      if (b.kind !== "rectangle" && b.kind !== "circle" && b.kind !== "image") continue;
+      if (cx > b.box.x && cx < b.box.x + b.box.w && cy > b.box.y && cy < b.box.y + b.box.h) {
+        bed = b;
+        break;
+      }
+    }
+    const judge = (ratio, where) => {
+      if (ratio === null) return;
+      if (ratio < 3) err("contrast", `"${t.id}" contrast ${ratio.toFixed(1)}:1 on ${where} is unreadable.`);
+      else if (ratio < 4.5) warn("contrast", `"${t.id}" contrast ${ratio.toFixed(1)}:1 on ${where} is weak.`);
+    };
+    if (!bed) {
+      judge(contrastRatio(fill, canvas.background), "canvas");
+      continue;
+    }
+    if (bed.kind === "image") continue; // capped notice below
+    if (typeof bed.fill === "string") {
+      judge(contrastRatio(fill, bed.fill), `"${bed.id}"`);
+      continue;
+    }
+    if (bed.gradient && Array.isArray(bed.gradient.stops) && bed.gradient.stops.length) {
+      const rs = bed.gradient.stops
+        .map((s) => contrastRatio(fill, s && s.color))
+        .filter((r) => r !== null);
+      if (!rs.length) continue;
+      if (rs.every((r) => r < 3)) err("contrast", `"${t.id}" unreadable across the "${bed.id}" gradient.`);
+      else if (rs.some((r) => r < 4.5)) warn("contrast", `"${t.id}" weak on part of the "${bed.id}" gradient.`);
+      continue;
+    }
+    judge(contrastRatio(fill, canvas.background), "canvas");
+  }
+  {
+    const arts = boxes.filter((b) => b.kind === "image");
+    const onArt = arts.length && texts.some((t) => {
+      const cx = t.box.x + t.box.w / 2;
+      const cy = t.box.y + t.box.h / 2;
+      return arts.some(
+        (g) => cx > g.box.x && cx < g.box.x + g.box.w && cy > g.box.y && cy < g.box.y + g.box.h,
+      );
+    });
+    if (onArt) warn("contrast", "Some text sits on artwork — verify contrast against the pixels on export.");
+  }
+
+  // 6b. Palette discipline + type discipline. Every painted fill must be
+  // a plan color or a neutral; body copy runs on at most two families.
+  const palette = opts.palette;
+  if (palette) {
+    const norm = (c) => {
+      let v = typeof c === "string" ? c.trim().toLowerCase() : "";
+      const short = v.match(/^#([0-9a-f]{3})$/);
+      if (short) v = `#${short[1].split("").map((ch) => ch + ch).join("")}`;
+      return v;
+    };
+    const planColors = new Set([palette.background, palette.ink, palette.accent].map(norm));
+    const isNeutral = (c) => {
+      const v = norm(c);
+      if (v === "" || v === "transparent" || v === "white" || v === "black" || v === "gray" || v === "grey") return true;
+      const m = v.match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/);
+      if (!m) return false;
+      let hex = m[1];
+      if (hex.length === 3) hex = hex.split("").map((ch) => ch + ch).join("");
+      const r = parseInt(hex.slice(0, 2), 16);
+      const g = parseInt(hex.slice(2, 4), 16);
+      const b = parseInt(hex.slice(4, 6), 16);
+      return r === g && g === b;
+    };
+    const paints = [];
+    const collect = (els) => {
+      for (const el of els || []) {
+        if (!el || typeof el !== "object") continue;
+        if ((el.type === "text" || el.type === "rectangle" || el.type === "circle") && typeof el.fill === "string") {
+          paints.push({ id: el.id, color: el.fill });
+        }
+        if (el.gradient && Array.isArray(el.gradient.stops)) {
+          for (const s of el.gradient.stops) paints.push({ id: `${el.id}:stop`, color: s && s.color });
+        }
+        if (el.type === "group" && Array.isArray(el.children)) collect(el.children);
+      }
+    };
+    collect(design.elements);
+    const rogue = paints.filter((p) => !planColors.has(norm(p.color)) && !isNeutral(p.color));
+    for (const r of rogue.slice(0, 3)) {
+      warn("palette", `"${r.id}" uses ${r.color}, outside the plan palette — ration the accent, harmonize the rest.`);
+    }
+  }
+  {
+    const families = new Set();
+    for (const el of design.elements || []) {
+      if (el && el.type === "text") families.add(el.fontFamily || "Arial");
+    }
+    if (families.size > 2) {
+      warn("typography", `${families.size} typefaces (${[...families].slice(0, 4).join(", ")}) — two max: one display, one text.`);
+    }
   }
 
   // 7. Hero artwork (only when the plan asked for images).
@@ -226,8 +340,27 @@ export function evaluateDesign(design, opts = {}) {
       err("hero", "The plan called for artwork but no image rendered.");
     } else {
       const biggest = images.reduce((a, b) => (b.box.w * b.box.h > a.box.w * a.box.h ? b : a));
-      if ((biggest.box.w * biggest.box.h) / (W * H) < 0.1) {
+      const areaFrac = (biggest.box.w * biggest.box.h) / (W * H);
+      if (areaFrac < 0.1) {
         warn("hero", `Largest artwork ("${biggest.id}") covers under 10% of the canvas.`);
+      }
+      // Focal thirds: a centered hero reads static unless it is a backdrop.
+      const cx = biggest.box.x + biggest.box.w / 2;
+      const cy = biggest.box.y + biggest.box.h / 2;
+      if (
+        areaFrac < 0.6 &&
+        cx > W / 3 && cx < (2 * W) / 3 &&
+        cy > H / 3 && cy < (2 * H) / 3
+      ) {
+        warn("focal", `Hero ("${biggest.id}") sits dead center — push the focal mass toward third-lines.`);
+      }
+      // Competing dominants: a huge hero AND a huge headline fight.
+      const topFs = texts.reduce((m, t) => {
+        const el = (design.elements || []).find((e) => e.id === t.id) || {};
+        return Math.max(m, el.fontSize || 0);
+      }, 0);
+      if (areaFrac > 0.2 && topFs > H * 0.08) {
+        warn("focal", "Hero and headline both dominate — step one down so a single focal wins (2:1).");
       }
     }
   }
@@ -279,6 +412,15 @@ export function evaluateDesign(design, opts = {}) {
         warn("spacing", "Vertical gaps between text blocks are inconsistent.");
       }
     }
+  }
+
+  // Spacious, not empty: a low-coverage design whose hierarchy, alignment
+  // and contrast are otherwise clean is breathing room, not failure.
+  const onlySparse = issues.filter((i) => i.severity === "error");
+  const sparseErr = onlySparse.find((i) => i.code === "sparse");
+  if (sparseErr && onlySparse.length === 1 && coverage >= 0.15) {
+    sparseErr.severity = "warn";
+    sparseErr.message += " (structured — treated leniently)";
   }
 
   const errors = issues.filter((i) => i.severity === "error").length;

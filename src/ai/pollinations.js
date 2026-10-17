@@ -27,6 +27,8 @@ export async function fetchAssetViaBackend(describe, opts = {}) {
       model: DEFAULT_MODEL,
       asset: opts.asset,
     }),
+    // Generation takes 9-17s observed; cap instead of hanging forever.
+    signal: AbortSignal.timeout(180000),
   });
   if (!res.ok) throw new Error(`backend ${res.status}`);
   const data = await res.json();
@@ -61,7 +63,7 @@ export function assetUrl(describe, opts = {}) {
  * Throws on CORS/network failure so callers can hotlink-fallback.
  */
 export async function fetchAssetDataUrl(url) {
-  const res = await fetch(url);
+  const res = await fetch(url, { signal: AbortSignal.timeout(120000) });
   if (!res.ok) throw new Error(`asset ${res.status}`);
   const blob = await res.blob();
   if (!blob.type.startsWith("image/")) throw new Error("asset is not an image");

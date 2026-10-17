@@ -2,6 +2,205 @@
 
 Conservative option wins every tie. Newest entries first.
 
+## Bricked opens (user report): save accepted what open rejected — twice
+- Bug 1, validator: save persists Fabric truth (group children in
+  group-relative coords, routinely negative; objects dragged partially
+  off-canvas with negative x/y) but open demanded every number >= 0.
+  7 of 11 saved designs unopenable. Fix: positions (x/y/x2/y2) accept
+  any finite number, top-level or nested; sizes stay >= 0. Same
+  relaxation in patch.js update-props (nested moves + off-canvas nudges
+  are legitimate). Rule kept where it protects: negative sizes, empty
+  designs (AI must produce something; loadProject opens those blank).
+- Bug 2, renderer (surfaced by the same design once validation passed):
+  toFabricFill emitted "50%" STRINGS for percentage-unit Gradient
+  coords, but Fabric 6 takes NUMBERS there (1 = 100% of bbox) — the
+  strings reached createLinearGradient verbatim → non-finite → whole
+  canvas render threw → same "Couldn't open project" toast. Fix:
+  numeric clamped fractions. Plus a smoke test: toLive() the paint on
+  a scratch context inside the existing try/catch, so ANY future
+  gradient pathology (bad color, wild offset from legacy saves)
+  degrades to the solid fill instead of bricking the open. Gradients
+  were never render-verified before — first real gradient to reach the
+  renderer was a legacy `coords:[...]`-array save.
+- Proof: validate-saved.mjs (new, permanent — revalidates all DB
+  designs), open-check.mjs (new, permanent — opens a design in the
+  browser, asserts objects + no error toast), 3 validator fixtures in
+  quality-check. All 4 bricked designs open (4/13/22/28 objects).
+
+## Server-side AI chain (user order): groq → gemini → openrouter-free
+- Every /api/groq request walks providers in order (AI_CHAIN), first
+  success wins; any failure (429/5xx/network/timeout/empty) advances.
+  The 8000-TPM 429 storm that dropped headline/tagline/header is now
+  absorbed by rung 2/3 instead of skipping components.
+- Free-only: Groq gpt-oss-120b, Gemini gemma-4-31b-it, OpenRouter
+  nvidia/nemotron-3-super-120b-a12b:free (the :free gpt-oss slug is dead;
+  enumerated live free list + structured-output flags to pick it).
+  gemma-4-26b-a4b-it answers under load but ignores JSON discipline
+  (prose, not parseable) — rejected: a 200-with-garbage is worse than a
+  retryable 503, because garbage parses nowhere and the chain can't
+  recover. 31b's demand 503s are retryable → chain advances (~30s cost,
+  bounded by the slow-verdict rule below).
+- Retry policy: same-provider retry ONLY for cheap transient faults
+  (network blips, fast 5xx < ~25s). 429s and slow verdicts advance
+  immediately — a 500ms sleep won't clear a quota or demand spike.
+- Gemini gets OpenAI-messages → systemInstruction/contents conversion +
+  JSON mime (its responseSchema subset can't express our null-unions, so
+  strict schemas stay Groq/OpenRouter-only; our lenient parser covers
+  Gemini output). OpenRouter reuses the OpenAI shape incl. strict with a
+  400→json_object downgrade, mirroring the client.
+- Browser contract unchanged: one POST /api/groq, response gains
+  `provider`/`attempts`; client logs which rung answered
+  (`[ai] chain ok via openrouter …`). Keys server-only, never VITE_.
+- SECURITY: Gemini + OpenRouter keys were pasted in chat (exposed) —
+  rotate both when convenient. They live only in gitignored .env.
+  Same standing reminder for the Groq key pasted earlier.
+
+## Perf/scale audit (user order): measure first, fix the hot spots
+- History snapshotted the WHOLE canvas per keystroke (text:changed →
+  full toObject+stringify into a 50-deep stack). Now trailing-800ms
+  for typing only; discrete ops stay instant. Proven by type-check
+  (5 keystrokes → 0 snapshots, then exactly 1; undo coherent).
+- Every network fetch now has a cap: gateway 180s (existing),
+  Pollinations backend 180s / direct 120s (new), image probe 30s (new,
+  same fallback dims). Hangs become skips, never stalls.
+- Deliberately NOT changed: pg pool default (10 fits single-user
+  local), no clustering/rate-limit (local tool; reassess if multi-user),
+  no image dedupe (seeds intentionally vary repeats), list LIMIT 100,
+  manualChunks fabric + lazy bg-removal/jspdf/tesseract (23MB onnx wasm
+  + duplicate ort chunks ship as lazy files, not initial bundle —
+  dependency packaging, not worth fighting).
+- Theory/gradient package (type scale, palette discipline, focal rules,
+  gradient DSL) inspected and queued behind this audit, not dropped.
+
+## Local llama server eliminated (user order)
+- Killed all llama-server processes; deleted fetchLocalChat, the local
+  rungs, think/timeoutMs plumbing, and local docs (.env.example,
+  README). Provider order is now groq ↔ conductor only. Rung errors
+  fixed too: non-retryable stops the chain but the PRIMARY error
+  surfaces (previously a fallback's error masked it).
+- Disk files under E:\oovi-local (bin + 2.4GB gguf) deliberately left
+  in place — say the word and they're gone, no re-download otherwise.
+
+## Groq strict schemas + crowded-plan replan (first live Groq poster)
+- Groq strict rejects schemas whose properties aren't ALL required:
+  every field is now required, optionals as null-unions, and the
+  validator strips nulls before checking (false/0 preserved). Kills the
+  400-then-downgrade round-trip on every component call.
+- Reasoning effort wired end to end (plan medium, components low —
+  verified accepted first): the main TPM lever on the 8K-tier key,
+  alongside component maxTokens 2000→1200.
+- Tidy displacement capped at 120px/object (overlap shoves only;
+  edge slide-backs stay unbounded). Beyond the cap the pair is named
+  unresolvable, not rearranged into new overlaps (+290px cascades seen).
+- Mass overlap (≥5 error overlaps) replans once like underbuilt plans
+  ("stagger boxes, bars behind their text"); sanitize warns when
+  planned boxes already overlap (decoration exempt — bleed is legal).
+
+## Groq GPT-OSS provider (server-side key, strict schemas)
+- Model: openai/gpt-oss-120b first (500 tok/s, reasoning-grade plans),
+  20b as the cheap alt. Both guarantee strict json_schema per Groq docs;
+  plan uses a closed schema, components use anyOf-of-6 with automatic
+  downgrade to json_object on 400 (nested groups can't recurse in strict
+  mode). Repair loop stays as backstop either way.
+- Key NEVER reaches the browser: new api/groq.js proxy (same shape as
+  asset/photos, Vercel-compatible), GROQ_API_KEY in gitignored .env
+  only, placeholder in .env.example. No temperature param (docs
+  examples omit it; reasoning models are picky). max_completion_tokens
+  caps spend (plan 4000, components 2000).
+- Provider rungs: VITE_AI_PROVIDER=groq → groq, conductor, local;
+  local → local, conductor; default unchanged (conductor, local) — no
+  silent reroute. Fallback only on retryable; first error surfaces.
+- Community backs the shape: constrained decoding kills malformed
+  output at the token layer, but always validate client-side anyway
+  (thinking models have shipped unconstrained replies with HTTP 200).
+
+## Local fallback: llama.cpp + Qwen3-4B, Conductor stays primary
+- User chose llama.cpp over Ollama for the box (7.9GB RAM, CPU-only,
+  4 cores): no resident daemon, ~2.6GB mmap'd weight only, portable
+  exe + gguf under E:\oovi-local (never in the repo). Community
+  consensus backs it: Ollama IS llama.cpp underneath; same file + same
+  settings run within noise, raw llama.cpp wins on control (context,
+  slots, KV quant), Ollama on convenience.
+- Model: Qwen3-4B Q4_K_M — the file the community benchmarks (single
+  user competitive, Apache 2.0, strong instruction/JSON following).
+  Server: `-c 4096 -np 3 -t 4` (small ctx for our short prompts, 3
+  slots matching the fan-out, CPU threads = cores).
+- Contract: responses go through the existing regexRepair + validate +
+  correction loop unchanged (response_format json_object, not strict
+  schema — escalate only if malformed rate demands it). Thinking:
+  plan thinks, components get /no_think.
+- Routing: VITE_AI_PROVIDER=local flips order; default keeps Conductor
+  first and falls back to local ONLY on retryable errors
+  (network/timeout/5xx + provider-admitted success:false — 4xx config
+  errors surface, never masked). No local server running = fast
+  connection-refused, no hangs. Ops: never pipe a server through
+  `Select-Object -First` (pipeline close kills it — learned the hard way).
+- Measured CPU reality (4-core, Qwen3-4B Q4_K_M): prefill ~4 tok/s,
+  gen ~3 tok/s. A 1K-token component prompt needs ~4 min before its
+  first token — so local caps are per call type (plan 20 min thinking,
+  components 10 min /no_think), not the 180s gateway cap. Full local
+  poster ≈ 30–45 min: 5–10× slower than a healthy gateway, available
+  when the gateway is down. Server slots sized to fit: -c 8192 -np 2
+  (4096/slot covers plan prompt + thinking + output; 1536/slot
+  truncated plans).
+
+## Speed: 3-wide fan-out with 2s request gaps (supersedes half-parallel)
+- Half-parallel burst-hung the gateway, so per user rule: max 3 concurrent
+  tasks, consecutive request starts 2s apart (slot k starts at k*2s).
+- Batch-apply left the canvas blank for 10+ minutes, so results now paint
+  AS THEY LAND (apply runs inside the worker on settle). Final stacking
+  still matches the plan exactly: each piece inserts at its plan-rank slot
+  (op.at / addImageElement at-param, element-granular at+k), undo entries
+  stay one-per-component.
+- Logs everywhere per user request: gateway calls (host/model/chars/ms),
+  plan + component summaries with attempts and timings, fan-out slot
+  starts, fetch outcomes, pass quality, replan triggers, tidy moves.
+- Sidebar overflow from the user's screenshot (cut slider label, buttons
+  clipped at viewport bottom, rail reading as "cut"): measured idle layout
+  fits, so the failures hit at generation tallness. Hardened the scroll
+  chains instead of chasing one element — `.left-panels` and `.inspector`
+  get the missing `min-height: 0` + internal scroll, range inputs get
+  `min-width: 0` so the slider squeezes instead of the label clipping,
+  prompt textarea + side blocks get `min-width: 0`, and `body` gets
+  `overflow-x: clip` so no transient wide element can shift the grid.
+  Tokens untouched; layout-only.
+- Image path split into pure `_fetchImageComponent` + ordered add;
+  `_generateImageComponent` removed (single caller, now dead).
+- Gateway fetch capped at 180s via AbortSignal.timeout: hangs become
+  quick per-component skips instead of stalling whole runs.
+- Roles were silently dropped end-to-end (prompt demands them, model
+  omits them, sanitize discarded even present ones): sanitize now
+  preserves valid roles and infers the rest from the id, image-kind
+  defaulting to hero.
+- Correction retries only fix malformed model output, never dead
+  networks: fetch failures in plan/component loops now throw immediately
+  (one 180s cap max per call) instead of burning attempts × timeout on a
+  hung gateway. Plan fallback chat line carries the failure reason.
+
+## Density without noise (ChatGPT-vs-Oovi poster gap + overlap noise)
+- User showed more content arriving as overlapping noise. Fix is NOT a
+  bigger budget alone: collisions get a deterministic resolver,
+  under-generation gets a bounded replan. Split by error code —
+  sparse/missing/hero/headline → ONE replan with correction note;
+  overlap/overflow → `Canvas.resolveCollisions()` (translation only,
+  text moves, shapes/images treated as intentional layers, single
+  history entry, unresolvable pairs reported for hand-fixing).
+- Budget raised modestly, not maximally: 30→60 top-level elements,
+  10→12 components, 1–6→1–8 per component, ≤2 images. Density is meant
+  to live in GROUPS (cap counts top-level only; children validated but
+  uncapped) — prompt now mandates one group per card/row.
+- Renderer could already do more than the prompt advertised (rect stroke,
+  text charSpacing, angle). Validator allowlist keeps those fields, so
+  the fix advertises them: text stroke/strokeWidth/angle/fontFamily in
+  the Types line, outline rule (stroke = background, ≈fontSize/10,
+  paintFirst in renderer), multicolor headlines as adjacent runs,
+  monospace stack for pixel themes. No gradient support added —
+  reference poster is flat colors + outline; gradients were a red herring.
+- `window.__oovi` probe handle was found MISSING (old probes ran
+  vacuous on `?.` chains). Restored DEV-only in main.js, verified
+  stripped from the prod bundle. Probe scripts take OOVI_PORT (5173 is
+  taken by another project on this machine).
+
 ## Live-fire review fixes (sparse/left-bunched/hallucinated poster)
 - Balance is measured, not assumed: inked-mass left/right ratio <0.35
   (at ≥25% coverage) warns. Theme can't ride DSL shapes, so textured

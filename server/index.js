@@ -3,6 +3,7 @@ import http from 'node:http';
 import pg from 'pg';
 import assetHandler from '../api/asset.js';
 import photosHandler from '../api/photos.js';
+import groqHandler from '../api/groq.js';
 
 // NOTE: stdlib http, not Express — the environment's npm tree cannot
 // materialize express's transitive deps (see DECISIONS). 8 JSON routes
@@ -120,8 +121,8 @@ const server = http.createServer(async (req, res) => {
       }
     }
 
-    if (path === '/api/asset' || path === '/api/photos') {
-      const handler = path === '/api/asset' ? assetHandler : photosHandler;
+    if (path === '/api/asset' || path === '/api/photos' || path === '/api/groq') {
+      const handler = path === '/api/asset' ? assetHandler : path === '/api/photos' ? photosHandler : groqHandler;
       if (req.method !== 'GET' && req.method !== 'POST') return finish(405, { error: 'GET or POST only' });
       const body = req.method === 'POST' ? await readBody(req).catch(() => undefined) : undefined;
       await handler(...adapt(req, res, query, body));

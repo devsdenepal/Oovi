@@ -65,10 +65,9 @@ function checkProps(props, canvas, errors, prefix) {
         errors.push(`${prefix}: prop "${key}" must be a number`);
         return false;
       }
-      if ((key === "x" || key === "y") && v < 0) {
-        errors.push(`${prefix}: prop "${key}" must be >= 0`);
-        return false;
-      }
+      // Positions accept any finite number: top-level objects may sit
+      // partially off-canvas and nested children are group-relative
+      // (negative is routine). Sizes stay bounded below.
       if ((key === "width" || key === "height" || key === "radius") && v <= 0) {
         errors.push(`${prefix}: prop "${key}" must be > 0`);
         return false;

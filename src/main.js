@@ -49,4 +49,8 @@ if (route.view === "home") {
     const status = document.getElementById("gen-status");
     if (status) status.textContent = `Bootstrap failed: ${error.message}`;
   });
+
+  // DEV-only probe handle (mirrors Excalidraw's window.h). import.meta.env.DEV
+  // compiles to false in production, so minifiers drop this branch entirely.
+  if (import.meta.env.DEV) window.__oovi = { app };
 }

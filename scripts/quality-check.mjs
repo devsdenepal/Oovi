@@ -1,4 +1,9 @@
 import { evaluateDesign } from '../src/ai/quality.js';
+import { register } from 'node:module';
+
+// src/ uses extensionless relative imports — resolve them for plain node.
+register(new URL('./ext-loader.mjs', import.meta.url));
+const { validateDesign } = await import('../src/design/designValidator.js');
 
 let failures = 0;
 const check = (name, cond, extra = '') => {
@@ -124,6 +129,179 @@ const smallHero = {
 };
 const r11 = evaluateDesign(smallHero, { components: [{ id: 'hero-art', kind: 'image', role: 'hero', box: { x: 1000, y: 60, width: 100, height: 100 } }] });
 check('small hero box warns', codes(r11).includes('warn:hero'), JSON.stringify(codes(r11)));
+
+// 12. Group children (center frame) flatten to the packed origin.
+const grouped = {
+  canvas: { width: 1200, height: 630, background: '#FFFFFF' },
+  elements: [
+    { id: 'headline', type: 'text', role: 'headline', content: 'Grouped Poster Title Here', x: 400, y: 60, width: 500, fontSize: 72, fontWeight: 800, fill: '#111111' },
+    { id: 'card', type: 'group', x: 100, y: 300, children: [
+      { id: 'card-bg', type: 'rectangle', x: -150, y: -50, width: 300, height: 100, fill: '#EEEEEE' },
+      { id: 'card-tx', type: 'text', content: 'Card label', x: -140, y: -40, width: 280, fontSize: 28, fontWeight: 400, fill: '#111111' },
+    ] },
+  ],
+};
+const r12 = evaluateDesign(grouped, {});
+check(
+  'group flattens to packed origin',
+  !codes(r12).some((c) => c.startsWith('error:overflow') || c === 'error:overlap'),
+  JSON.stringify(codes(r12)),
+);
+
+// 13. Off-palette fills warn (accent rationed, freelance hues flagged).
+const offPalette = {
+  canvas: { width: 1200, height: 630, background: '#FFFFFF' },
+  elements: [
+    { id: 'headline', type: 'text', role: 'headline', content: 'Palette Test Title Here', x: 48, y: 60, width: 600, fontSize: 72, fontWeight: 800, fill: '#111111' },
+    { id: 'rogue-rect', type: 'rectangle', x: 700, y: 60, width: 200, height: 100, fill: '#00FF00' },
+    { id: 'rogue-text', type: 'text', content: 'Off palette line', x: 48, y: 300, width: 300, fontSize: 24, fontWeight: 400, fill: '#123456' },
+  ],
+};
+const r13 = evaluateDesign(offPalette, { palette: { background: '#FFFFFF', ink: '#111111', accent: '#FFC400' } });
+check('off-palette warns', codes(r13).filter((c) => c === 'warn:palette').length >= 2, JSON.stringify(codes(r13)));
+
+// 14. Three typefaces warn (two max: display + text).
+const threeFonts = {
+  canvas: { width: 1200, height: 630, background: '#FFFFFF' },
+  elements: [
+    { id: 'headline', type: 'text', role: 'headline', content: 'Font Title', x: 48, y: 60, width: 500, fontSize: 72, fontWeight: 800, fill: '#111111' },
+    { id: 'sub-a', type: 'text', content: 'Georgia subline here', x: 48, y: 200, width: 400, fontSize: 28, fontWeight: 400, fill: '#111111', fontFamily: 'Georgia' },
+    { id: 'sub-b', type: 'text', content: 'Mono subline here', x: 48, y: 260, width: 400, fontSize: 24, fontWeight: 400, fill: '#111111', fontFamily: 'Courier New' },
+  ],
+};
+check('three fonts warn', codes(evaluateDesign(threeFonts, {})).includes('warn:typography'));
+
+// 15. Dead-center hero warns (backdrop exempt, thirds rule).
+const centeredHero = {
+  canvas: { width: 1200, height: 630, background: '#14101F' },
+  elements: [
+    { id: 'headline', type: 'text', role: 'headline', content: 'Centered Hero Title', x: 350, y: 40, width: 500, fontSize: 60, fontWeight: 800, fill: '#FFFFFF' },
+    { id: 'hero', type: 'image', role: 'hero', x: 400, y: 115, width: 400, height: 400, src: 'data:image/png;base64,xx' },
+  ],
+};
+check('dead-center hero warns', codes(evaluateDesign(centeredHero, { expectHero: true })).includes('warn:focal'));
+
+// 16. Competing dominants warn (big hero AND big headline).
+const twoGiants = {
+  canvas: { width: 1200, height: 630, background: '#14101F' },
+  elements: [
+    { id: 'headline', type: 'text', role: 'headline', content: 'Giant Headline Title', x: 600, y: 60, width: 520, fontSize: 72, fontWeight: 800, fill: '#FFFFFF' },
+    { id: 'hero', type: 'image', role: 'hero', x: 60, y: 60, width: 520, height: 320, src: 'data:image/png;base64,xx' },
+  ],
+};
+check('competing dominants warn', codes(evaluateDesign(twoGiants, { expectHero: true })).includes('warn:focal'));
+
+// 17. Spacious but structured: sparse demotes to warn, no errors.
+const spacious = {
+  canvas: { width: 1200, height: 630, background: '#14101F' },
+  elements: [
+    { id: 'headline', type: 'text', role: 'headline', content: 'Spacious Poster Title', x: 64, y: 80, width: 520, fontSize: 64, fontWeight: 800, fill: '#FFFFFF' },
+    { id: 'tagline', type: 'text', role: 'tagline', content: 'A calm supporting line of text', x: 64, y: 280, width: 480, fontSize: 24, fontWeight: 400, fill: '#FFFFFF' },
+    { id: 'details', type: 'text', role: 'details', content: 'October, somewhere, sometime', x: 64, y: 340, width: 480, fontSize: 20, fontWeight: 400, fill: '#FFC400' },
+    { id: 'hero', type: 'image', role: 'hero', x: 800, y: 100, width: 280, height: 280, src: 'data:image/png;base64,xx' },
+  ],
+};
+const r17 = evaluateDesign(spacious, {
+  expectHero: true,
+  palette: { background: '#14101F', ink: '#FFFFFF', accent: '#FFC400' },
+});
+check(
+  'spacious downgrades to warn',
+  codes(r17).includes('warn:sparse') && !r17.issues.some((i) => i.severity === 'error'),
+  JSON.stringify(codes(r17)),
+);
+
+// 18. White text on a white bar (dark canvas) errors on the backdrop.
+const barWash = {
+  canvas: { width: 1200, height: 630, background: '#14101F' },
+  elements: [
+    { id: 'headline', type: 'text', role: 'headline', content: 'Bar Wash Title Here', x: 64, y: 60, width: 500, fontSize: 64, fontWeight: 800, fill: '#FFFFFF' },
+    { id: 'bar', type: 'rectangle', x: 48, y: 280, width: 500, height: 80, fill: '#FFFFFF' },
+    { id: 'washed', type: 'text', content: 'Dissolved line of text', x: 64, y: 296, width: 400, fontSize: 28, fontWeight: 400, fill: '#FFFFFF' },
+  ],
+};
+check('white-on-white bar errors', codes(evaluateDesign(barWash, {})).includes('error:contrast'), JSON.stringify(codes(evaluateDesign(barWash, {}))));
+
+// 19. Dark text on a dark bar errors.
+const barDark = {
+  canvas: { width: 1200, height: 630, background: '#FFFFFF' },
+  elements: [
+    { id: 'headline', type: 'text', role: 'headline', content: 'Dark Bar Title Here', x: 64, y: 60, width: 500, fontSize: 64, fontWeight: 800, fill: '#111111' },
+    { id: 'bar', type: 'rectangle', x: 48, y: 280, width: 500, height: 80, fill: '#1A1A2E' },
+    { id: 'sunk', type: 'text', content: 'Sunk line of text', x: 64, y: 296, width: 400, fontSize: 28, fontWeight: 400, fill: '#14101F' },
+  ],
+};
+check('dark-on-dark bar errors', codes(evaluateDesign(barDark, {})).includes('error:contrast'));
+
+// 20. Text failing across a whole gradient errors.
+const barGradBad = {
+  canvas: { width: 1200, height: 630, background: '#14101F' },
+  elements: [
+    { id: 'headline', type: 'text', role: 'headline', content: 'Gradient Bar Title', x: 64, y: 60, width: 500, fontSize: 64, fontWeight: 800, fill: '#FFFFFF' },
+    { id: 'bar', type: 'rectangle', x: 48, y: 280, width: 500, height: 80, fill: '#FFFFFF',
+      gradient: { type: 'linear', x1: 0, y1: 0, x2: 1, y2: 0, stops: [{ offset: 0, color: '#FFFFFF' }, { offset: 1, color: '#F0F0F0' }] } },
+    { id: 'washed', type: 'text', content: 'Dissolved on gradient', x: 64, y: 296, width: 400, fontSize: 28, fontWeight: 400, fill: '#FFFFFF' },
+  ],
+};
+check('gradient wash errors', codes(evaluateDesign(barGradBad, {})).includes('error:contrast'));
+
+// 21. Dark text on a light gradient passes clean.
+const barGradGood = {
+  canvas: { width: 1200, height: 630, background: '#14101F' },
+  elements: [
+    { id: 'headline', type: 'text', role: 'headline', content: 'Gradient Bar Title', x: 64, y: 60, width: 500, fontSize: 64, fontWeight: 800, fill: '#FFFFFF' },
+    { id: 'bar', type: 'rectangle', x: 48, y: 280, width: 500, height: 80, fill: '#FFFFFF',
+      gradient: { type: 'linear', x1: 0, y1: 0, x2: 1, y2: 0, stops: [{ offset: 0, color: '#FFFFFF' }, { offset: 1, color: '#FFC400' }] } },
+    { id: 'crisp', type: 'text', content: 'Crisp on gradient', x: 64, y: 296, width: 400, fontSize: 28, fontWeight: 400, fill: '#111111' },
+  ],
+};
+{
+  const cs = codes(evaluateDesign(barGradGood, {}));
+  check('good gradient contrast clean', !cs.some((c) => c.startsWith('error:contrast') || c.startsWith('warn:contrast')), JSON.stringify(cs));
+}
+
+// 22. Text over artwork warns exactly once.
+const onArt = {
+  canvas: { width: 1200, height: 630, background: '#14101F' },
+  elements: [
+    { id: 'headline', type: 'text', role: 'headline', content: 'Art Backdrop Title', x: 64, y: 60, width: 500, fontSize: 64, fontWeight: 800, fill: '#FFFFFF' },
+    { id: 'photo', type: 'image', role: 'hero', x: 600, y: 100, width: 400, height: 400, src: 'data:image/png;base64,xx' },
+    { id: 'cap-a', type: 'text', content: 'Caption one here', x: 650, y: 200, width: 300, fontSize: 24, fontWeight: 400, fill: '#FFFFFF' },
+    { id: 'cap-b', type: 'text', content: 'Caption two here', x: 650, y: 260, width: 300, fontSize: 24, fontWeight: 400, fill: '#FFFFFF' },
+  ],
+};
+{
+  const cs = codes(evaluateDesign(onArt, { expectHero: true }));
+  check('artwork backdrop warns once', cs.filter((c) => c === 'warn:contrast').length === 1, JSON.stringify(cs));
+}
+
+// 23. Validator: group-relative negatives + off-canvas positions open.
+// (Save persists them — Fabric children are group-relative, drags go
+// off-canvas — so rejecting them bricked saved projects.)
+const negGroup = {
+  canvas: { width: 1200, height: 630, background: '#FFFFFF' },
+  elements: [
+    { id: 'g', type: 'group', x: -20, y: 100, children: [
+      { id: 'g-bg', type: 'rectangle', x: -150, y: -50, width: 300, height: 100, fill: '#EEEEEE' },
+      { id: 'g-tx', type: 'text', content: 'Card label here', x: -140, y: -40, width: 280, fontSize: 24, fontWeight: 400, fill: '#111111' },
+    ] },
+    { id: 'off', type: 'rectangle', x: -30, y: 500, width: 200, height: 80, fill: '#FFC400' },
+  ],
+};
+{
+  const v = validateDesign(negGroup);
+  check('negative group children + off-canvas open', v.ok === true, JSON.stringify(v.errors || []));
+}
+check('negative width still rejected', validateDesign({
+  canvas: { width: 1200, height: 630, background: '#FFFFFF' },
+  elements: [
+    { id: 'bad', type: 'rectangle', x: 10, y: 10, width: -50, height: 80, fill: '#FFC400' },
+  ],
+}).ok === false);
+check('empty design still rejected (AI must produce something)', validateDesign({
+  canvas: { width: 1200, height: 630, background: '#FFFFFF' },
+  elements: [],
+}).ok === false);
 
 console.log(failures === 0 ? 'QUALITY CHECK DONE' : `QUALITY CHECK: ${failures} FAILURES`);
 process.exit(failures === 0 ? 0 : 1);

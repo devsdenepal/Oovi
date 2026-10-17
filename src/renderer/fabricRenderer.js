@@ -1,4 +1,4 @@
-import { Canvas, Textbox, Rect, Circle, Line, Group, FabricImage } from "fabric";
+import { Canvas, Textbox, Rect, Circle, Line, Group, FabricImage, Point, Gradient } from "fabric";
 
 /**
  * Fabric.js renderer.
@@ -62,7 +62,63 @@ function commonOptions(element) {
     designId: element.id,
     elementRole: element.role || null,
     elementType: element.type,
+    // Gradient round-trip: fill carries the live paint (string or Gradient
+    // instance); these two always carry the DSL originals for toDesign and
+    // history (see HISTORY_PROPS).
+    designFill: typeof element.fill === "string" ? element.fill : null,
+    designGradient: element.gradient && typeof element.gradient === "object" ? element.gradient : null,
   };
+}
+
+/**
+ * DSL fill → Fabric paint. A validated gradient descriptor becomes a live
+ * Gradient (percentage units, bbox-relative); otherwise the plain color.
+ */
+function toFabricFill(element) {
+  const g = element.gradient;
+  if (!g || typeof g !== "object") return element.fill;
+  // Fabric percentage coords are NUMBERS (1 = 100% of bbox) — "50%"
+  // strings reach createLinearGradient verbatim and throw non-finite,
+  // bricking the whole canvas render. Clamp to [0,1], never negative
+  // (negative radii throw too).
+  const frac = (v, fb) => {
+    const n = typeof v === "number" && Number.isFinite(v) ? v : fb;
+    return Math.max(0, Math.min(1, n));
+  };
+  const coords =
+    g.type === "radial"
+      ? { x1: frac(g.cx, 0.5), y1: frac(g.cy, 0.5), r1: 0, x2: frac(g.cx, 0.5), y2: frac(g.cy, 0.5), r2: frac(g.r, 0.5) }
+      : { x1: frac(g.x1, 0), y1: frac(g.y1, 0), x2: frac(g.x2, 1), y2: frac(g.y2, 0) };
+  try {
+    const paint = new Gradient({
+      type: g.type === "radial" ? "radial" : "linear",
+      gradientUnits: "percentage",
+      coords,
+      colorStops: (Array.isArray(g.stops) ? g.stops : []).map((s) => ({ offset: s.offset, color: s.color })),
+    });
+    // Fabric defers the real canvas calls to render time, outside this
+    // try — so smoke-test the paint NOW on a scratch context. Anything
+    // pathological (bad color, wild offset) throws here and degrades to
+    // the solid fill instead of bricking the design on open.
+    smokeTestPaint(paint);
+    return paint;
+  } catch {
+    return element.fill;
+  }
+}
+
+// Reuses one scratch context for paint smoke tests (browser only).
+let _smokeCtx = null;
+function smokeTestPaint(paint) {
+  if (typeof document === "undefined") return;
+  if (!_smokeCtx) {
+    const c = document.createElement("canvas");
+    c.width = 8;
+    c.height = 8;
+    _smokeCtx = c.getContext("2d");
+  }
+  if (!_smokeCtx) return;
+  paint.toLive(_smokeCtx);
 }
 
 function createText(element) {
@@ -72,8 +128,13 @@ function createText(element) {
     ...commonOptions(element),
     fontSize: element.fontSize,
     fontWeight: element.fontWeight ?? 400,
-    fill: element.fill,
+    fill: toFabricFill(element),
     fontFamily: element.fontFamily || "Arial",
+    // Outline channel (pixel-art/funky headlines): off unless the model
+    // asks. paintFirst keeps the fill crisp over the stroke.
+    stroke: element.stroke || null,
+    strokeWidth: element.strokeWidth ?? 0,
+    paintFirst: "stroke",
     textAlign: element.textAlign || "left",
     lineHeight: element.lineHeight ?? 1.2,
     charSpacing: element.charSpacing || 0,
@@ -88,7 +149,7 @@ function createRectangle(element) {
     ...commonOptions(element),
     width: element.width,
     height: element.height,
-    fill: element.fill,
+    fill: toFabricFill(element),
     rx: element.cornerRadius ?? 0,
     ry: element.cornerRadius ?? 0,
     stroke: element.stroke || null,
@@ -101,7 +162,7 @@ function createCircle(element) {
   const circle = new Circle({
     ...commonOptions(element),
     radius: element.radius,
-    fill: element.fill,
+    fill: toFabricFill(element),
     stroke: element.stroke || null,
     strokeWidth: element.strokeWidth ?? 0,
   });
@@ -187,6 +248,34 @@ function createImagePlaceholder(element) {
 }
 
 /**
+ * Re-applies recorded gradients after a native loadFromJSON revive.
+ * History snapshots serialize the live Gradient instance as a plain
+ * object, which fabric does not turn back into paint on its own — but
+ * the DSL originals ride along (HISTORY_PROPS), so re-mapping them is
+ * exact. Walks group children too.
+ */
+export function hydrateGradients(canvas) {
+  if (!canvas || typeof canvas.getObjects !== "function") return;
+  const walk = (objs) => {
+    for (const o of objs || []) {
+      if (!o || typeof o !== "object") continue;
+      if (o.designGradient && !(o.fill instanceof Gradient)) {
+        o.fill = toFabricFill({ fill: typeof o.fill === "string" ? o.fill : o.designFill, gradient: o.designGradient });
+        if (typeof o.setCoords === "function") o.setCoords();
+      }
+      if (typeof o.getObjects === "function") {
+        try {
+          walk(o.getObjects());
+        } catch {
+          // ignore exotic containers
+        }
+      }
+    }
+  };
+  walk(canvas.getObjects());
+}
+
+/**
  * Swaps every pending image placeholder on the canvas for its loaded
  * pixels (stretched exactly to the DSL box), preserving stack order.
  * @param {fabric.Canvas} canvas
@@ -268,7 +357,7 @@ export function canvasToDesign(canvas) {
   const elements = [];
   for (const obj of objects) {
     if (obj.designId === undefined) continue;
-    elements.push(objectToDsl(obj));
+    elements.push(objectToDsl(obj, absoluteOrigin(obj)));
   }
   return {
     canvas: {
@@ -280,13 +369,32 @@ export function canvasToDesign(canvas) {
   };
 }
 
-function objectToDsl(obj) {
+/**
+ * Canvas-space origin of an object. Members of an ActiveSelection store
+ * coordinates relative to the selection (v6 behavior), so reading
+ * obj.left/top raw makes persist, validate and quality depend on what
+ * happens to be selected — the exact corruption the resolver runs exposed
+ * (moved pieces serialized hundreds of px off). Ancestor matrices compose,
+ * so nested groups resolve exactly too.
+ */
+function absoluteOrigin(obj) {
+  if (!obj.group) return { x: obj.left, y: obj.top };
+  try {
+    const p = new Point(obj.left, obj.top).transform(obj.group.calcTransformMatrix());
+    if (Number.isFinite(p.x) && Number.isFinite(p.y)) return { x: p.x, y: p.y };
+  } catch {
+    // fall through to raw coords
+  }
+  return { x: obj.left, y: obj.top };
+}
+
+function objectToDsl(obj, origin) {
   const base = {
     id: obj.designId,
     type: obj.elementType || obj.type,
     role: obj.elementRole || undefined,
-    x: obj.left,
-    y: obj.top,
+    x: origin ? origin.x : obj.left,
+    y: origin ? origin.y : obj.top,
     angle: obj.angle,
     opacity: obj.opacity,
     // Sparse: only present when non-default, keeping AI output clean.
@@ -300,7 +408,8 @@ function objectToDsl(obj) {
       base.width = obj.width;
       base.fontSize = obj.fontSize;
       base.fontWeight = obj.fontWeight;
-      base.fill = obj.fill;
+      base.fill = obj.designFill || obj.fill;
+      base.gradient = obj.designGradient || undefined;
       base.textAlign = obj.textAlign;
       base.lineHeight = obj.lineHeight;
       base.fontFamily = obj.fontFamily;
@@ -310,12 +419,14 @@ function objectToDsl(obj) {
     case "rectangle":
       base.width = obj.width;
       base.height = obj.height;
-      base.fill = obj.fill;
+      base.fill = obj.designFill || obj.fill;
+      base.gradient = obj.designGradient || undefined;
       if (obj.rx) base.cornerRadius = obj.rx;
       break;
     case "circle":
       base.radius = obj.radius;
-      base.fill = obj.fill;
+      base.fill = obj.designFill || obj.fill;
+      base.gradient = obj.designGradient || undefined;
       break;
     case "line":
       base.x2 = obj.x2;
@@ -324,7 +435,7 @@ function objectToDsl(obj) {
       base.strokeWidth = obj.strokeWidth;
       break;
     case "group":
-      base.children = obj.getObjects().map(objectToDsl);
+      base.children = obj.getObjects().map((k) => objectToDsl(k));
       break;
     case "image":
       base.width = Math.round((obj.width || 0) * (obj.scaleX || 1));

@@ -6,3 +6,7 @@ dist
 .DS_Store
 .vite
 .vercel
+# Local scratch artifacts (SQLite experiments, dumps)
+generations.db
+*.sqlite
+*.sqlite3

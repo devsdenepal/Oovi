@@ -6,6 +6,8 @@
  * through canvas.loadFromJSON().
  */
 
+import { hydrateGradients } from "../renderer/fabricRenderer";
+
 const MAX_HISTORY = 50;
 
 /**
@@ -17,6 +19,8 @@ const HISTORY_PROPS = [
   "designId",
   "elementRole",
   "elementType",
+  "designFill",
+  "designGradient",
   "locked",
   "designSrc",
   "pendingSrc",
@@ -59,6 +63,9 @@ export class HistoryManager {
       // fabric 6: loadFromJSON returns a promise (2nd arg is a per-object
       // reviver, not a completion callback). Await the real completion.
       await this.canvas.loadFromJSON(state);
+      // Native revive leaves gradient paints as plain objects — re-apply
+      // the recorded DSL gradients (exact; see hydrateGradients).
+      hydrateGradients(this.canvas);
       this.canvas.renderAll();
     } finally {
       this.saving = false;

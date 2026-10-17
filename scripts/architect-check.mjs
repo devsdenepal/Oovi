@@ -1,14 +1,17 @@
 import { chromium } from 'playwright';
 
-const browser = await chromium.launch();
+const PORT = process.env.OOVI_PORT || 5173;
+const browser = await chromium.launch({ headless: true });
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
 page.on('pageerror', (e) => console.log('PAGEERROR:', e.message));
-await page.goto('http://localhost:5173/?mock=1#/design/new', { waitUntil: 'networkidle' });
+await page.goto(`http://localhost:${PORT}/?mock=1#/design/new`, { waitUntil: 'networkidle' });
 await page.waitForSelector('#canvas-holder', { timeout: 20000 });
 await page.waitForTimeout(1000);
 await page.click('[data-ltab="reference"]');
 await page.click('#generate-btn');
-await page.waitForTimeout(5000);
+// Progressive placement + staggered starts: wait on real state, not a timer.
+await page.waitForFunction(() => window.__oovi?.app?.state?.generating === true, { timeout: 15000 });
+await page.waitForFunction(() => window.__oovi?.app?.state?.generating === false, { timeout: 180000 });
 const r = await page.evaluate(() => {
   const q = (s) => document.querySelector(s);
   return {

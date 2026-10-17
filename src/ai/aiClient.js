@@ -112,14 +112,25 @@ function parseJsonLenient(text) {
  * Marks an error as a network/CORS failure so callers can retry through
  * the same-origin proxy. CORS blockages surface as a fetch TypeError
  * ("Failed to fetch"), indistinguishable from a plain network error.
+ * Network errors are also fallback-eligible (retryable): a dead gateway
+ * is exactly when the local model should take over.
  */
 function networkError(message) {
   const error = new Error(message);
   error.isNetworkError = true;
+  error.retryable = true;
   return error;
 }
 
 async function fetchAiconductor(url, token, model, prompt) {
+  const tStart = Date.now();
+  const host = String(url || "").replace(/^https?:\/\//, "").split("/")[0];
+  const ms = () => Date.now() - tStart;
+  console.log(`[ai] POST ${host}/generate model=${model || "default"} promptChars=${prompt.length}`);
+  const fail = (message) => {
+    console.warn(`[ai] request failed after ${ms()}ms: ${message}`);
+    return message;
+  };
   const headers = { "Content-Type": "application/json" };
   if (token) {
     headers["Authorization"] = `Bearer ${token}`;
@@ -132,13 +143,16 @@ async function fetchAiconductor(url, token, model, prompt) {
 
   let response;
   try {
+    // Fail fast: a hung gateway call must never stall a whole generation
+    // (observed ~105s/call; 3min cap turns hangs into quick retries/skips).
     response = await fetch(`${url}/generate`, {
       method: "POST",
       headers,
       body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(180000),
     });
   } catch (error) {
-    throw networkError(`AI request failed (network): ${error.message}`);
+    throw networkError(fail(`AI request failed (network): ${error.message}`));
   }
 
   if (!response.ok) {
@@ -149,43 +163,298 @@ async function fetchAiconductor(url, token, model, prompt) {
     } catch {
       // keep status text
     }
-    throw new Error(`AI request failed: ${detail}`);
+    const error = new Error(fail(`AI request failed: ${detail}`));
+    // 5xx may recover on another provider; 4xx is a config error that must
+    // surface instead of being masked by a fallback.
+    if (response.status >= 500) error.retryable = true;
+    throw error;
   }
 
   let data;
   try {
     data = await response.json();
   } catch {
-    throw new Error("AI returned a non-JSON response");
+    throw new Error(fail("AI returned a non-JSON response"));
   }
 
   if (data?.success === false) {
-    throw new Error(data?.error || "AI returned an error");
+    // Provider-admitted failure (operators down, overloaded): retryable,
+    // unlike 4xx config errors. This is the exact case the local box
+    // exists for.
+    const error = new Error(fail(data?.error || "AI returned an error"));
+    error.retryable = true;
+    throw error;
   }
 
   const text = data?.text || data?.result || data?.output || data?.content;
   if (typeof text !== "string" || text.trim() === "") {
-    throw new Error("AI returned an empty response");
+    throw new Error(fail("AI returned an empty response"));
   }
 
+  console.log(`[ai] ok ${ms()}ms respChars=${text.length}`);
   return text;
 }
 
 /**
- * Fetches model text from the AI Conductor endpoint, transparently falling
- * back to the same-origin proxy when a custom provider fails on CORS/network.
+ * Split our single-string "[System]...[User]..." prompts into real chat
+ * roles for OpenAI-compatible endpoints. Falls back to user-only.
  */
-async function fetchWithFallback(primaryUrl, token, model, prompt) {
-  const configuredUrl = (import.meta.env.VITE_AICONDUCTOR_URL || "").trim().replace(/\/+$/, "");
-  const isDefault = !configuredUrl || configuredUrl === DEFAULT_URL;
+function splitPrompt(full) {
+  const lines = String(full || "").split("\n");
+  const at = lines.findIndex((l) => l.trim() === "[User]");
+  if (at === -1) return { system: "", user: String(full || "") };
+  const sys = lines.slice(0, at).filter((l) => l.trim() !== "[System]");
+  return { system: sys.join("\n").trim(), user: lines.slice(at + 1).join("\n").trim() };
+}
+
+/** All validator-tolerated styling fields. Groq strict mode demands every
+ * property key appear in `required`, so optionals are nullable unions —
+ * and normalizeElement strips nulls back out before validation. */
+const OPT_COMMON = {
+  role: { type: ["string", "null"] },
+  stroke: { type: ["string", "null"] },
+  strokeWidth: { type: ["number", "null"] },
+  angle: { type: ["number", "null"] },
+  opacity: { type: ["number", "null"] },
+  visible: { type: ["boolean", "null"] },
+  locked: { type: ["boolean", "null"] },
+};
+function closedVariant(extraProps) {
+  const properties = { id: { type: "string" }, ...OPT_COMMON, ...extraProps };
+  return {
+    type: "object",
+    properties,
+    required: Object.keys(properties),
+    additionalProperties: false,
+  };
+}
+// Gradient overlay, strict-compatible: nullable object, all keys required
+// (unused coords arrive null and are defaulted by the validator).
+const GRADIENT_PROP = {
+  type: ["object", "null"],
+  properties: {
+    type: { type: "string", enum: ["linear", "radial"] },
+    x1: { type: ["number", "null"] }, y1: { type: ["number", "null"] },
+    x2: { type: ["number", "null"] }, y2: { type: ["number", "null"] },
+    cx: { type: ["number", "null"] }, cy: { type: ["number", "null"] },
+    r: { type: ["number", "null"] },
+    stops: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: { offset: { type: "number" }, color: { type: "string" } },
+        required: ["offset", "color"],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ["type", "x1", "y1", "x2", "y2", "cx", "cy", "r", "stops"],
+  additionalProperties: false,
+};
+const TEXT_VAR = closedVariant(
+  {
+    type: { type: "string", enum: ["text"] },
+    content: { type: "string" },
+    x: { type: "number" }, y: { type: "number" }, width: { type: "number" },
+    fontSize: { type: "number" }, fontWeight: { type: "number" }, fill: { type: "string" },
+    textAlign: { type: ["string", "null"] }, lineHeight: { type: ["number", "null"] },
+    fontFamily: { type: ["string", "null"] }, charSpacing: { type: ["number", "null"] },
+    gradient: GRADIENT_PROP,
+  },
+);
+const RECT_VAR = closedVariant(
+  {
+    type: { type: "string", enum: ["rectangle"] },
+    x: { type: "number" }, y: { type: "number" },
+    width: { type: "number" }, height: { type: "number" }, fill: { type: "string" },
+    cornerRadius: { type: ["number", "null"] },
+    gradient: GRADIENT_PROP,
+  },
+);
+const CIRCLE_VAR = closedVariant(
+  {
+    type: { type: "string", enum: ["circle"] },
+    x: { type: "number" }, y: { type: "number" },
+    radius: { type: "number" }, fill: { type: "string" },
+    gradient: GRADIENT_PROP,
+  },
+);
+const LINE_VAR = closedVariant(
+  {
+    type: { type: "string", enum: ["line"] },
+    x: { type: "number" }, y: { type: "number" },
+    x2: { type: "number" }, y2: { type: "number" },
+  },
+);
+const IMAGE_VAR = closedVariant(
+  {
+    type: { type: "string", enum: ["image"] },
+    x: { type: "number" }, y: { type: "number" },
+    width: { type: "number" }, height: { type: "number" }, src: { type: "string" },
+  },
+);
+// Groups nest one level (flat children; deeper nesting falls back to
+// json_object mode via the automatic downgrade below).
+const GROUP_VAR = closedVariant(
+  {
+    type: { type: "string", enum: ["group"] },
+    x: { type: "number" }, y: { type: "number" },
+    children: { type: "array", items: { anyOf: [TEXT_VAR, RECT_VAR, CIRCLE_VAR, LINE_VAR, IMAGE_VAR] } },
+  },
+);
+const COMPONENTS_SCHEMA = {
+  type: "object",
+  properties: {
+    elements: { type: "array", items: { anyOf: [TEXT_VAR, RECT_VAR, CIRCLE_VAR, LINE_VAR, IMAGE_VAR, GROUP_VAR] } },
+  },
+  required: ["elements"],
+  additionalProperties: false,
+};
+const PLAN_SCHEMA = {
+  type: "object",
+  properties: {
+    palette: {
+      type: "object",
+      properties: {
+        background: { type: "string" }, ink: { type: "string" }, accent: { type: "string" },
+      },
+      required: ["background", "ink", "accent"],
+      additionalProperties: false,
+    },
+    style: { type: "string" },
+    components: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          id: { type: "string" },
+          kind: { type: "string", enum: ["dsl", "image"] },
+          role: {
+            type: "string",
+            enum: ["header", "headline", "hero", "tagline", "details", "sections", "audience", "footer", "decoration"],
+          },
+          describe: { type: "string" },
+          asset: { type: "string", enum: ["icon", "logo", "illustration", "photo", "none"] },
+          box: {
+            type: "object",
+            properties: {
+              x: { type: "number" }, y: { type: "number" },
+              width: { type: "number" }, height: { type: "number" },
+            },
+            required: ["x", "y", "width", "height"],
+            additionalProperties: false,
+          },
+        },
+        required: ["id", "kind", "role", "describe", "asset", "box"],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ["palette", "style", "components"],
+  additionalProperties: false,
+};
+
+/**
+ * Same-origin /api/groq proxy, now a server-side provider CHAIN
+ * (groq → gemini → openrouter, order via AI_CHAIN). The browser sends one
+ * normalized request; the proxy returns whichever provider answered, so a
+ * rate-limited provider never drops a component. Keys stay server-side.
+ *
+ * Strict json_schema first; a 400 (schema unsupported by every provider)
+ * downgrades once to plain json_object, where our repair loop takes over.
+ */
+async function fetchGroqChat(prompt, opts = {}) {
+  const tStart = Date.now();
+  const ms = () => Date.now() - tStart;
+  const model = import.meta.env.VITE_GROQ_MODEL || "openai/gpt-oss-120b";
+  const { system, user } = splitPrompt(prompt);
+  const messages = [
+    ...(system ? [{ role: "system", content: system }] : []),
+    { role: "user", content: user },
+  ];
+  const post = async (schema) => {
+    let res;
+    try {
+      res = await fetch("/api/groq", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messages, model, schema, name: opts.name, maxTokens: opts.maxTokens, effort: opts.effort }),
+        signal: AbortSignal.timeout(180000),
+      });
+    } catch (error) {
+      throw networkError(`ai request failed (network): ${error.message}`);
+    }
+    let data = null;
+    try {
+      data = await res.json();
+    } catch {
+      // keep data null
+    }
+    if (!res.ok) {
+      const error = new Error(`ai request failed: ${data?.error || res.status}`);
+      if (data?.retryable) error.retryable = true;
+      error.status = res.status;
+      throw error;
+    }
+    if (typeof data?.text !== "string" || !data.text.trim()) {
+      throw new Error("ai returned an empty response");
+    }
+    // provider = which rung of the chain answered (groq/gemini/openrouter).
+    return { text: data.text, provider: data.provider || "groq" };
+  };
+  console.log(`[ai] chain POST /api/groq model=${model} promptChars=${prompt.length} strict=${opts.schema ? "schema" : "json_object"}`);
   try {
-    return await fetchAiconductor(primaryUrl, token, model, prompt);
+    const out = await post(opts.schema);
+    console.log(`[ai] chain ok via ${out.provider} ${ms()}ms respChars=${out.text.length}`);
+    return out.text;
   } catch (error) {
-    if (!isDefault && error.isNetworkError) {
-      return await fetchAiconductor(PROXY_PATH, token, model, prompt);
+    if (error && error.status === 400 && opts.schema && typeof opts.schema === "object") {
+      console.warn(`[ai] chain strict rejected (400), downgrading to json_object: ${error.message}`);
+      const out = await post("json_object");
+      console.log(`[ai] chain ok-downgraded via ${out.provider} ${ms()}ms respChars=${out.text.length}`);
+      return out.text;
     }
     throw error;
   }
+}
+
+/**
+ * Provider order: VITE_AI_PROVIDER=groq puts Groq first, anything else
+ * (default) keeps Conductor first. A failed primary falls back to the
+ * other side ONLY on retryable errors (network/timeout/5xx/429) —
+ * 4xx config errors surface instead of being masked.
+ */
+async function fetchWithFallback(primaryUrl, token, model, prompt, opts = {}) {
+  const configuredUrl = (import.meta.env.VITE_AICONDUCTOR_URL || "").trim().replace(/\/+$/, "");
+  const isDefault = !configuredUrl || configuredUrl === DEFAULT_URL;
+  const flag = (import.meta.env.VITE_AI_PROVIDER || "conductor").toLowerCase();
+  const tryConductor = async () => {
+    try {
+      return await fetchAiconductor(primaryUrl, token, model, prompt);
+    } catch (error) {
+      if (!isDefault && error.isNetworkError) {
+        return await fetchAiconductor(PROXY_PATH, token, model, prompt);
+      }
+      throw error;
+    }
+  };
+  const rungs =
+    flag === "groq"
+      ? [["groq", () => fetchGroqChat(prompt, opts)], ["conductor", tryConductor]]
+      : [["conductor", tryConductor], ["groq", () => fetchGroqChat(prompt, opts)]];
+  let firstError = null;
+  for (const [name, run] of rungs) {
+    try {
+      return await run();
+    } catch (error) {
+      firstError = firstError || error;
+      console.warn(`[ai] ${name} failed: ${error && error.message}`);
+      // Non-retryable (4xx config errors) stops the chain fast; the
+      // primary error surfaces at the end, never a fallback's.
+      if (!error || !error.retryable) break;
+    }
+  }
+  throw firstError;
 }
 
 /**
@@ -375,6 +644,18 @@ function sanitizeBox(box, canvas, warnings, id) {
   return { x, y, width, height };
 }
 
+const PLAN_ROLES = [
+  "header",
+  "headline",
+  "hero",
+  "tagline",
+  "details",
+  "sections",
+  "audience",
+  "footer",
+  "decoration",
+];
+
 function sanitizePlan(raw, canvas) {
   const warnings = [];
   const palette = {
@@ -386,7 +667,21 @@ function sanitizePlan(raw, canvas) {
   const style = String((raw && raw.style) || "").slice(0, 200);
   const seen = new Set();
   const components = [];
-  for (const c of (raw?.components || []).slice(0, 10)) {
+  // Roles drive size floors, hero checks and hierarchy warnings downstream,
+  // but models often omit them — infer from the id so the contract holds.
+  const inferRole = (id, kind) => {
+    if (/hero|focal|art|illustration|mascot/.test(id)) return "hero";
+    if (/headline|title/.test(id)) return "headline";
+    if (/header|brand|kicker|nav/.test(id)) return "header";
+    if (/tagline|subhead|subtitle|slogan/.test(id)) return "tagline";
+    if (/detail|info|date|time|venue|when|where/.test(id)) return "details";
+    if (/audience|who|attend/.test(id)) return "audience";
+    if (/foot|register|sponsor|partner|organiz/.test(id)) return "footer";
+    if (/decor|confetti|sparkle|background|texture|pattern|shape/.test(id)) return "decoration";
+    if (/section|activit|benefit|lineup|card|feature|expect/.test(id)) return "sections";
+    return kind === "image" ? "hero" : "sections";
+  };
+  for (const c of (raw?.components || []).slice(0, 12)) {
     if (!c || typeof c !== "object") continue;
     const id = String(c.id || "").trim().toLowerCase().replace(/[^a-z0-9-_]+/g, "-");
     if (!id || seen.has(id)) {
@@ -407,11 +702,32 @@ function sanitizePlan(raw, canvas) {
     components.push({
       id,
       kind,
+      role: PLAN_ROLES.includes(c.role) ? c.role : inferRole(id, kind),
       describe: String(c.describe || id).slice(0, 300),
-      asset: ["icon", "logo", "illustration", "photo"].includes(c.asset) ? c.asset : "illustration",
+      asset: ["icon", "logo", "illustration", "photo", "none"].includes(c.asset) ? c.asset : "illustration",
       ...(box ? { box } : {}),
     });
   }
+  // Planned boxes that already overlap (decoration may bleed, anything
+  // else collides by construction) — surfaced now, fixed by replan.
+  let boxClash = null;
+  for (let i = 0; i < components.length && !boxClash; i++) {
+    for (let j = i + 1; j < components.length; j++) {
+      const a = components[i];
+      const b = components[j];
+      if (!a.box || !b.box || a.role === "decoration" || b.role === "decoration") continue;
+      const A = a.box;
+      const B = b.box;
+      if (
+        Math.min(A.x + A.width, B.x + B.width) - Math.max(A.x, B.x) > 0 &&
+        Math.min(A.y + A.height, B.y + B.height) - Math.max(A.y, B.y) > 0
+      ) {
+        boxClash = `"${a.id}" and "${b.id}"`;
+        break;
+      }
+    }
+  }
+  if (boxClash) warnings.push(`plan: ${boxClash} boxes overlap — sections will collide`);
   return { palette, style, components, warnings };
 }
 
@@ -432,6 +748,8 @@ export async function planDesign(userPrompt, canvas) {
     const clean = sanitizePlan(mockPlan(userPrompt, canvas), canvas);
     return { ...clean, source: "mock" };
   }
+  const tStart = Date.now();
+  console.log(`[ai] plan start canvas=${canvas.width}x${canvas.height} promptChars=${userPrompt.length}`);
   const { primaryUrl, token, model } = gatewayEnv();
   let errors = [];
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
@@ -439,7 +757,15 @@ export async function planDesign(userPrompt, canvas) {
       attempt === 1
         ? buildPlanPrompt(userPrompt, canvas)
         : `${buildPlanPrompt(userPrompt, canvas)}\n\n[Correction]\nYour previous response was not usable JSON (${errors.join("; ")}). Return ONLY the JSON plan.`;
-    const text = await fetchWithFallback(primaryUrl, token, model, requestPrompt);
+    // Corrections only fix malformed model output — a dead network never
+    // recovers by re-asking, so fetch failures throw immediately instead
+    // of burning (attempts × timeout) on a hung gateway.
+    let text;
+    try {
+      text = await fetchWithFallback(primaryUrl, token, model, requestPrompt, { schema: PLAN_SCHEMA, name: "oovi_plan", maxTokens: 4000, effort: "medium" });
+    } catch (error) {
+      throw new Error(`Could not plan the design: ${error.message}`);
+    }
     const parsed = regexRepairJson(text);
     if (parsed === null) {
       errors = ["unrecoverable JSON"];
@@ -450,6 +776,10 @@ export async function planDesign(userPrompt, canvas) {
       errors = ["plan had no usable components"];
       continue;
     }
+    console.log(
+      `[ai] plan ok ${Date.now() - tStart}ms attempts=${attempt} ` +
+        `components=${clean.components.map((c) => `${c.id}(${c.kind}/${c.role})`).join(",")}`,
+    );
     return { ...clean, source: "ai" };
   }
   throw new Error(`Could not plan the design: ${errors.slice(0, 3).join("; ")}`);
@@ -467,6 +797,8 @@ export async function componentDesign(component, canvas, plan) {
     if (!check.ok) throw new Error(`Mock component invalid: ${check.errors.slice(0, 2).join("; ")}`);
     return { elements: check.design.elements, source: "mock" };
   }
+  const tStart = Date.now();
+  console.log(`[ai] component start ${component.id} (${component.kind}/${component.role || "?"})`);
   const { primaryUrl, token, model } = gatewayEnv();
   let errors = [];
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
@@ -474,14 +806,29 @@ export async function componentDesign(component, canvas, plan) {
       attempt === 1
         ? buildComponentPrompt(component, canvas, plan)
         : `${buildComponentPrompt(component, canvas, plan)}\n\n[Correction]\nYour previous response failed (${errors.join("; ")}). Return ONLY {"elements":[...]}.`;
-    const text = await fetchWithFallback(primaryUrl, token, model, requestPrompt);
+    // Same fail-fast rule as planning: corrections fix bad JSON, not networks.
+    let text;
+    try {
+      text = await fetchWithFallback(primaryUrl, token, model, requestPrompt, { schema: COMPONENTS_SCHEMA, name: "oovi_component", maxTokens: 1200, effort: "low" });
+    } catch (error) {
+      throw new Error(`Component "${component.id}" failed: ${error.message}`);
+    }
     const parsed = regexRepairJson(text);
     if (parsed === null || !Array.isArray(parsed.elements)) {
+      console.warn(`[ai] component retry ${component.id} attempt=${attempt} errors=unrecoverable JSON`);
       errors = ["unrecoverable JSON"];
       continue;
     }
     const check = validateDesign({ canvas, elements: parsed.elements });
-    if (check.ok) return { elements: check.design.elements, source: "ai" };
+    if (check.ok) {
+      console.log(
+        `[ai] component ok ${component.id} ${Date.now() - tStart}ms attempts=${attempt} elements=${check.design.elements.length}`,
+      );
+      return { elements: check.design.elements, source: "ai" };
+    }
+    console.warn(
+      `[ai] component retry ${component.id} attempt=${attempt} errors=${check.errors.slice(0, 2).join("; ")}`,
+    );
     errors = check.errors;
   }
   throw new Error(`Component "${component.id}" failed: ${errors.slice(0, 3).join("; ")}`);

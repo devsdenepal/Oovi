@@ -87,6 +87,14 @@ Copy `.env.example` to `.env`. Keys are **server-only** unless prefixed `VITE_`:
 
 > Never put a secret in a `VITE_`-prefixed variable. Those are bundled into the client. The browser holds no image or database credentials.
 
+### Groq GPT-OSS provider
+
+Set `VITE_AI_PROVIDER=groq` in `.env` (plus `GROQ_API_KEY`, server-side
+only) to generate with `openai/gpt-oss-120b` through the same-origin
+`/api/groq` proxy — the key never reaches the browser. Plans use strict
+schemas; components use low reasoning effort to stay inside rate limits.
+Conductor remains the fallback on retryable failures.
+
 ## Project structure
 
 ```text

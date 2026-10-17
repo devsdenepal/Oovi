@@ -1,6 +1,6 @@
 import { chromium } from 'playwright';
 
-const browser = await chromium.launch();
+const browser = await chromium.launch({ headless: true });
 const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
 const dash = await ctx.newPage();
 dash.on('pageerror', (e) => console.log('PAGEERROR:', e.message));

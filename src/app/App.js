@@ -37,11 +37,18 @@ import { DebugTabs } from "../components/DebugTabs";
 const EXAMPLE_PROMPT =
   "Create a modern product announcement for our new AI assistant. Include the company name header, a bold headline, supporting body text, a decorative rounded rectangle, and a footer with the website.";
 
-function probeImage(src) {
+function probeImage(src, timeoutMs = 30000) {
   return new Promise((resolve, reject) => {
     const img = new Image();
-    img.onload = () => resolve({ w: img.naturalWidth, h: img.naturalHeight });
-    img.onerror = () => reject(new Error("image probe failed"));
+    const timer = window.setTimeout(() => reject(new Error("image probe timed out")), timeoutMs);
+    img.onload = () => {
+      window.clearTimeout(timer);
+      resolve({ w: img.naturalWidth, h: img.naturalHeight });
+    };
+    img.onerror = () => {
+      window.clearTimeout(timer);
+      reject(new Error("image probe failed"));
+    };
     img.src = src;
   });
 }
@@ -360,7 +367,7 @@ export class App {
         plan = await planDesign(prompt, canvas);
       } catch (error) {
         console.warn("[architect] plan failed, falling back to direct:", error.message);
-        this.assistant.pushAssistant("Plan failed — falling back to one-shot generation.");
+        this.assistant.pushAssistant(`Plan failed (${error.message}) — falling back to one-shot generation.`);
         this.state.generating = false;
         return await this.onGenerateDirect(prompt);
       }
@@ -378,30 +385,196 @@ export class App {
       let done = 0;
       let failed = 0;
       let appliedTotal = 0;
-      const renderedIds = [];
-      for (const component of plan.components) {
-        done += 1;
-        if (component.kind === "image") {
-          status(`Component ${done}/${plan.components.length}: fetching ${component.id}…`);
-          if (await this._generateImageComponent(component)) {
-            appliedTotal += 1;
-            renderedIds.push(component.id);
-          } else failed += 1;
-        } else {
-          status(`Component ${done}/${plan.components.length}: building ${component.id}…`);
-          try {
-            const { elements } = await componentDesign(component, canvas, plan);
-            const res = this.editor.applyPatchOps(elements.map((element) => ({ op: "add", element })));
-            appliedTotal += res.applied.length;
-            renderedIds.push(component.id);
-            this.assistant.pushAssistant(`+ ${component.id} (${res.applied.length} pieces)`);
-          } catch (error) {
-            failed += 1;
-            this.assistant.pushAssistant(`${component.id} skipped: ${error.message}`, "error");
+      let renderedIds = [];
+      // One pass over the plan; extracted so a thin first pass can retry
+      // with corrections without duplicating the loop.
+      //
+      // Speed: component calls are independent (full plan + box + sibling
+      // context each), so they fan out — at most 3 at once with a 2s gap
+      // between request starts (user rule; politeness to a gateway that
+      // hangs under bursts). Each result paints AS IT LANDS (the old
+      // batch-apply left the canvas blank for 10+ minutes), inserted at its
+      // plan-rank position so final layer order is exactly plan order
+      // regardless of arrival order. Undo entries stay one-per-component.
+      const fanOut = async (tasks, onSettled) => {
+        const limit = Math.max(1, Math.min(3, tasks.length));
+        const results = new Array(tasks.length);
+        const order = [];
+        let next = 0;
+        let started = 0;
+        console.log(`[build] fan-out ${tasks.length} tasks, ${limit} wide, 2s start gaps`);
+        const workers = Array.from({ length: limit }, async () => {
+          while (next < tasks.length) {
+            const i = next++;
+            const slot = started++;
+            if (slot > 0) await new Promise((r) => setTimeout(r, slot * 2000));
+            console.log(`[build] start ${tasks[i].label} (slot ${slot})`);
+            try {
+              results[i] = { ok: true, value: await tasks[i].run() };
+            } catch (error) {
+              results[i] = { ok: false, error };
+            }
+            order.push(i);
+            // Paint as it lands: the apply step runs here, inside the
+            // worker, so the canvas grows throughout the run instead of
+            // appearing all at once at the end. Layer order still resolves
+            // to plan order via the plan-rank insert position.
+            await onSettled(i, results[i]);
           }
+        });
+        await Promise.all(workers);
+        return { results, order };
+      };
+      const buildAll = async (activePlan) => {
+        const out = { done: 0, failed: 0, appliedTotal: 0, renderedIds: [] };
+        const n = activePlan.components.length;
+        // Placed pieces as {i: plan index, count: elements}; a component's
+        // slot = total elements of placed components ranked below it.
+        const placed = [];
+        const slotFor = (i) => placed.filter((p) => p.i < i).reduce((s, p) => s + p.count, 0);
+        status(`Building ${n} components (3 at a time, 2s apart)…`);
+        const applyOne = async (i, settled) => {
+          const component = activePlan.components[i];
+          out.done += 1;
+          status(`Placing ${out.done}/${n}: ${component.id}…`);
+          const at = slotFor(i);
+          if (!settled || !settled.ok) {
+            out.failed += 1;
+            console.warn(`[build] place ${component.id} FAILED: ${settled && settled.error ? settled.error.message : "unknown error"}`);
+            this.assistant.pushAssistant(
+              `${component.id} skipped: ${settled && settled.error ? settled.error.message : "unknown error"}`,
+              "error",
+            );
+          } else if (settled.value.kind === "image") {
+            const fetched = settled.value.fetched;
+            if (!fetched) {
+              out.failed += 1;
+            } else {
+              try {
+                this.editor.addImageElement(fetched.src, fetched.w, fetched.h, component.box, at);
+                out.appliedTotal += 1;
+                out.renderedIds.push(component.id);
+                placed.push({ i, count: 1 });
+                const imagetag = isMockEnabled()
+                  ? "mock"
+                  : fetched.note || "";
+                console.log(`[build] placed ${component.id} image at=${at}`);
+                this.assistant.pushAssistant(
+                  `+ ${component.id} (image${imagetag ? `, ${imagetag}` : ""})`,
+                );
+                if (fetched.note === "hotlinked" && !isMockEnabled()) {
+                  notify("Image hotlinked: PNG export may be blocked by the provider.", "error");
+                }
+              } catch (error) {
+                out.failed += 1;
+                this.assistant.pushAssistant(`${component.id} skipped: ${error.message}`, "error");
+              }
+            }
+          } else {
+            try {
+              const res = this.editor.applyPatchOps(
+                settled.value.elements.map((element, k) => ({ op: "add", element, at: at + k })),
+              );
+              out.appliedTotal += res.applied.length;
+              out.renderedIds.push(component.id);
+              placed.push({ i, count: res.applied.length });
+              console.log(`[build] placed ${component.id} ${res.applied.length} pieces at=${at}`);
+              this.assistant.pushAssistant(`+ ${component.id} (${res.applied.length} pieces)`);
+            } catch (error) {
+              out.failed += 1;
+              this.assistant.pushAssistant(`${component.id} skipped: ${error.message}`, "error");
+            }
+          }
+          this._renderJsonPreview();
+          this._refreshChrome();
+        };
+        await fanOut(
+          activePlan.components.map((component) => ({
+            label: component.id,
+            run: async () => {
+              const t = Date.now();
+              if (component.kind === "image") {
+                const fetched = await this._fetchImageComponent(component);
+                console.log(`[build] fetched ${component.id} ${Date.now() - t}ms ${fetched ? fetched.note || "ok" : "FAILED"}`);
+                return { kind: "image", fetched };
+              }
+              const { elements } = await componentDesign(component, canvas, activePlan);
+              console.log(`[build] ready ${component.id} ${Date.now() - t}ms elements=${elements.length}`);
+              return { kind: "dsl", elements };
+            },
+          })),
+          applyOne,
+        );
+        return out;
+      };
+      const evalOpts = (activePlan, ids) => ({
+        plannedIds: activePlan.components.map((c) => c.id),
+        renderedIds: ids,
+        expectHero: activePlan.components.some((c) => c.kind === "image"),
+        components: activePlan.components,
+        palette: activePlan.palette,
+      });
+      const topDefects = (report) =>
+        [...report.issues]
+          .sort((a, b) => (a.severity === b.severity ? 0 : a.severity === "error" ? -1 : 1))
+          .slice(0, 4)
+          .map((i) => i.message)
+          .join(" ");
+
+      let result = await buildAll(plan);
+      let report = evaluateDesign(this.editor.toDesign(), evalOpts(plan, result.renderedIds));
+      console.log(`[build] pass complete: ${result.done - result.failed}/${result.done} components, ${result.appliedTotal} pieces, quality=${report.score}`);
+
+      // Thin plans get ONE replanned retry (costs tokens, so bounded);
+      // collisions get the deterministic resolver (costs nothing) — unless
+      // the plan itself stacks sections on top of each other (mass overlap),
+      // which no amount of nudging can fix: that replans instead.
+      const UNDERBUILT = new Set(["sparse", "missing", "hero", "headline"]);
+      const overlapErrors = report.issues.filter((i) => i.severity === "error" && i.code === "overlap").length;
+      const crowded = overlapErrors >= 5;
+      if (report.issues.some((i) => i.severity === "error" && UNDERBUILT.has(i.code)) || crowded) {
+        const why = crowded
+          ? `Sections overlap (${overlapErrors} collisions) — stagger boxes vertically with breathing room, keep bars behind their own text.`
+          : `First pass under-built (${topDefects(report)}).`;
+        console.warn(`[build] replanning once: ${why}`);
+        this.assistant.pushAssistant(`${why} Retrying the plan once…`);
+        status("Replanning with corrections…");
+        try {
+          const plan2 = await planDesign(
+            `${prompt}\n\n[Correction] Your previous plan failed quality checks: ${topDefects(report)}. Fix every defect above; keep the rest of the brief.`,
+            canvas,
+          );
+          this.editor.loadDesign({ canvas: { ...canvas, background: plan2.palette.background }, elements: [] });
+          if (plan2.warnings.length) {
+            this.assistant.pushAssistant(`Replan notes: ${plan2.warnings.join("; ")}`);
+          }
+          this.assistant.pushAssistant(`Replan: ${plan2.components.length} components (${plan2.source}).`);
+          plan = plan2;
+          result = await buildAll(plan2);
+          report = evaluateDesign(this.editor.toDesign(), evalOpts(plan2, result.renderedIds));
+        } catch (error) {
+          this.assistant.pushAssistant(`Replan failed (${error.message}) — keeping the first pass.`, "error");
         }
-        this._renderJsonPreview();
-        this._refreshChrome();
+      }
+      ({ done, failed, appliedTotal, renderedIds } = result);
+
+      const COLLISION = new Set(["overlap", "overflow"]);
+      if (report.issues.some((i) => i.severity === "error" && COLLISION.has(i.code))) {
+        console.log("[build] collisions detected, running deterministic tidy");
+        const fix = this.editor.resolveCollisions();
+        console.log(`[build] tidy: moved=${fix.moved.length} unresolvable=${fix.unresolvable.length}`);
+        if (fix.moved.length) {
+          this.assistant.pushAssistant(
+            `Auto-arranged ${fix.moved.length} piece${fix.moved.length === 1 ? "" : "s"} to clear overlaps (one undo step).`,
+          );
+          report = evaluateDesign(this.editor.toDesign(), evalOpts(plan, renderedIds));
+        }
+        if (fix.unresolvable.length) {
+          this.assistant.pushAssistant(
+            `Could not separate: ${fix.unresolvable.slice(0, 4).join(", ")} — drag them apart by hand.`,
+            "error",
+          );
+        }
       }
 
       this.state.design = this.editor.toDesign();
@@ -412,12 +585,9 @@ export class App {
         semantic: null,
         warnings: [],
       });
-      const report = evaluateDesign(this.state.design, {
-        plannedIds: plan.components.map((c) => c.id),
-        renderedIds,
-        expectHero: plan.components.some((c) => c.kind === "image"),
-        components: plan.components,
-      });
+      // report already holds the final pass (plus any tidy); refresh its
+      // options against the active plan, then present it.
+      report = evaluateDesign(this.state.design, evalOpts(plan, renderedIds));
       const top = [...report.issues]
         .sort((a, b) => (a.severity === b.severity ? 0 : a.severity === "error" ? -1 : 1))
         .slice(0, 4);
@@ -453,23 +623,26 @@ export class App {
     }
   }
 
-  async _generateImageComponent(component) {
+  /**
+   * Fetch phase of an image component: pure network, no canvas mutation,
+   * so the build loop can run these concurrently. Returns the asset spec
+   * (or null on failure); the caller adds it in plan order.
+   */
+  async _fetchImageComponent(component) {
     const box = component.box;
+    const tStart = Date.now();
     if (isMockEnabled()) {
-      const src = mockAssetDataUrl(component.describe, box);
-      this.editor.addImageElement(src, box.width, box.height, box);
-      this.assistant.pushAssistant(`+ ${component.id} (image, mock)`);
-      return true;
+      return { src: mockAssetDataUrl(component.describe, box), w: box.width, h: box.height, note: "mock" };
     }
     const assetOpts = { width: box.width, height: box.height, asset: component.asset };
     // 1. Backend first — the secret key never leaves the server.
     try {
       const src = await fetchAssetViaBackend(component.describe, assetOpts);
       const dims = await probeImage(src).catch(() => ({ w: box.width, h: box.height }));
-      this.editor.addImageElement(src, dims.w, dims.h, box);
-      this.assistant.pushAssistant(`+ ${component.id} (image)`);
-      return true;
+      console.log(`[build] image ${component.id} via backend ${Date.now() - tStart}ms`);
+      return { src, w: dims.w, h: dims.h, note: "" };
     } catch (error) {
+      console.warn(`[build] image ${component.id} backend failed: ${error.message}`);
       console.warn("[architect] backend unavailable, trying direct:", error.message);
     }
     // 2. Keyless direct fetch (dataURL: export-safe).
@@ -477,21 +650,12 @@ export class App {
       const url = assetUrl(component.describe, assetOpts);
       const src = await fetchAssetDataUrl(url);
       const dims = await probeImage(src).catch(() => ({ w: box.width, h: box.height }));
-      this.editor.addImageElement(src, dims.w, dims.h, box);
-      this.assistant.pushAssistant(`+ ${component.id} (image)`);
-      return true;
+      console.log(`[build] image ${component.id} direct ${Date.now() - tStart}ms`);
+      return { src, w: dims.w, h: dims.h, note: "" };
     } catch (error) {
+      console.warn(`[build] image ${component.id} direct failed: ${error.message}`);
       console.warn("[architect] asset fetch failed, hotlinking:", error.message);
-      try {
-        const url = assetUrl(component.describe, { width: box.width, height: box.height, asset: component.asset });
-        this.editor.addImageElement(url, box.width, box.height, box);
-        this.assistant.pushAssistant(`+ ${component.id} (image, hotlinked — export may warn)`);
-        notify("Image hotlinked: PNG export may be blocked by the provider.", "error");
-        return true;
-      } catch (error2) {
-        this.assistant.pushAssistant(`${component.id} skipped: ${error2.message}`, "error");
-        return false;
-      }
+      return { src: assetUrl(component.describe, { width: box.width, height: box.height, asset: component.asset }), w: box.width, h: box.height, note: "hotlinked" };
     }
   }
 

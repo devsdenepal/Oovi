@@ -15,7 +15,7 @@ import { DESIGN_VERSION } from "./designTypes";
 
 export const CANVAS_WIDTH = 1080;
 export const CANVAS_HEIGHT = 1080;
-export const MAX_ELEMENTS = 30;
+export const MAX_ELEMENTS = 60;
 
 export const ELEMENT_TYPES = ["text", "rectangle", "circle", "line", "group", "image"];
 

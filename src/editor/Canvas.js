@@ -252,7 +252,7 @@ export class CanvasEditor {
    * @param {number} naturalW intrinsic pixels
    * @param {number} naturalH intrinsic pixels
    */
-  addImageElement(src, naturalW, naturalH, box = null) {
+  addImageElement(src, naturalW, naturalH, box = null, at = null) {
     const c = this.canvas;
     if (!c || !src) return;
     const n = ++this._insertCount;
@@ -277,7 +277,9 @@ export class CanvasEditor {
     };
     const obj = createDesignObject(element);
     if (!obj) return;
-    c.add(obj);
+    if (typeof at === "number" && typeof c.insertAt === "function") {
+      c.insertAt(Math.max(0, Math.min(at, c.getObjects().length)), obj);
+    } else c.add(obj);
     c.setActiveObject(obj);
     c.requestRenderAll();
     this._handleSelection();
@@ -735,7 +737,16 @@ export class CanvasEditor {
     c.on("object:added", () => this._handleMutation());
     c.on("object:removed", () => this._handleMutation());
     c.on("object:modified", () => this._handleMutation());
-    c.on("text:changed", () => this._handleMutation());
+    // Typing fires text:changed per keystroke; a full-canvas snapshot per
+    // keystroke is pure waste (50-deep stack of whole-canvas JSON). Trailing
+    // 800ms throttle keeps per-word undo granularity at ~0 cost. Discrete
+    // ops above stay instant.
+    c.on("text:changed", () => this._handleMutationThrottled());
+    this._mutationTimer = null;
+    this._removeListeners.push(() => {
+      if (this._mutationTimer) window.clearTimeout(this._mutationTimer);
+      this._mutationTimer = null;
+    });
     c.on("history:change", () => {
       this._syncLayers();
       this._syncSelection();
@@ -761,6 +772,15 @@ export class CanvasEditor {
     this.onDirty?.();
     this._syncLayers();
     this._syncSelection();
+  }
+
+  _handleMutationThrottled() {
+    if (this.suppressHistory) return;
+    if (this._mutationTimer) window.clearTimeout(this._mutationTimer);
+    this._mutationTimer = window.setTimeout(() => {
+      this._mutationTimer = null;
+      this._handleMutation();
+    }, 800);
   }
 
   _syncSelection() {
@@ -1005,6 +1025,185 @@ export class CanvasEditor {
   }
 
   /**
+   * Deterministic collision repair (post-generation tidy).
+   *
+   * The last fix proved more content without layout control is just noisy
+   * overlap: per-component calls only see sibling boxes, never rendered
+   * extents, so text drifts into text. This pass measures the LIVE Fabric
+   * bounds and translates text-bearing top-level objects just enough to
+   * clear text-on-text overlaps and canvas-edge overflow.
+   *
+   * Intent-preserving by construction: translation only (no resize,
+   * restyle, or regroup), shapes/images are treated as intentional layers
+   * and never moved for overlaps, and everything lands in ONE history
+   * entry via applyPatchOps (one Ctrl+Z reverts the whole tidy).
+   * @returns {{moved: Array<{id: string, dx: number, dy: number}>, unresolvable: string[]}}
+   */
+  resolveCollisions() {
+    const c = this.canvas;
+    const empty = { moved: [], unresolvable: [] };
+    if (!c) return empty;
+    const W = c.width || 0;
+    const H = c.height || 0;
+    if (!W || !H) return empty;
+    const tops = c.getObjects().filter((o) => o && o.visible !== false);
+    if (tops.length < 1) return empty;
+    const isText = (o) =>
+      o.elementType === "text" ||
+      (typeof o.type === "string" && o.type.includes("text"));
+    const bearsText = (o) => {
+      if (isText(o)) return true;
+      if (o.elementType === "group" && typeof o.getObjects === "function") {
+        try {
+          return o.getObjects().some((k) => isText(k));
+        } catch {
+          return false;
+        }
+      }
+      return false;
+    };
+    // Base rects measured once; translation commutes with bounding boxes,
+    // so offsetting the cache while planning moves is exact.
+    const base = new Map();
+    for (const o of tops) {
+      let r = null;
+      try {
+        r = o.getBoundingRect();
+      } catch {
+        r = null;
+      }
+      if (
+        !r ||
+        [r.left, r.top, r.width, r.height].some((v) => typeof v !== "number" || !isFinite(v))
+      ) {
+        continue;
+      }
+      base.set(o, { x: r.left, y: r.top, w: Math.max(0, r.width), h: Math.max(0, r.height) });
+    }
+    const at = new Map(); // obj -> {dx, dy} planned translation
+    const placed = (o) => {
+      const b = base.get(o);
+      const d = at.get(o) || { dx: 0, dy: 0 };
+      return { x: b.x + d.dx, y: b.y + d.dy, w: b.w, h: b.h };
+    };
+    // Displacement budget: sliding back inside is unbounded (always
+    // correct), but overlap shoves beyond this scream plan failure, not
+    // tidyable collision — refuse and report instead of rearranging the
+    // poster into new overlaps (observed: +290px cascades).
+    const SHOVE_CAP = 120;
+    const shift = (o, dx, dy, capped) => {
+      const d = at.get(o) || { dx: 0, dy: 0 };
+      if (capped && Math.max(Math.abs(d.dx + dx), Math.abs(d.dy + dy)) > SHOVE_CAP) return false;
+      d.dx += dx;
+      d.dy += dy;
+      at.set(o, d);
+      return true;
+    };
+    const GAP = 12;
+
+    // Pass 1: text past the canvas edge slides back inside. Applies to any
+    // text-bearing object (lone text or group card); pure shapes and photos
+    // may bleed intentionally and are left alone.
+    for (const o of tops) {
+      if (!base.has(o) || !bearsText(o)) continue;
+      const p = placed(o);
+      let dx = 0;
+      let dy = 0;
+      if (p.x < 0) dx = -p.x;
+      else if (p.x + p.w > W) dx = W - (p.x + p.w);
+      if (p.y < 0) dy = -p.y;
+      else if (p.y + p.h > H) dy = H - (p.y + p.h);
+      if (dx || dy) shift(o, Math.round(dx), Math.round(dy));
+    }
+
+    // Pass 2: text-on-text overlaps. Only downward-then-up motion, capped,
+    // so sweeps converge instead of oscillating.
+    const area = (b) => b.w * b.h;
+    const intersectDepth = (a, b) => ({
+      x: Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x),
+      y: Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y),
+    });
+    const unresolvable = new Set();
+    for (let sweep = 0; sweep < 10; sweep++) {
+      let fixedAny = false;
+      const order = tops.filter((o) => base.has(o));
+      for (let i = 0; i < order.length; i++) {
+        for (let j = i + 1; j < order.length; j++) {
+          const A = order[i];
+          const B = order[j];
+          const aT = bearsText(A);
+          const bT = bearsText(B);
+          if (!aT && !bT) continue; // two layers — intentional, never touch
+          const a = placed(A);
+          const b = placed(B);
+          const smaller = Math.min(area(a), area(b));
+          if (smaller <= 0) continue;
+          const { x: ox, y: oy } = intersectDepth(a, b);
+          if (ox <= 0 || oy <= 0 || (ox * oy) / smaller <= 0.15) continue;
+          // Move the text side; both text-bearing → move the lower one.
+          // (Text-vs-image therefore slides the text off the artwork.)
+          let mover = null;
+          if (aT && !bT) mover = A;
+          else if (bT && !aT) mover = B;
+          else mover = a.y <= b.y ? B : A;
+          const m = placed(mover);
+          const need = Math.ceil(oy) + GAP;
+          const pushUnres = () => {
+            if (A.designId) unresolvable.add(A.designId);
+            if (B.designId) unresolvable.add(B.designId);
+          };
+          if (m.y + m.h + need <= H + 1 && shift(mover, 0, need, true)) {
+            fixedAny = true;
+          } else if (m.y - need >= -1 && shift(mover, 0, -need, true)) {
+            fixedAny = true;
+          } else {
+            pushUnres();
+          }
+        }
+      }
+      if (!fixedAny) break;
+    }
+    // Final scan: pairs still colliding after the sweep budget are named,
+    // not silently left.
+    {
+      const order = tops.filter((o) => base.has(o));
+      for (let i = 0; i < order.length; i++) {
+        for (let j = i + 1; j < order.length; j++) {
+          const A = order[i];
+          const B = order[j];
+          if (!bearsText(A) && !bearsText(B)) continue;
+          const a = placed(A);
+          const b = placed(B);
+          const smaller = Math.min(area(a), area(b));
+          if (smaller <= 0) continue;
+          const { x: ox, y: oy } = intersectDepth(a, b);
+          if (ox > 0 && oy > 0 && (ox * oy) / smaller > 0.15) {
+            if (A.designId) unresolvable.add(A.designId);
+            if (B.designId) unresolvable.add(B.designId);
+          }
+        }
+      }
+    }
+
+    const ops = [];
+    const moved = [];
+    for (const [o, d] of at) {      if ((!d.dx && !d.dy) || !o.designId) continue;
+      ops.push({
+        op: "update",
+        id: o.designId,
+        props: { x: Math.round((o.left || 0) + d.dx), y: Math.round((o.top || 0) + d.dy) },
+      });
+      moved.push({ id: o.designId, dx: d.dx, dy: d.dy });
+    }
+    if (ops.length) this.applyPatchOps(ops);
+    console.log(
+      `[tidy] moved=${moved.length} unresolvable=${unresolvable.size} ` +
+        moved.map((m) => `${m.id}(${m.dx},${m.dy})`).join(" "),
+    );
+    return { moved, unresolvable: [...unresolvable] };
+  }
+
+  /**
    * Applies validated patch ops as ONE history entry (suppressed batch +
    * single snapshot). Returns human-readable change lines for the chat.
    * @param {Array} ops validated ops (see src/ai/patch.js)
@@ -1057,7 +1256,12 @@ export class CanvasEditor {
         } else if (op.op === "add") {
           const obj = createDesignObject(op.element);
           if (!obj) continue;
-          c.add(obj);
+          // Optional plan-rank slot: progressive application (arrival order)
+          // inserts at the position the piece holds in plan order, so the
+          // final stack matches the plan regardless of network timing.
+          if (typeof op.at === "number" && typeof c.insertAt === "function") {
+            c.insertAt(Math.max(0, Math.min(op.at, c.getObjects().length)), obj);
+          } else c.add(obj);
           if (typeof obj.setCoords === "function") obj.setCoords();
           changed.add(op.element.id);
           applied.push(`+ ${op.element.id} (${op.element.type})`);
