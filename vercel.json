@@ -1,8 +1,0 @@
-{
-  "rewrites": [
-    {
-      "source": "/aiconductor/(.*)",
-      "destination": "https://aiconductor.vercel.app/$1"
-    }
-  ]
-}

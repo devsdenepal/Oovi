@@ -52,5 +52,27 @@ try {
   }
 }
 
+// 3. Ollama promoted to PRIMARY (the documented one-line flip) must hand
+// off to the cloud when the daemon is down, instead of stalling the run.
+process.env.AI_CHAIN = 'ollama,groq';
+try {
+  const out = await runChain(req);
+  if (out.provider === 'ollama') {
+    console.log('ok: on-device ollama answered as primary (daemon is running here)');
+  } else if (out.provider === 'groq') {
+    console.log('ok: ollama-first with no daemon -> fell through to groq');
+  } else {
+    console.log(`FAIL: ollama-first landed on ${out.provider}, expected ollama or groq`);
+    failures++;
+  }
+} catch (error) {
+  if (error.status >= 429) {
+    console.log(`ok: ollama-first blocked only by upstream demand (${error.status}) -> ${error.message.slice(0, 80)}`);
+  } else {
+    console.log(`FAIL: ollama-first -> ${error.message}`);
+    failures++;
+  }
+}
+
 console.log(failures === 0 ? 'FALLBACK CHECK DONE' : `FALLBACK CHECK: ${failures} FAILURES`);
 process.exit(failures === 0 ? 0 : 1);

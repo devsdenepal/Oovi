@@ -16,29 +16,17 @@ import { validateDesign } from "../design/designValidator";
  *
  * generateDesign(userPrompt, { referenceAnalysis, referenceInfluence }) -> { design, semanticDesign, warnings, canvas }
  *
- * The AI provider is configurable via environment variables:
+ * Every request goes through one same-origin server route:
  *
- *   AICONDUCTOR_URL      base URL of the AI Conductor endpoint
- *                         (default https://aiconductor.vercel.app)
- *   AICONDUCTOR_TOKEN    bearer token for the endpoint
- *   AICONDUCTOR_MODEL    model name forwarded to the endpoint (optional)
+ *   POST /api/groq   { messages, schema, maxTokens, effort }
+ *   ->               { text, provider }
  *
- * The default provider is the AI Conductor vercel deployment, which exposes
- *   POST /generate   { "prompt": "<flattened system + user prompt>" }
- *   ->               { "success": true, "text": "<model output>" }
- *
- * Swapping providers (OpenAI-compatible /generate, image generators, etc.)
- * only requires a new fetchDesign() here - the renderer and validator are
- * untouched.
+ * The provider order (Groq gpt-oss-120b -> Gemini Gemma 4 -> OpenRouter
+ * Nemotron -> on-device Ollama) lives server-side in api/_aiChain.js, so the
+ * API keys never reach the browser and no call ever leaves this pipeline.
+ * Swapping providers only means editing that chain - the renderer and
+ * validator are untouched.
  */
-
-const DEFAULT_URL = "https://aiconductor.vercel.app";
-
-// Same-origin path that the Vite dev/preview server proxies to
-// DEFAULT_URL (see vite.config.js). The AI Conductor endpoint does not send
-// CORS headers, so it is always reached through this proxy instead of a
-// direct browser fetch.
-const PROXY_PATH = "/aiconductor";
 
 // How many times we ask the model to fix an invalid design before giving up.
 const MAX_ATTEMPTS = 3;
@@ -120,79 +108,6 @@ function networkError(message) {
   error.isNetworkError = true;
   error.retryable = true;
   return error;
-}
-
-async function fetchAiconductor(url, token, model, prompt) {
-  const tStart = Date.now();
-  const host = String(url || "").replace(/^https?:\/\//, "").split("/")[0];
-  const ms = () => Date.now() - tStart;
-  console.log(`[ai] POST ${host}/generate model=${model || "default"} promptChars=${prompt.length}`);
-  const fail = (message) => {
-    console.warn(`[ai] request failed after ${ms()}ms: ${message}`);
-    return message;
-  };
-  const headers = { "Content-Type": "application/json" };
-  if (token) {
-    headers["Authorization"] = `Bearer ${token}`;
-  }
-
-  const payload = { prompt };
-  if (model) {
-    payload.model = model;
-  }
-
-  let response;
-  try {
-    // Fail fast: a hung gateway call must never stall a whole generation
-    // (observed ~105s/call; 3min cap turns hangs into quick retries/skips).
-    response = await fetch(`${url}/generate`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(180000),
-    });
-  } catch (error) {
-    throw networkError(fail(`AI request failed (network): ${error.message}`));
-  }
-
-  if (!response.ok) {
-    let detail = `${response.status} ${response.statusText}`;
-    try {
-      const body = await response.json();
-      detail = body?.error || body?.message || detail;
-    } catch {
-      // keep status text
-    }
-    const error = new Error(fail(`AI request failed: ${detail}`));
-    // 5xx may recover on another provider; 4xx is a config error that must
-    // surface instead of being masked by a fallback.
-    if (response.status >= 500) error.retryable = true;
-    throw error;
-  }
-
-  let data;
-  try {
-    data = await response.json();
-  } catch {
-    throw new Error(fail("AI returned a non-JSON response"));
-  }
-
-  if (data?.success === false) {
-    // Provider-admitted failure (operators down, overloaded): retryable,
-    // unlike 4xx config errors. This is the exact case the local box
-    // exists for.
-    const error = new Error(fail(data?.error || "AI returned an error"));
-    error.retryable = true;
-    throw error;
-  }
-
-  const text = data?.text || data?.result || data?.output || data?.content;
-  if (typeof text !== "string" || text.trim() === "") {
-    throw new Error(fail("AI returned an empty response"));
-  }
-
-  console.log(`[ai] ok ${ms()}ms respChars=${text.length}`);
-  return text;
 }
 
 /**
@@ -399,7 +314,7 @@ async function fetchGroqChat(prompt, opts = {}) {
     if (typeof data?.text !== "string" || !data.text.trim()) {
       throw new Error("ai returned an empty response");
     }
-    // provider = which rung of the chain answered (groq/gemini/openrouter).
+    // provider = which rung of the chain answered (groq/gemini/openrouter/ollama).
     return { text: data.text, provider: data.provider || "groq" };
   };
   console.log(`[ai] chain POST /api/groq model=${model} promptChars=${prompt.length} strict=${opts.schema ? "schema" : "json_object"}`);
@@ -419,56 +334,11 @@ async function fetchGroqChat(prompt, opts = {}) {
 }
 
 /**
- * Provider order: VITE_AI_PROVIDER=groq puts Groq first, anything else
- * (default) keeps Conductor first. A failed primary falls back to the
- * other side ONLY on retryable errors (network/timeout/5xx/429) —
- * 4xx config errors surface instead of being masked.
- */
-async function fetchWithFallback(primaryUrl, token, model, prompt, opts = {}) {
-  const configuredUrl = (import.meta.env.VITE_AICONDUCTOR_URL || "").trim().replace(/\/+$/, "");
-  const isDefault = !configuredUrl || configuredUrl === DEFAULT_URL;
-  const flag = (import.meta.env.VITE_AI_PROVIDER || "conductor").toLowerCase();
-  const tryConductor = async () => {
-    try {
-      return await fetchAiconductor(primaryUrl, token, model, prompt);
-    } catch (error) {
-      if (!isDefault && error.isNetworkError) {
-        return await fetchAiconductor(PROXY_PATH, token, model, prompt);
-      }
-      throw error;
-    }
-  };
-  const rungs =
-    flag === "groq"
-      ? [["groq", () => fetchGroqChat(prompt, opts)], ["conductor", tryConductor]]
-      : [["conductor", tryConductor], ["groq", () => fetchGroqChat(prompt, opts)]];
-  let firstError = null;
-  for (const [name, run] of rungs) {
-    try {
-      return await run();
-    } catch (error) {
-      firstError = firstError || error;
-      console.warn(`[ai] ${name} failed: ${error && error.message}`);
-      // Non-retryable (4xx config errors) stops the chain fast; the
-      // primary error surfaces at the end, never a fallback's.
-      if (!error || !error.retryable) break;
-    }
-  }
-  throw firstError;
-}
-
-/**
  * Semantic pipeline (reference-based). The model outputs a semantic DSL,
  * which is validated, laid out by the constraint engine, then validated a
  * second time as a pixel Design.
  */
 async function generateSemantic(userPrompt, analysis, influence) {
-  const configuredUrl = (import.meta.env.VITE_AICONDUCTOR_URL || "").trim().replace(/\/+$/, "");
-  const token = import.meta.env.VITE_AICONDUCTOR_TOKEN;
-  const model = import.meta.env.VITE_AICONDUCTOR_MODEL;
-  const isDefault = !configuredUrl || configuredUrl === DEFAULT_URL;
-  const primaryUrl = isDefault ? PROXY_PATH : configuredUrl;
-
   let previousSemantic = null;
   let errors = [];
 
@@ -478,7 +348,7 @@ async function generateSemantic(userPrompt, analysis, influence) {
         ? buildSemanticDesignPrompt(userPrompt, { analysis, influence })
         : buildSemanticRevalidationPrompt(userPrompt, previousSemantic, errors, { analysis, influence });
 
-    const text = await fetchWithFallback(primaryUrl, token, model, requestPrompt);
+    const text = await fetchGroqChat(requestPrompt);
 
     const parsed = regexRepairJson(text);
     if (parsed === null) {
@@ -553,18 +423,7 @@ export async function generateDesign(userPrompt, options = {}) {
     return generateSemantic(userPrompt, referenceAnalysis, referenceInfluence);
   }
 
-  const configuredUrl = (import.meta.env.VITE_AICONDUCTOR_URL || "").trim().replace(/\/+$/, "");
-  const token = import.meta.env.VITE_AICONDUCTOR_TOKEN;
-  const model = import.meta.env.VITE_AICONDUCTOR_MODEL;
-
   const prompt = buildDesignPrompt(userPrompt, canvas);
-
-  // The default AI Conductor endpoint has no CORS headers, so route it
-  // straight through the same-origin proxy. Custom providers configured via
-  // VITE_AICONDUCTOR_URL are tried directly; on a CORS/network failure they
-  // fall back to the proxy too.
-  const isDefault = !configuredUrl || configuredUrl === DEFAULT_URL;
-  const primaryUrl = isDefault ? PROXY_PATH : configuredUrl;
 
   let previousOutput = "";
   let errors = [];
@@ -573,7 +432,7 @@ export async function generateDesign(userPrompt, options = {}) {
     const requestPrompt =
       attempt === 1 ? prompt : buildRevalidationPrompt(userPrompt, previousOutput, errors, canvas);
 
-    const text = await fetchWithFallback(primaryUrl, token, model, requestPrompt);
+    const text = await fetchGroqChat(requestPrompt);
     previousOutput = text;
 
     const parsed = regexRepairJson(text);
@@ -619,13 +478,7 @@ export async function generatePatch(message, context) {
     return { ops: valid, errors, note, source: "mock" };
   }
 
-  const configuredUrl = (import.meta.env.VITE_AICONDUCTOR_URL || "").trim().replace(/\/+$/, "");
-  const token = import.meta.env.VITE_AICONDUCTOR_TOKEN;
-  const model = import.meta.env.VITE_AICONDUCTOR_MODEL;
-  const isDefault = !configuredUrl || configuredUrl === DEFAULT_URL;
-  const primaryUrl = isDefault ? PROXY_PATH : configuredUrl;
-
-  const text = await fetchWithFallback(primaryUrl, token, model, buildPatchPrompt(message, design, selectedIds));
+  const text = await fetchGroqChat(buildPatchPrompt(message, design, selectedIds));
   const parsed = regexRepairJson(text);
   if (parsed === null) {
     throw new Error("AI response was not recoverable JSON. Ask again, more specifically.");
@@ -731,14 +584,6 @@ function sanitizePlan(raw, canvas) {
   return { palette, style, components, warnings };
 }
 
-function gatewayEnv() {
-  const configuredUrl = (import.meta.env.VITE_AICONDUCTOR_URL || "").trim().replace(/\/+$/, "");
-  const token = import.meta.env.VITE_AICONDUCTOR_TOKEN;
-  const model = import.meta.env.VITE_AICONDUCTOR_MODEL;
-  const isDefault = !configuredUrl || configuredUrl === DEFAULT_URL;
-  return { primaryUrl: isDefault ? PROXY_PATH : configuredUrl, token, model };
-}
-
 /**
  * Architect pass 1: natural-language request → build plan (palette +
  * ordered components, each routed dsl|image with a fixed box).
@@ -750,7 +595,6 @@ export async function planDesign(userPrompt, canvas) {
   }
   const tStart = Date.now();
   console.log(`[ai] plan start canvas=${canvas.width}x${canvas.height} promptChars=${userPrompt.length}`);
-  const { primaryUrl, token, model } = gatewayEnv();
   let errors = [];
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     const requestPrompt =
@@ -759,10 +603,10 @@ export async function planDesign(userPrompt, canvas) {
         : `${buildPlanPrompt(userPrompt, canvas)}\n\n[Correction]\nYour previous response was not usable JSON (${errors.join("; ")}). Return ONLY the JSON plan.`;
     // Corrections only fix malformed model output — a dead network never
     // recovers by re-asking, so fetch failures throw immediately instead
-    // of burning (attempts × timeout) on a hung gateway.
+    // of burning (attempts × timeout) on a hung provider.
     let text;
     try {
-      text = await fetchWithFallback(primaryUrl, token, model, requestPrompt, { schema: PLAN_SCHEMA, name: "oovi_plan", maxTokens: 4000, effort: "medium" });
+      text = await fetchGroqChat(requestPrompt, { schema: PLAN_SCHEMA, name: "oovi_plan", maxTokens: 4000, effort: "medium" });
     } catch (error) {
       throw new Error(`Could not plan the design: ${error.message}`);
     }
@@ -799,7 +643,6 @@ export async function componentDesign(component, canvas, plan) {
   }
   const tStart = Date.now();
   console.log(`[ai] component start ${component.id} (${component.kind}/${component.role || "?"})`);
-  const { primaryUrl, token, model } = gatewayEnv();
   let errors = [];
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     const requestPrompt =
@@ -809,7 +652,7 @@ export async function componentDesign(component, canvas, plan) {
     // Same fail-fast rule as planning: corrections fix bad JSON, not networks.
     let text;
     try {
-      text = await fetchWithFallback(primaryUrl, token, model, requestPrompt, { schema: COMPONENTS_SCHEMA, name: "oovi_component", maxTokens: 1200, effort: "low" });
+      text = await fetchGroqChat(requestPrompt, { schema: COMPONENTS_SCHEMA, name: "oovi_component", maxTokens: 1200, effort: "low" });
     } catch (error) {
       throw new Error(`Component "${component.id}" failed: ${error.message}`);
     }

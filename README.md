@@ -78,8 +78,9 @@ Copy `.env.example` to `.env`. Keys are **server-only** unless prefixed `VITE_`:
 
 | Variable | Where | Purpose |
 |---|---|---|
-| `VITE_AICONDUCTOR_URL` | Browser | AI gateway endpoint (via same-origin proxy) |
-| `VITE_AICONDUCTOR_TOKEN` | Browser | Gateway token for local demo use |
+| `VITE_GROQ_MODEL` | Browser | Model hint sent with each request (each rung uses its own configured model) |
+| `GROQ_API_KEY` / `GEMINI_API_KEY` / `OPENROUTER_API_KEY` | Server only | Open-weight AI chain (`api/_aiChain.js`) |
+| `OLLAMA_URL` / `OLLAMA_MODEL` | Server only | On-device open-weight rung (Ollama) |
 | `POLLINATIONS_KEY` | Server only | AI image generation (`api/asset.js`) |
 | `UNSPLASH_ACCESS_KEY` | Server only | Photo search (`api/photos.js`) |
 | `PGHOST / PGPORT / PGUSER / PGPASSWORD / PGDATABASE` | Server only | Postgres connection (`server/index.js`) |
@@ -87,13 +88,42 @@ Copy `.env.example` to `.env`. Keys are **server-only** unless prefixed `VITE_`:
 
 > Never put a secret in a `VITE_`-prefixed variable. Those are bundled into the client. The browser holds no image or database credentials.
 
-### Groq GPT-OSS provider
+### AI providers — open-weight chain
 
-Set `VITE_AI_PROVIDER=groq` in `.env` (plus `GROQ_API_KEY`, server-side
-only) to generate with `openai/gpt-oss-120b` through the same-origin
-`/api/groq` proxy — the key never reaches the browser. Plans use strict
-schemas; components use low reasoning effort to stay inside rate limits.
-Conductor remains the fallback on retryable failures.
+Every generation runs on **open-weight models only**. A single POST to the
+same-origin `/api/groq` route walks a server-side chain
+([`api/_aiChain.js`](api/_aiChain.js)) and returns the first success, so a
+rate limit or outage on one provider never drops a component. Prompts use
+strict JSON schemas; the key never reaches the browser.
+
+| Rung | Model | Host | Notes |
+|---|---|---|---|
+| 1 | `openai/gpt-oss-120b` | Groq | Apache-2.0; free tier (30 req/min, 8k TPM) |
+| 2 | `gemma-4-31b-it` | Gemini API | open weights; separate quota pool |
+| 3 | `nvidia/nemotron-3-super-120b-a12b:free` | OpenRouter | open weights; free tier |
+| 4 | `gpt-oss:20b` | **Ollama (on-device)** | open weights, ~12 GB — fits 16 GB RAM |
+
+Order is set by `AI_CHAIN` in `.env`. Any failure — `429`, `5xx`, network,
+timeout, or empty body — advances to the next rung. Only cheap transient
+faults retry on the same provider; a rate limit advances immediately.
+`VITE_MOCK_AI=1` skips the network entirely.
+
+**Rung 4 is on-device and needs no key** ([Ollama](https://ollama.com)):
+
+```bash
+ollama pull gpt-oss:20b
+# our prompts exceed Ollama's 2048-token default context:
+setx OLLAMA_CONTEXT_LENGTH 8192
+```
+
+It sits last as an offline fallback so a slow CPU model can never stall a
+generation; when Ollama is not running the rung falls through in ~1.5 s.
+Put `ollama` first in `AI_CHAIN` to make on-device primary.
+
+> The chain is the only way out of the app: there is no second gateway and
+> no client-side provider switch, so no call can bypass the open-weight
+> rungs above. Adding or reordering a provider means editing
+> `api/_aiChain.js`.
 
 ## Project structure
 

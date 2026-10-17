@@ -11,8 +11,8 @@ const PROMPT = 'An event announcement for event: Hacktoberfest 2026, use pixel d
 const browser = await chromium.launch({ headless: process.env.HEADED !== '1' });
 const page = await browser.newPage({ viewport: { width: 1600, height: 1000 } });
 page.on('pageerror', (e) => console.log('PAGEERROR:', e.message.slice(0, 300)));
-// Forward the app's [ai]/[build]/[tidy] console trail so hop sequences
-// (conductor -> local fallback) are visible in run output.
+// Forward the app's [ai]/[build]/[tidy] console trail so chain hops
+// (rung -> rung fallthrough) are visible in run output.
 page.on('console', (m) => {
   const t = m.text();
   if (/^\[(ai|build|tidy)\]/.test(t)) console.log('CONSOLE: ' + t.slice(0, 300));

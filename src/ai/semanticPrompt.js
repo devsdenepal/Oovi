@@ -145,7 +145,7 @@ export function buildSemanticReferenceGuide(analysis, influence = 1) {
 /**
  * @param {string} userPrompt
  * @param {{analysis?: import("../reference/analysisTypes").ReferenceDesignAnalysis, influence?: number}} [options]
- * @returns {string} flattened prompt for the AI Conductor endpoint
+ * @returns {string} flattened prompt for the model chain
  */
 export function buildSemanticDesignPrompt(userPrompt, options = {}) {
   const chunks = ["[System]", buildSemanticSystemInstruction()];

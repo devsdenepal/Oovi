@@ -57,9 +57,9 @@ export function buildSystemInstruction(canvas = { width: CANVAS_WIDTH, height: C
 }
 
 /**
- * Builds the single flattened prompt string the AI Conductor endpoint expects.
- * Matches the deepgyan convention: a [System] block followed by the user
- * request, joined into one prompt.
+ * Builds the single flattened prompt string sent to the model chain.
+ * A [System] block followed by the user request, joined into one prompt;
+ * the transport splits it back into chat roles.
  */
 export function buildDesignPrompt(userPrompt, canvas) {
   const system = buildSystemInstruction(canvas);

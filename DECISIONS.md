@@ -2,6 +2,47 @@
 
 Conservative option wins every tie. Newest entries first.
 
+## Open-weight-only + on-device rung (user order: "only opensource models", "use ollama")
+- Model choice is now a hard rule, not a preference: every rung runs an
+  open-weight model — Groq gpt-oss-120b (Apache-2.0), Gemini gemma-4-31b-it,
+  OpenRouter nemotron-3-super-120b-a12b:free, and on-device gpt-oss:20b.
+  No closed/proprietary model is called anywhere in the pipeline.
+- The unverifiable third-party gateway rung and its whole client path are
+  DELETED, not just demoted: the direct fetch to that endpoint, its URL
+  constants, the Vite and Vercel proxy rewrites, and the env vars that fed
+  it are all gone. The server-side chain is now the only way out of the
+  app, which makes "open-weight only" checkable rather than aspirational.
+- Fixing that also removed a latent bug: the old client flag defaulted to
+  that gateway, so an unset/other value put the unverifiable model FIRST
+  and the chain second.
+- Local rung = Ollama (user order, superseding the llama.cpp/8080 plan —
+  no local code had been written yet, so nothing to unwind), OpenAI-compat
+  /v1/chat/completions, OLLAMA_URL default http://127.0.0.1:11434.
+- Position: LAST, as an offline fallback. Tie-break by this file's own rule
+  ("conservative option wins every tie"): a 16GB-RAM CPU model generating a
+  ~1200-token component can exceed the 165s chain deadline and the 180s
+  client timeout, so local-first could hang generation on the machine it
+  was added for. Last means it can never stall a run, and it is one env
+  line to promote (`AI_CHAIN=ollama,...`).
+- Cost of last: when cloud rungs work, the on-device model is never
+  exercised. Accepted deliberately — capability + offline path over demo
+  theatre.
+- Reachability: 1.5s /api/tags health probe, so a down daemon is an instant
+  fall-through instead of a dead 120s wait; connection errors are retryable
+  and log as "[ai] chain ok/failed". No response_format passed (Ollama's
+  structured-output support varies by version) — prompt discipline + the
+  existing lenient repair handle it.
+- Context: our plan prompt is ~3.8k tokens; Ollama defaults to n_ctx=2048,
+  so the model would be silently truncated. Documented
+  OLLAMA_CONTEXT_LENGTH=8192 rather than passing num_ctx (not part of the
+  OpenAI-compat surface). Not machine-verifiable here: Ollama is not
+  installed on this box (~/.ollama exists but holds no models, no binary,
+  nothing on 11434) — the rung is proven to degrade gracefully, not to
+  generate.
+- Model pick: gpt-oss:20b (~12GB Q4) is the largest open-weight model that
+  fits 16GB RAM with headroom, and it keeps the local family the same as
+  rung 1 (gpt-oss), so prompt/JSON behaviour carries over.
+
 ## Bricked opens (user report): save accepted what open rejected — twice
 - Bug 1, validator: save persists Fabric truth (group children in
   group-relative coords, routinely negative; objects dragged partially
@@ -75,7 +116,7 @@ Conservative option wins every tie. Newest entries first.
 ## Local llama server eliminated (user order)
 - Killed all llama-server processes; deleted fetchLocalChat, the local
   rungs, think/timeoutMs plumbing, and local docs (.env.example,
-  README). Provider order is now groq ↔ conductor only. Rung errors
+  README). Provider order is now groq ↔ the hosted gateway only. Rung errors
   fixed too: non-retryable stops the chain but the PRIMARY error
   surfaces (previously a fallback's error masked it).
 - Disk files under E:\oovi-local (bin + 2.4GB gguf) deliberately left
@@ -107,14 +148,14 @@ Conservative option wins every tie. Newest entries first.
   only, placeholder in .env.example. No temperature param (docs
   examples omit it; reasoning models are picky). max_completion_tokens
   caps spend (plan 4000, components 2000).
-- Provider rungs: VITE_AI_PROVIDER=groq → groq, conductor, local;
-  local → local, conductor; default unchanged (conductor, local) — no
+- Provider rungs: VITE_AI_PROVIDER=groq → groq, hosted gateway, local;
+  local → local, hosted gateway; default unchanged (gateway, local) — no
   silent reroute. Fallback only on retryable; first error surfaces.
 - Community backs the shape: constrained decoding kills malformed
   output at the token layer, but always validate client-side anyway
   (thinking models have shipped unconstrained replies with HTTP 200).
 
-## Local fallback: llama.cpp + Qwen3-4B, Conductor stays primary
+## Local fallback: llama.cpp + Qwen3-4B, hosted gateway stays primary
 - User chose llama.cpp over Ollama for the box (7.9GB RAM, CPU-only,
   4 cores): no resident daemon, ~2.6GB mmap'd weight only, portable
   exe + gguf under E:\oovi-local (never in the repo). Community
@@ -129,8 +170,8 @@ Conservative option wins every tie. Newest entries first.
   correction loop unchanged (response_format json_object, not strict
   schema — escalate only if malformed rate demands it). Thinking:
   plan thinks, components get /no_think.
-- Routing: VITE_AI_PROVIDER=local flips order; default keeps Conductor
-  first and falls back to local ONLY on retryable errors
+- Routing: VITE_AI_PROVIDER=local flips order; default keeps the hosted
+  gateway first and falls back to local ONLY on retryable errors
   (network/timeout/5xx + provider-admitted success:false — 4xx config
   errors surface, never masked). No local server running = fast
   connection-refused, no hangs. Ops: never pipe a server through

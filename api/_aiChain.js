@@ -9,11 +9,17 @@
  * bounded same-provider retry first; slow verdicts advance immediately so
  * one struggling model can't burn the whole budget.
  *
- * Keys live ONLY in server env (never VITE_-prefixed, never bundled):
+ * OPEN-WEIGHT ONLY: every rung runs an open-weight model — Groq
+ * gpt-oss-120b and Gemini's Gemma 4 are open weights; the local rung is
+ * Ollama on your own machine (default gpt-oss:20b, sized for 16GB RAM).
+ * No closed/proprietary model is ever called.
+ *
+ * Config lives ONLY in server env (never VITE_-prefixed, never bundled):
  *   GROQ_API_KEY / GROQ_MODEL
  *   GEMINI_API_KEY / GEMINI_MODEL
  *   OPENROUTER_API_KEY / OPENROUTER_MODEL
- *   AI_CHAIN (order, default "groq,gemini,openrouter")
+ *   OLLAMA_URL / OLLAMA_MODEL   (on-device, no key)
+ *   AI_CHAIN (order, default "groq,gemini,openrouter,ollama")
  *
  * Every provider is normalised to OpenAI-style `messages` in and plain
  * `text` out, so the browser keeps calling one route (/api/groq) and never
@@ -26,6 +32,10 @@ const MAX_ATTEMPTS = 2;
 
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
+const OLLAMA_URL_DEFAULT = "http://127.0.0.1:11434";
+// On-device generation is slow on CPU; allow more wall time than the cloud
+// rungs (still bounded by the chain deadline).
+const OLLAMA_TIMEOUT = 120_000;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -78,8 +88,8 @@ async function postJson(url, headers, body, upstream) {
   return { res, data };
 }
 
-function budget(deadline) {
-  return Math.max(5000, Math.min(PROVIDER_TIMEOUT, deadline - Date.now()));
+function budget(deadline, cap = PROVIDER_TIMEOUT) {
+  return Math.max(5000, Math.min(cap, deadline - Date.now()));
 }
 
 function firstText(data) {
@@ -186,7 +196,49 @@ async function callGemini(req, deadline) {
   return { text, model, usage: data?.usageMetadata || null };
 }
 
-const CALLERS = { groq: callGroq, gemini: callGemini, openrouter: callOpenRouter };
+/**
+ * On-device rung: Ollama's OpenAI-compatible endpoint, no key.
+ * Ollama is optional and often not running — a 1.5s health probe keeps a
+ * down daemon an instant fall-through instead of a dead 75s wait. Model
+ * output is plain text + our lenient repair (Ollama's structured-output
+ * support varies by version, so we don't depend on response_format).
+ */
+async function callOllama(req, deadline) {
+  const base = (process.env.OLLAMA_URL || OLLAMA_URL_DEFAULT).replace(/\/+$/, "");
+  const model = process.env.OLLAMA_MODEL || "gpt-oss:20b";
+  try {
+    const health = await fetch(`${base}/api/tags`, { signal: AbortSignal.timeout(1500) });
+    if (!health.ok) throw new Error(`health ${health.status}`);
+  } catch (error) {
+    throw providerError("ollama", `not reachable at ${base} (${error.message})`, { retryable: true });
+  }
+  const body = {
+    model,
+    messages: req.messages,
+    max_tokens: clampTokens(req.maxTokens, 2000),
+    temperature: 0.2,
+    stream: false,
+  };
+  let res;
+  let data = null;
+  try {
+    ({ res, data } = await postJson(`${base}/v1/chat/completions`, {}, body, budget(deadline, OLLAMA_TIMEOUT)));
+  } catch (error) {
+    throw providerError("ollama", `request failed (${error.message})`, { retryable: true });
+  }
+  if (!res.ok) {
+    const detail = data?.error?.message || data?.error || `${res.status}`;
+    throw providerError("ollama", String(detail), {
+      status: res.status,
+      retryable: res.status >= 500 || res.status === 429,
+    });
+  }
+  const text = firstText(data);
+  if (!text) throw providerError("ollama", "empty response", { retryable: true });
+  return { text, model, usage: data?.usage || null };
+}
+
+const CALLERS = { groq: callGroq, gemini: callGemini, openrouter: callOpenRouter, ollama: callOllama };
 
 /**
  * Tries providers in order; returns { text, provider, model, usage, attempts }.
@@ -194,7 +246,7 @@ const CALLERS = { groq: callGroq, gemini: callGemini, openrouter: callOpenRouter
  * request/schema problem still surfaces instead of a downstream mask).
  */
 export async function runChain(req) {
-  const order = (process.env.AI_CHAIN || "groq,gemini,openrouter")
+  const order = (process.env.AI_CHAIN || "groq,gemini,openrouter,ollama")
     .split(",")
     .map((s) => s.trim().toLowerCase())
     .filter((s) => CALLERS[s]);

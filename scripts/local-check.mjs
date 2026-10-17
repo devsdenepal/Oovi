@@ -1,24 +1,49 @@
-const BASE = 'http://127.0.0.1:8080';
+/**
+ * On-device provider probe (Ollama, OpenAI-compatible endpoint).
+ * Checks the daemon, lists installed models, then measures reliability,
+ * JSON discipline, and behaviour under context pressure.
+ *
+ *   node scripts/local-check.mjs
+ *   OLLAMA_URL=http://127.0.0.1:11434 OLLAMA_MODEL=gpt-oss:20b node scripts/local-check.mjs
+ */
+const BASE = (process.env.OLLAMA_URL || 'http://127.0.0.1:11434').replace(/\/+$/, '');
+const MODEL = process.env.OLLAMA_MODEL || 'gpt-oss:20b';
+
+console.log(`--- health ${BASE} ---`);
+try {
+  const res = await fetch(`${BASE}/api/tags`, { signal: AbortSignal.timeout(4000) });
+  const data = await res.json();
+  const names = (data?.models || []).map((m) => m.name);
+  console.log(`reachable=${res.ok} models=[${names.join(', ')}]`);
+  if (!names.some((n) => n === MODEL || n.startsWith(MODEL.split(':')[0]))) {
+    console.warn(`WARN: model "${MODEL}" not installed — run: ollama pull ${MODEL}`);
+  }
+} catch (error) {
+  console.error(`UNREACHABLE (${error.message}) — is Ollama running? https://ollama.com`);
+  console.log('LOCAL CHECK DONE');
+  process.exit(0);
+}
 
 async function chat(messages, { maxTokens = 200, temperature = 0 } = {}) {
   const t = Date.now();
   const res = await fetch(`${BASE}/v1/chat/completions`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ messages, max_tokens: maxTokens, temperature }),
+    body: JSON.stringify({ model: MODEL, messages, max_tokens: maxTokens, temperature, stream: false }),
     signal: AbortSignal.timeout(120000),
   });
   const ms = Date.now() - t;
   if (!res.ok) return { ok: false, ms, error: `http ${res.status}` };
   const data = await res.json();
   const choice = data?.choices?.[0];
+  const completion = data?.usage?.completion_tokens;
   return {
     ok: true,
     ms,
     text: (choice?.message?.content || '').trim(),
     promptTokens: data?.usage?.prompt_tokens,
-    completionTokens: data?.usage?.completion_tokens,
-    tps: data?.timings?.predicted_per_second,
+    completionTokens: completion,
+    tps: completion ? completion / (ms / 1000) : undefined,
     truncated: choice?.finish_reason,
   };
 }
@@ -26,7 +51,7 @@ async function chat(messages, { maxTokens = 200, temperature = 0 } = {}) {
 const SYS = 'You reply with JSON only, no prose.';
 
 // 1-3. Reliability: same trivial probe x3, temp 0.
-console.log('--- reliability x3 (trivial JSON, temp 0) ---');
+console.log(`--- reliability x3 (${MODEL}, trivial JSON, temp 0) ---`);
 for (let i = 1; i <= 3; i++) {
   const r = await chat(
     [{ role: 'system', content: SYS }, { role: 'user', content: 'Return {"ok": true, "word": "pineapple"}.' }],
@@ -58,7 +83,9 @@ try {
   console.log('parsed: FAILED — not JSON');
 }
 
-// 5. Context pressure: a prompt near n_ctx=2048 with a big system block.
+// 5. Context pressure: a prompt near the default context window with a big
+// system block. Our real plan prompt is ~3.8k tokens, so a small n_ctx
+// (Ollama defaults to 2048) truncates it — raise OLLAMA_CONTEXT_LENGTH.
 console.log('--- context: oversized prompt ---');
 const bigSys = SYS + ' ' + 'Poster design theory placeholder. '.repeat(120);
 const r5 = await chat(
