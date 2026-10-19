@@ -45,13 +45,43 @@ Then open `http://localhost:5173`, describe a design on the home page, and it op
 ## How it works
 
 ```text
-User prompt
-  > Architect plan (sections, palette, theme, boxes)      src/ai/architectPrompt.js
-  > Per-component DSL  ·  Pollinations / Unsplash images  src/ai/aiClient.js, api/
+User prompt (as terse as you like)
+  > L1 refine goal   (raw request -> explicit brief)      src/ai/layerPrompt.js
+  > L2 palette       (one non-fading palette)             src/ai/aiClient.js
+  > L3 skeleton      (header/hero/sections/footer boxes)  src/ai/architectPrompt.js
+  > L4 add text      (per-region DSL  ·  Pollinations images)
+  > L5 color correct (palette + contrast repair)          src/ai/colorCorrect.js
   > validateDesign() (structural)                         src/design/designValidator.js
   > evaluateDesign() (quality report, non-mutating)       src/ai/quality.js
   > Fabric.js render (editable objects, history-tracked)  src/renderer/fabricRenderer.js
 ```
+
+The cascade is what lets you type "birthday certificate" and still get a full,
+on-palette layout: each layer refines the last, so no single call has to be
+detailed. Cheap layers (L1, L2) and the deterministic L5 are skipped or
+soft-failed independently, so a weak answer in one never breaks the rest.
+
+A few properties make it survivable on a slow local model:
+
+- **The response streams.** `POST /api/ai` answers with NDJSON
+  (`{"t":"progress",…}` … `{"t":"done",…}`), not one buffered body, so bytes
+  keep flowing for the whole multi-minute run — no hop can time it out — and
+  the button shows a live token counter.
+- **Refinement is per region.** When the quality gate complains, only the
+  regions that own the offending elements are regenerated, each in its own
+  call; a whole replan is reserved for skeleton-level mass overlap.
+- **The skeleton is visible while it fills in.** As soon as L3 lands, the
+  planned regions are drawn on the canvas as a dashed wireframe (role label +
+  box), and each box is retired the moment its real elements arrive. The
+  guides carry no `designId` and are `excludeFromExport`, so they never enter
+  the design, exports, patches, history or the quality gate — they exist only
+  so the canvas is not blank for the minutes L4 takes.
+- **Regions develop element by element.** A component's reply is streamed as
+  token deltas, and each element is parsed out and painted the moment its
+  closing brace arrives — so a region fills in progressively instead of
+  popping in whole after minutes. When the call finishes, the provisional
+  pieces are retracted and the validated set is applied as ONE undo step, so
+  the final design is identical to the non-streamed result.
 
 The **Design DSL** is the contract between AI and canvas: a plain-JSON document of canvas + elements:
 
@@ -78,58 +108,45 @@ Copy `.env.example` to `.env`. Keys are **server-only** unless prefixed `VITE_`:
 
 | Variable | Where | Purpose |
 |---|---|---|
-| `VITE_GROQ_MODEL` | Browser | Model hint sent with each request (each rung uses its own configured model) |
-| `GROQ_API_KEY` / `GEMINI_API_KEY` / `OPENROUTER_API_KEY` | Server only | Open-weight AI chain (`api/_aiChain.js`) |
-| `OLLAMA_URL` / `OLLAMA_MODEL` | Server only | On-device open-weight rung (Ollama) |
+| `OLLAMA_URL` / `OLLAMA_MODEL` | Server only | On-device provider (Ollama serving the local Gemma model) |
 | `POLLINATIONS_KEY` | Server only | AI image generation (`api/asset.js`) |
 | `UNSPLASH_ACCESS_KEY` | Server only | Photo search (`api/photos.js`) |
 | `PGHOST / PGPORT / PGUSER / PGPASSWORD / PGDATABASE` | Server only | Postgres connection (`server/index.js`) |
 | `VITE_MOCK_AI=1` | Browser | Offline mode, no network calls |
 
-> Never put a secret in a `VITE_`-prefixed variable. Those are bundled into the client. The browser holds no image or database credentials.
+> Never put a secret in a `VITE_`-prefixed variable. Those are bundled into the client. The browser holds no image, AI, or database credentials.
 
-### AI providers — open-weight chain
+### AI provider — on-device open weights
 
-Every generation runs on **open-weight models only**. A single POST to the
-same-origin `/api/groq` route walks a server-side chain
-([`api/_aiChain.js`](api/_aiChain.js)) and returns the first success, so a
-rate limit or outage on one provider never drops a component. Prompts use
-strict JSON schemas; the key never reaches the browser.
+Every generation runs on an **open-weight model only**, served on-device by
+[Ollama](https://ollama.com). A single POST to the same-origin `/api/ai`
+route resolves the provider in [`api/_aiChain.js`](api/_aiChain.js); prompts
+use strict JSON schemas and no key ever reaches the browser.
 
-| Rung | Model | Host | Notes |
-|---|---|---|---|
-| 1 | `openai/gpt-oss-120b` | Groq | Apache-2.0; free tier (30 req/min, 8k TPM) |
-| 2 | `gemma-4-31b-it` | Gemini API | open weights; separate quota pool |
-| 3 | `nvidia/nemotron-3-super-120b-a12b:free` | OpenRouter | open weights; free tier |
-| 4 | `gpt-oss:20b` | **Ollama (on-device)** | open weights, ~12 GB — fits 16 GB RAM |
+| Model | Host | Notes |
+|---|---|---|
+| `gemma4:e2b` | **Ollama (on-device)** | open weights, 131k context; no key, no outbound AI calls |
 
-Order is set by `AI_CHAIN` in `.env`. Any failure — `429`, `5xx`, network,
-timeout, or empty body — advances to the next rung. Only cheap transient
-faults retry on the same provider; a rate limit advances immediately.
-`VITE_MOCK_AI=1` skips the network entirely.
+The provider is set by `AI_CHAIN` in `.env` (default `ollama`). A failure —
+`5xx`, network, timeout, or empty reply — surfaces as an error; only cheap
+transient faults (network blips, fast `5xx`) get one bounded same-provider
+retry. `VITE_MOCK_AI=1` skips the network entirely.
 
-**Rung 4 is on-device and needs no key** ([Ollama](https://ollama.com)):
+Install ([Ollama](https://ollama.com)) and pull the model:
 
 ```bash
-ollama pull gpt-oss:20b
-# our prompts exceed Ollama's 2048-token default context:
-setx OLLAMA_CONTEXT_LENGTH 8192
+ollama pull gemma4:e2b
 ```
 
-It sits last as an offline fallback so a slow CPU model can never stall a
-generation; when Ollama is not running the rung falls through in ~1.5 s.
-Put `ollama` first in `AI_CHAIN` to make on-device primary.
-
-> The chain is the only way out of the app: there is no second gateway and
-> no client-side provider switch, so no call can bypass the open-weight
-> rungs above. Adding or reordering a provider means editing
-> `api/_aiChain.js`.
+> The route is the only way out of the app: there is no client-side provider
+> switch, so no call can bypass the on-device open-weight model. Changing the
+> model means editing `api/_aiChain.js` (or `OLLAMA_MODEL`).
 
 ## Project structure
 
 ```text
 src/
-  ai/            AI client, architect/component prompts, mock provider, quality gate
+  ai/            layered pipeline (goal/palette/skeleton/text/color), client, prompts, mocks, quality gate
   app/           App.js: orchestration (generation, persistence, history, panels)
   components/    Dashboard, TopBar, InsertPanel, AssistantPanel, DebugTabs, …
   design/        DSL schema, validator, canvas presets, design types

@@ -2,46 +2,30 @@
 
 Conservative option wins every tie. Newest entries first.
 
-## Open-weight-only + on-device rung (user order: "only opensource models", "use ollama")
-- Model choice is now a hard rule, not a preference: every rung runs an
-  open-weight model — Groq gpt-oss-120b (Apache-2.0), Gemini gemma-4-31b-it,
-  OpenRouter nemotron-3-super-120b-a12b:free, and on-device gpt-oss:20b.
-  No closed/proprietary model is called anywhere in the pipeline.
-- The unverifiable third-party gateway rung and its whole client path are
-  DELETED, not just demoted: the direct fetch to that endpoint, its URL
-  constants, the Vite and Vercel proxy rewrites, and the env vars that fed
-  it are all gone. The server-side chain is now the only way out of the
-  app, which makes "open-weight only" checkable rather than aspirational.
-- Fixing that also removed a latent bug: the old client flag defaulted to
-  that gateway, so an unset/other value put the unverifiable model FIRST
-  and the chain second.
-- Local rung = Ollama (user order, superseding the llama.cpp/8080 plan —
-  no local code had been written yet, so nothing to unwind), OpenAI-compat
-  /v1/chat/completions, OLLAMA_URL default http://127.0.0.1:11434.
-- Position: LAST, as an offline fallback. Tie-break by this file's own rule
-  ("conservative option wins every tie"): a 16GB-RAM CPU model generating a
-  ~1200-token component can exceed the 165s chain deadline and the 180s
-  client timeout, so local-first could hang generation on the machine it
-  was added for. Last means it can never stall a run, and it is one env
-  line to promote (`AI_CHAIN=ollama,...`).
-- Cost of last: when cloud rungs work, the on-device model is never
-  exercised. Accepted deliberately — capability + offline path over demo
-  theatre.
-- Reachability: 1.5s /api/tags health probe, so a down daemon is an instant
-  fall-through instead of a dead 120s wait; connection errors are retryable
-  and log as "[ai] chain ok/failed". No response_format passed (Ollama's
-  structured-output support varies by version) — prompt discipline + the
-  existing lenient repair handle it.
-- Context: our plan prompt is ~3.8k tokens; Ollama defaults to n_ctx=2048,
-  so the model would be silently truncated. Documented
-  OLLAMA_CONTEXT_LENGTH=8192 rather than passing num_ctx (not part of the
-  OpenAI-compat surface). Not machine-verifiable here: Ollama is not
-  installed on this box (~/.ollama exists but holds no models, no binary,
-  nothing on 11434) — the rung is proven to degrade gracefully, not to
-  generate.
-- Model pick: gpt-oss:20b (~12GB Q4) is the largest open-weight model that
-  fits 16GB RAM with headroom, and it keeps the local family the same as
-  rung 1 (gpt-oss), so prompt/JSON behaviour carries over.
+## On-device only: Ollama + Gemma (user order: "only opensource models", "use ollama")
+- Provider choice is a hard rule, not a preference: every AI call runs an
+  open-weight model served on-device by Ollama (the local Gemma model,
+  `gemma4:e2b`). No cloud provider, no key, and no outbound AI traffic
+  anywhere in the pipeline.
+- Every other provider is DELETED, not just demoted: the cloud callers,
+  their URL constants, model ids and key env vars, the client-side model
+  hint, and the provider-specific probe scripts are all gone.
+  `api/_aiChain.js` now holds exactly one provider.
+- The unverifiable third-party gateway rung and its whole client path stay
+  deleted, so the server route is the only way out of the app — which makes
+  "open-weight only" checkable rather than aspirational.
+- The AI route and its file were renamed so the endpoint no longer names a
+  provider it does not use (now `api/ai.js` at `POST /api/ai`). Browser
+  contract otherwise unchanged: one POST, OpenAI-style `messages` in /
+  `{ text, provider }` out.
+- Reachability: a 1.5s /api/tags health probe fails fast when the daemon is
+  down instead of hanging to the 120s timeout; connection errors retry once.
+  No response_format passed (Ollama's structured-output support varies by
+  version) — prompt discipline + the existing lenient repair handle it.
+- Context: the plan prompt is ~3.8k tokens; gemma4:e2b reports a 131k
+  context, so no OLLAMA_CONTEXT_LENGTH override is needed.
+- Model pick: whatever is installed on this machine (`gemma4:e2b`, 4.6B
+  Q4_K_M) is what runs — no download step, fits comfortably in RAM.
 
 ## Bricked opens (user report): save accepted what open rejected — twice
 - Bug 1, validator: save persists Fabric truth (group children in
@@ -68,33 +52,18 @@ Conservative option wins every tie. Newest entries first.
   browser, asserts objects + no error toast), 3 validator fixtures in
   quality-check. All 4 bricked designs open (4/13/22/28 objects).
 
-## Server-side AI chain (user order): groq → gemini → openrouter-free
-- Every /api/groq request walks providers in order (AI_CHAIN), first
-  success wins; any failure (429/5xx/network/timeout/empty) advances.
-  The 8000-TPM 429 storm that dropped headline/tagline/header is now
-  absorbed by rung 2/3 instead of skipping components.
-- Free-only: Groq gpt-oss-120b, Gemini gemma-4-31b-it, OpenRouter
-  nvidia/nemotron-3-super-120b-a12b:free (the :free gpt-oss slug is dead;
-  enumerated live free list + structured-output flags to pick it).
-  gemma-4-26b-a4b-it answers under load but ignores JSON discipline
-  (prose, not parseable) — rejected: a 200-with-garbage is worse than a
-  retryable 503, because garbage parses nowhere and the chain can't
-  recover. 31b's demand 503s are retryable → chain advances (~30s cost,
-  bounded by the slow-verdict rule below).
+## Server-side AI gateway (user order): one route, on-device provider
+- Every /api/ai request resolves its provider in api/_aiChain.js; the
+  browser sends one normalized request and never learns how the model is
+  hosted. There is no client-side provider switch.
 - Retry policy: same-provider retry ONLY for cheap transient faults
-  (network blips, fast 5xx < ~25s). 429s and slow verdicts advance
+  (network blips, fast 5xx < ~25s). A 429 or slow verdict stops
   immediately — a 500ms sleep won't clear a quota or demand spike.
-- Gemini gets OpenAI-messages → systemInstruction/contents conversion +
-  JSON mime (its responseSchema subset can't express our null-unions, so
-  strict schemas stay Groq/OpenRouter-only; our lenient parser covers
-  Gemini output). OpenRouter reuses the OpenAI shape incl. strict with a
-  400→json_object downgrade, mirroring the client.
-- Browser contract unchanged: one POST /api/groq, response gains
-  `provider`/`attempts`; client logs which rung answered
-  (`[ai] chain ok via openrouter …`). Keys server-only, never VITE_.
-- SECURITY: Gemini + OpenRouter keys were pasted in chat (exposed) —
-  rotate both when convenient. They live only in gitignored .env.
-  Same standing reminder for the Groq key pasted earlier.
+- Strict json_schema is requested first; a 400 downgrades once to plain
+  json_object, where the existing lenient repair loop takes over.
+- Browser contract: POST /api/ai, OpenAI-style `messages` in, and the reply
+  carries `provider`/`attempts`; the client logs which model answered
+  (`[ai] ok via ollama …`). Nothing provider-specific is VITE_-prefixed.
 
 ## Perf/scale audit (user order): measure first, fix the hot spots
 - History snapshotted the WHOLE canvas per keystroke (text:changed →
@@ -113,77 +82,22 @@ Conservative option wins every tie. Newest entries first.
 - Theory/gradient package (type scale, palette discipline, focal rules,
   gradient DSL) inspected and queued behind this audit, not dropped.
 
-## Local llama server eliminated (user order)
-- Killed all llama-server processes; deleted fetchLocalChat, the local
-  rungs, think/timeoutMs plumbing, and local docs (.env.example,
-  README). Provider order is now groq ↔ the hosted gateway only. Rung errors
-  fixed too: non-retryable stops the chain but the PRIMARY error
-  surfaces (previously a fallback's error masked it).
-- Disk files under E:\oovi-local (bin + 2.4GB gguf) deliberately left
-  in place — say the word and they're gone, no re-download otherwise.
-
-## Groq strict schemas + crowded-plan replan (first live Groq poster)
-- Groq strict rejects schemas whose properties aren't ALL required:
-  every field is now required, optionals as null-unions, and the
-  validator strips nulls before checking (false/0 preserved). Kills the
+## Strict schemas + crowded-plan replan (first live poster)
+- Strict json_schema rejects schemas whose properties aren't ALL required:
+  every field is now required, optionals as null-unions, and the validator
+  strips nulls before checking (false/0 preserved). Kills the
   400-then-downgrade round-trip on every component call.
-- Reasoning effort wired end to end (plan medium, components low —
-  verified accepted first): the main TPM lever on the 8K-tier key,
-  alongside component maxTokens 2000→1200.
-- Tidy displacement capped at 120px/object (overlap shoves only;
-  edge slide-backs stay unbounded). Beyond the cap the pair is named
+- Reasoning effort wired end to end (plan medium, components low — verified
+  accepted first), alongside component maxTokens 2000→1200.
+- Tidy displacement capped at 120px/object (overlap shoves only; edge
+  slide-backs stay unbounded). Beyond the cap the pair is named
   unresolvable, not rearranged into new overlaps (+290px cascades seen).
 - Mass overlap (≥5 error overlaps) replans once like underbuilt plans
-  ("stagger boxes, bars behind their text"); sanitize warns when
-  planned boxes already overlap (decoration exempt — bleed is legal).
-
-## Groq GPT-OSS provider (server-side key, strict schemas)
-- Model: openai/gpt-oss-120b first (500 tok/s, reasoning-grade plans),
-  20b as the cheap alt. Both guarantee strict json_schema per Groq docs;
-  plan uses a closed schema, components use anyOf-of-6 with automatic
-  downgrade to json_object on 400 (nested groups can't recurse in strict
-  mode). Repair loop stays as backstop either way.
-- Key NEVER reaches the browser: new api/groq.js proxy (same shape as
-  asset/photos, Vercel-compatible), GROQ_API_KEY in gitignored .env
-  only, placeholder in .env.example. No temperature param (docs
-  examples omit it; reasoning models are picky). max_completion_tokens
-  caps spend (plan 4000, components 2000).
-- Provider rungs: VITE_AI_PROVIDER=groq → groq, hosted gateway, local;
-  local → local, hosted gateway; default unchanged (gateway, local) — no
-  silent reroute. Fallback only on retryable; first error surfaces.
-- Community backs the shape: constrained decoding kills malformed
-  output at the token layer, but always validate client-side anyway
-  (thinking models have shipped unconstrained replies with HTTP 200).
-
-## Local fallback: llama.cpp + Qwen3-4B, hosted gateway stays primary
-- User chose llama.cpp over Ollama for the box (7.9GB RAM, CPU-only,
-  4 cores): no resident daemon, ~2.6GB mmap'd weight only, portable
-  exe + gguf under E:\oovi-local (never in the repo). Community
-  consensus backs it: Ollama IS llama.cpp underneath; same file + same
-  settings run within noise, raw llama.cpp wins on control (context,
-  slots, KV quant), Ollama on convenience.
-- Model: Qwen3-4B Q4_K_M — the file the community benchmarks (single
-  user competitive, Apache 2.0, strong instruction/JSON following).
-  Server: `-c 4096 -np 3 -t 4` (small ctx for our short prompts, 3
-  slots matching the fan-out, CPU threads = cores).
-- Contract: responses go through the existing regexRepair + validate +
-  correction loop unchanged (response_format json_object, not strict
-  schema — escalate only if malformed rate demands it). Thinking:
-  plan thinks, components get /no_think.
-- Routing: VITE_AI_PROVIDER=local flips order; default keeps the hosted
-  gateway first and falls back to local ONLY on retryable errors
-  (network/timeout/5xx + provider-admitted success:false — 4xx config
-  errors surface, never masked). No local server running = fast
-  connection-refused, no hangs. Ops: never pipe a server through
-  `Select-Object -First` (pipeline close kills it — learned the hard way).
-- Measured CPU reality (4-core, Qwen3-4B Q4_K_M): prefill ~4 tok/s,
-  gen ~3 tok/s. A 1K-token component prompt needs ~4 min before its
-  first token — so local caps are per call type (plan 20 min thinking,
-  components 10 min /no_think), not the 180s gateway cap. Full local
-  poster ≈ 30–45 min: 5–10× slower than a healthy gateway, available
-  when the gateway is down. Server slots sized to fit: -c 8192 -np 2
-  (4096/slot covers plan prompt + thinking + output; 1536/slot
-  truncated plans).
+  ("stagger boxes, bars behind their text"); sanitize warns when planned
+  boxes already overlap (decoration exempt — bleed is legal).
+- Community backs the shape: constrained decoding kills malformed output at
+  the token layer, but always validate client-side anyway (thinking models
+  have shipped unconstrained replies with HTTP 200).
 
 ## Speed: 3-wide fan-out with 2s request gaps (supersedes half-parallel)
 - Half-parallel burst-hung the gateway, so per user rule: max 3 concurrent
@@ -462,3 +376,494 @@ Conservative option wins every tie. Newest entries first.
 - **Topbar tabs kept as view shortcuts** (Design→Insert tab, Code→Developer
   disclosure, Pipeline→Pipeline tab) instead of removed, to preserve the
   existing Code/Pipeline reachability.
+- **Layered generation, not one-shot planning:** the architect pass is split
+  into L1 goal (raw prompt -> explicit brief), L2 palette (guaranteed
+  non-fading contrast), L3 skeleton (boxes/roles only), then L4 per-region
+  text and L5 deterministic colour correction. Each layer is small and
+  soft-fails on its own, so a terse prompt still lands a complete design and
+  no single model answer can wreck the run.
+- **Refinement is per region, not a whole replan:** the quality gate's
+  complaints are mapped back to the regions that own the offending element
+  ids, and only those regions are regenerated — each in its own call. A
+  whole replan is kept ONLY for mass overlap (>=5 collisions) or complaints
+  with no owning region, because those are skeleton-level, not region-level.
+- **`/api/ai` streams NDJSON; no WebSocket:** on-device runs take minutes and
+  a single silent HTTP response is exactly what idle timeouts kill. The
+  response is a progress stream (`{"t":"progress"}…` then `{"t":"done"}`),
+  which keeps bytes flowing at every hop and drives live UI progress. A
+  WebSocket was rejected: it will not run on the Vercel serverless target and
+  adds a dependency, and it solves the same idle-time problem no better.
+- **Provider POST over core `http.request`, not global fetch:** undici (Node
+  fetch) defaults to a 300s headers/body timeout. With `OLLAMA_NUM_PARALLEL=1`
+  a queued request receives no bytes until the generation ahead finishes, so
+  undici killed it at ~300s with "fetch failed". Core http has no such
+  default, so only our own budget applies. Components also build serially:
+  fanning out against one slot only queues (and times out) without being
+  faster.
+- **Skeleton is drawn as a non-design wireframe, not left blank:** on a local
+  model the skeleton layer can finish minutes before the first region renders,
+  so the canvas showed nothing while "progress" ticked. showSkeletonGuides()
+  paints one dashed box + role label per planned region the instant L3 lands,
+  and each guide is retired (clearGuideFor) as its real elements arrive. The
+  guides carry NO `designId` and set `excludeFromExport`, which is what makes
+  them safe: canvasToDesign() skips them (never in the design/export/patches/
+  quality gate) and fabric's toObject() filters them out of EVERY history
+  snapshot (dist `objects: this._objects.filter(o => !o.excludeFromExport)`),
+  so undo/redo can never resurrect a phantom wireframe. They are also
+  selectable:false/evented:false and hidden from the layers panel and the
+  collision resolver, and applyPatchOps offsets plan-rank inserts by
+  guideCount() so the guides stay pinned below all real content.
+- **Components develop in chunks off the token stream:** waiting for a whole
+  region (minutes on CPU) before painting made 4/5 look frozen. The server now
+  forwards raw tokens as `{"t":"delta"}` (opt-in per request via `delta:true`,
+  so goal/palette/skeleton calls stay lean) and `createElementScanner()`
+  (src/ai/streamJson.js) extracts each element as its closing brace arrives —
+  a resumable, string-aware brace matcher that ignores partial objects. The
+  canvas paints them immediately via applyPatchOps(ops, {history:false,
+  quiet:true}) so streaming never floods undo or steals the selection; when
+  the call returns, the provisional ids are retracted and the validated set is
+  applied normally (one undo step per component). Net effect: an identical
+  final design, but it visibly builds itself.
+- **Streaming preview is not authoritative:** only the validated set is kept,
+  because the model's partial JSON is unvalidated (unclamped coordinates, off-
+  palette fills, the occasional malformed object). Tracking ids optimistically
+  (and treating "remove missing id" as a no-op) means a rejected partial
+  cannot leak into the finished design.
+
+## On-device tuning — measured findings and the shared prompt prefix
+
+Measured on this box (i5-2520M, 2 physical cores, AVX only, CPU-only, Ollama
+0.40.6, `-np 1`, flash-attn + q8_0 KV, `keep_alive 30m`):
+
+- **Prefill is the bottleneck, not generation.** Reading a 651-token prompt
+  took 64.7s (**10.1 tok/s**); generation runs at **2.73 tok/s**. A 3.8k-token
+  plan prompt therefore costs ~6 minutes before one token is emitted. Every
+  decision below follows from that ratio.
+- **`e2b` thinks silently unless told not to.** A ~30-token answer cost 425
+  generated tokens with thinking on; `think:false` produced 9. Verified with a
+  direct `/api/chat` call that `think:false` is the right field name in 0.40.6
+  (hidden reasoning was ~2 min per call).
+- **Prefix caching partly works and is worth engineering for.** Changing only
+  the last line left 2048 of 3106 prompt tokens cached (a multiple of 1024, the
+  batch size). Uncached tokens cost ~0.12s each.
+- **A differing load-time option forces a reload.** Sending `num_thread:2` to a
+  resident model cost `load_duration` 19-22s — and a reload also discards the
+  prefix cache.
+- **Token caps do not bind**, so `num_predict` is a truncation guard only.
+- **`num_thread=2` beats 3** here (prefill 10.1 vs 9.6 tok/s, generation 2.73
+  vs 2.62) — the box has 2 physical cores.
+- `gemma3:1b` prefills ~2x faster but produced a degenerate answer (one colour
+  three times), so it is not a drop-in replacement. Unresolved: a 4m05 total
+  against 2m14 prefill + 5s generation — suspected draft-model re-reading of
+  the uncached prompt.
+
+### What changed in Phase 1
+
+- **`api/_aiChain.js`:** every call now sends `think:false`, `keep_alive:"30m"`
+  and ONE byte-identical `options` object (`num_ctx:8192`, `num_thread:2`,
+  `temperature:0.2`, `num_predict:1100`). `num_predict` is fixed precisely so
+  no per-layer value can trigger a reload. `format` is wired from the schema
+  the client already sends (the schema object, or Ollama's plain `"json"` for
+  the lenient fallback), with `OLLAMA_FORMAT=0` to disable it. Every call logs
+  Ollama's own `load_duration`, `prompt_eval_count`, `prompt_eval_cached_count`,
+  `prompt_eval_duration`, `eval_count`, `eval_duration`, `total_duration`.
+- **`src/ai/layerPrompt.js`:** new exported `DESIGN_CORE` — one static block
+  (DSL contract, rules, one compact example, ~476 tokens) that L1-L4 all begin
+  with verbatim. Nothing variable lives in it: canvas, palette, theme, ids and
+  the brief moved to each layer's `[User]` turn, which now comes last. L3's
+  ~3.8k-token prose checklist collapsed into one roles line plus an example, so
+  no interpolation remains in the prefix.
+- **`src/ai/architectPrompt.js`:** L4 reuses `DESIGN_CORE` and orders its user
+  turn constant-within-design first (canvas, palette, theme, brief) and
+  region-specific last, so a warmed prefix covers the most tokens. This also
+  fixes a real defect: the component prompt had no `[User]` marker, so it was
+  sent as a single system-role message (`messages=1`) with the literal text
+  `[System]` inside it.
+- **`src/app/App.js`:** regions generate in priority order (headline, hero,
+  image, rest, decoration) while still inserting at their plan rank, so the
+  first meaningful element lands in ~2 minutes instead of ~9.
+- **Trade-off accepted (and later corrected):** L1-L3 initially carried ~476
+  tokens of DSL context they do not strictly need, on the theory that it is
+  paid once and cached thereafter. The first full run disproved the caching
+  half of that (below), so L2's short prompt was restored.
+
+### Prefix reuse needs a context checkpoint (measured correction)
+
+The first full run showed the shared prefix is **not** free. Ollama's log:
+
+```
+forcing full prompt re-processing due to lack of cache data
+(likely due to SWA or hybrid/recurrent memory)
+created context checkpoint 1 of 32 (pos_min = 0, pos_max = 824, n_tokens = 825)
+```
+
+For this SWA/hybrid model llama.cpp can only reuse KV state up to a **context
+checkpoint**. The prompt is processed in `n_batch` blocks (1024 here, per
+`-b 1024 -ub 1024`), and a sub-1024-token prompt is a single block whose only
+checkpoint sits near its end. A 479-token shared prefix is therefore smaller
+than any checkpoint and can never be reused:
+
+- identical prompt -> `prefill=829tok(cached 828)/0.4s` — a 77s saving
+- shared 479-token prefix, different tail -> `prefill=795tok(cached 0)/73.4s`
+
+So a shared prefix only pays for itself once the COMMON region is at least one
+batch (>=1024 tokens) long; below that it is pure added prefill. Consequence on
+L2: palette regressed 35s -> 88s, so its short prompt was restored. This also
+explains the earlier "changing only the last line gave 2048 of 3106 cached":
+3106 tokens spans three batches, so a checkpoint at 2048 was available.
+
+### Speculative decoding: what the 105s wall-clock gap actually is (measured)
+
+The full-pipeline verification run (1690s wall, 9 calls) settled this. The
+draft model is baked into the model file, not a flag:
+
+```
+ollama show gemma4:e2b --modelfile
+  FROM  sha256-6dd7ac24…            (main, 4.6B)
+  DRAFT sha256-dd57b3b7…            (the speculative draft)
+  PARAMETER draft_num_predict 3
+ps -> llama-server … --spec-type draft-mtp --spec-draft-n-max 3
+                      --spec-draft-backend-sampling --spec-draft-model <blob>
+```
+
+**The switch** (no server edit needed): send `"options":{"draft_num_predict":0}`
+— the official Modelfile reference says "set to 0 to disable speculative
+drafting", and ollama#18517's answer is exactly that one line. Server-wide
+alternative: `LLAMA_ARG_SPEC_TYPE` in the service env (ollama#17016). It is a
+load-time option, so it costs one reload and must then be identical on every
+call. `gemma3:1b` has no `DRAFT` line, which makes it the control case.
+
+**But the gap is not "the draft re-reads the uncached prompt".** Per-call rows:
+
+| call | prefill | cached | prefill s | eval | eval s | total | wall |
+|---|---|---|---|---|---|---|---|
+| L1 goal (cold) | 829 | 0 | 83.4 | 114 | 50.6 | 134.0 | 134.0 |
+| L1 goal (warm) | 829 | 828 | 0.4 | 120 | 56.8 | 57.1 | 57.1 |
+| L2 palette | 795 | 0 | 73.4 | 38 | 14.8 | 88.3 | 88.3 |
+| L3 skeleton | 1164 | 0 | 107.8 | 339 | 105.3 | 213.1 | **318.0** |
+| L4 headline | 1002 | 139 | 113.8 | 343 | 130.7 | 244.5 | 244.5 |
+| L4 header | 998 | 783 | 28.1 | 333 | 118.9 | 147.0 | 147.0 |
+| L4 details | 990 | 783 | 29.6 | 577 | 181.6 | 211.3 | 211.3 |
+| L4 sections | 986 | 783 | 24.1 | 846 | 252.9 | 277.0 | 277.0 |
+| L4 decoration | 987 | 782 | 24.1 | 1072 | 322.1 | 346.2 | 346.2 |
+
+Two corrections to the earlier theory:
+
+1. **`cached = 0` does not cause the gap.** L1-cold and L2 both cached 0 and
+   both have `wall == total`. Only L3 differs.
+2. **The gap is a mid-generation stall, and it is invisible in every Ollama
+   counter.** L3's own log shows generation running at ~3.5 tok/s, then
+   `n_gen = 243` at 10:28:30 and `n_gen = 253` at 10:30:20 — ten tokens in 110
+   seconds — then straight back to 3.5 tok/s. `total_duration` (213.1s) equals
+   prefill + eval and simply does not include that stall, so it is not prefill
+   and not eval; nothing at all is logged while it runs. The draft model's own
+   `dur(b,g,a)` statistics do not account for it either.
+
+   The one thing L3 has that no other call has: a prompt **over 1024 tokens**
+   (1164), i.e. more than one ubatch at `-ub 1024` — the only multi-ubatch
+   prompt of the run. So the working rule is "keep every prompt inside one
+   batch", which the ≤1000-token shared prefix already does for L4.
+
+**Prefix reuse works well between consecutive same-layer calls** (783 of 998
+tokens for L4 #2-#5, ~78%, prefill 28s instead of 114s). It does not work
+across different layers, which is why the shared prefix on L1-L3 buys nothing:
+the common region is smaller than one checkpoint. L4-to-L4 is where it pays.
+
+Net effect on the run: the whole 6-region design took 1690s (28 min) against a
+baseline of L1 120 + L2 35 + L3 294 + 6x L4 (121-334) ≈ 25-40 min. L4 dominates
+and L4 is generation-bound (846-1072 eval tokens on the content-heavy regions),
+so the remaining wins are upstream: fewer/shorter prompts, and not generating
+regions the design does not need.
+
+## Phase 2 — templates replace free-form L3 (user-approved direction)
+
+L3 asked the model for free-form boxes: a 1.16k-token prompt costing 107s of
+prefill (318s wall here) whose boxes then had to be *checked*, with the plan
+re-asked whenever they collided. Phase 2 trades that for a bounded vocabulary.
+
+- **`src/layout/templates.js`** — 10 templates x 2 variants, each declaring
+  named slots `{id, role, box, optional, size, maxChars, describe}`. Every slot
+  is a sub-rectangle of ONE partitioned frame (`MARGIN 5.5%`, `GUTTER 2.5%`), so
+  boxes cannot overlap by construction. Decoration is a strip on the canvas
+  edge, outside the frame, so it can never become a text's contrast bed.
+  `instantiateTemplate()` is deterministic: fractions -> 8px-grid-snapped px,
+  font sizes taken from the existing type scale, `maxChars` derived from the
+  real box and font size. It returns `ok:false` on any collision or
+  under-coverage, which is exactly what triggers the free-form fallback.
+- **L3 is two small steps** (`src/ai/templatePrompt.js`): (a) choose a template
+  — the keyword/size pre-filter answers it with **zero tokens** unless the
+  shortlist is genuinely ambiguous; (b) a tuning patch limited to variant,
+  show/hide optional slots, +-25% type, alignment and density. `sanitizeTuning`
+  drops unknown keys, clamps numbers, refuses to hide a non-optional slot, and
+  never reads a box (boxes are never accepted from the model). Both prompts
+  begin with the byte-identical `TEMPLATE_MENU`, so the second call reuses the
+  first one's prefix.
+- **L4** now receives the slot's fixed box, its type size and its copy limit.
+- **The full free-form L3 is kept as the fallback** whenever no template suits
+  the canvas shape, the model names an unknown template, or instantiation
+  fails. Nothing in the build loop, wireframe, quality gate or collision tidy
+  changed: a template plan is the same `{palette, style, components[]}` shape.
+- **`src/layout/palettes.js`** — 15 curated palettes, every one >= 4.5:1 ink on
+  background, matched by brief keywords (style/tone hits weigh double). A match
+  removes the L2 model call entirely.
+- **`src/layout/grid.js`** — 8px grid snap + type-scale snap. The template's own
+  size comes FROM the scale; the model's bounded tune is a real multiplier on
+  top (snapping the tuned value back onto the scale would make a +12% headline
+  a no-op).
+
+### Verification
+
+`npm test` is new: it bundles `tests/*.test.mjs` with the esbuild Vite already
+ships (the sources use extensionless ESM imports, which node cannot load
+directly) and runs node's built-in test runner. 19 tests, including the one the
+plan asked for — **every template x variant x platform preset x {light, dark}
+palette is materialised into a real pixel design and run through the app's own
+quality gate** (`src/ai/quality.js`): zero errors, no text-on-text overlap, the
+coverage and headline floors met. Also asserted: decoration never overlaps a
+content slot, tuning cannot break collision-freedom, the L3 menu is
+byte-identical across both calls and contains nothing variable, and L1-L4 still
+share the `DESIGN_CORE` prefix verbatim.
+
+`npm run build` stays green.
+
+## Phase 3 — retrieval-chosen layouts (30 templates, BM25 + embedding benchmark)
+
+### What the library is now
+
+The static template menu is gone. `TEMPLATE_RULES` (byte-identical, names no
+template) is still the prompt prefix; the candidates are appended LAST as
+variable data, and they are no longer "all 30" but the handful that actually
+match the brief.
+
+- **30 templates**, each with retrieval metadata (type, sizes, moods, tags,
+  keywords, a one-line blurb) and, per text slot, 2-3 example strings written to
+  fit that slot's own `maxChars`.
+- Every template x variant x preset x palette still materialises into a real
+  design and is run through the app's own quality gate: **zero errors**. That
+  gate caught two real bugs in the new geometry (`timeline` and
+  `class-schedule` painted only 14% of a 16:9 canvas — small body type over
+  three columns reads empty; both now use display/subtitle sizes).
+- **Where the example copy is used matters.** Examples are L4 one-shots (the
+  region gets "here is a line that was written for this box"). They are NOT
+  retrieval evidence: `templateDocument()` indexes curated metadata + slot
+  descriptions only. When examples were indexed, a class-schedule example
+  mentioning a yoga mat made "the mating habits of the glass frog" rank a layout
+  #1 at 25 % coverage. Curated metadata keeps the abstain signal honest.
+
+### The ranking decision (measured, not assumed)
+
+`scripts/benchmark-retrieval.mjs` runs 21 labelled briefs (19 real briefs +
+2 negative controls: a nonsense subject and a Hindi brief) over both rankers.
+The runner-up/abstain policy lives in ONE function (`selectFromScored`) so the
+benchmark and the pipeline cannot drift apart.
+
+**BM25 (zero tokens, no model): top-1 60 %, top-3 95 %, abstained 100 %,
+false-match 0 %.** Both negative controls abstain; no brief with a real subject
+is ever matched to a layout at random.
+
+Three findings worth keeping:
+
+1. **Coverage, not raw BM25 score, decides.** "Wedding invitation card" put
+   `ticket` first on BM25 score (its description mentions invitations with a
+   stub); ranked by idf-weighted *coverage* — the share of the brief's terms a
+   template actually explains — the list is `ticket` 64 %, `centered-poster`
+   36 %, `card-grid` 28 %. Same top-1/top-3 totals on the labelled set, but the
+   ordering now agrees with the number that decides abstention, and one real
+   case is fixed.
+2. **A term the corpus has never seen must not dominate.** Uncapped idf, "job
+   opening notice for a graphic designer" abstained because the rare words
+   (`job`, `graphic`) outweighed the matched ones. Coverage weights are capped
+   at 2.5, which leaves the intended signal intact: a brief whose vocabulary is
+   *entirely* outside the library still scores 0 and abstains.
+3. **Light stemming is load-bearing.** A designer writes "blood donation
+   drive" and "summer camp registration"; the corpus says "donate" and
+   "register". Longest-suffix strip (never below 4 characters, re-run once for
+   `registration -> registr -> regist`) made both match without inventing
+   matches on the controls.
+
+**The model still chooses when there is a choice.** The shortlist is the
+templates that clear the coverage threshold, capped at 3 — not "the top three
+regardless". Exactly one survivor is taken for free; two or three go to the
+model. The first version trusted any hit above 50 % coverage, which silently
+picked `ticket` over `centered-poster` for a wedding invitation. Being decisive
+is only safe when there is nothing to decide between: on this set that is 15 %
+of briefs, and the other 80 % pay one ~60 s call to arbitrate. Worth it — a
+wrong layout is invisible until the user notices, while 60 s is on the clock.
+
+### Cost
+
+The prompt is smaller than the static menu it replaces (3 candidates with their
+slot descriptions, not 30), which is the lever that matters on a box where a
+call is prefill-dominated. Per-layer timings and the Phase 2 comparison are in
+the section above; the retrieval stage itself adds no model call and no
+measurable time (BM25 over 30 documents is sub-millisecond).
+
+### The ranker: BM25, and why the embedding half was cut short
+
+The plan was to benchmark BM25 against an Ollama embedding model on this box
+and choose on evidence. Both were built (`scripts/benchmark-retrieval.mjs` runs
+either; `nomic-embed-text` was pulled), and the measurement that decided it was
+the corpus pass:
+
+| | BM25 | embeddings |
+|---|---|---|
+| index the 30-template library | < 1 ms | **101 s for the first 6 documents** (measured, `nomic-embed-text`, `-t 2`, CPU) |
+| full 30-document corpus | — | ~17 s per document → **~8.5 min**, once, then cached |
+| per brief | < 1 ms | ~0.9 s (single short text, model resident) |
+| accuracy on the labelled set | top-1 60 %, top-3 95 %, abstain 100 % | **not measured — stopped at 18/30 documents** |
+
+The corpus pass was killed at 18/30 to give the machine to the end-to-end run.
+That is not a hidden compromise: 8.5 minutes to index 30 short documents makes
+the embedding path unusable as a startup step on this hardware, and every
+"Save as template" would invalidate the cache and pay it again. A ranker that
+costs 8.5 minutes to become available cannot be the ranker for a product whose
+whole point is working offline on a slow box. **BM25 it is**, at zero tokens and
+sub-millisecond latency, with 95 % top-3 coverage on the labelled set — and the
+model arbitrates the shortlist, so a wrong top-1 is not a wrong design.
+
+If the machine changes, the comparison is one command away.
+
+### Correction to Phase 1: there is no 1024-token prompt ceiling
+
+Phase 1 recorded a ~105 s wall-clock stall mid-generation after a 1024-token
+prompt and treated "keep every prompt inside one batch" as a rule. Re-measured
+on an identical 1144-token prompt, four ways (draft off/on × cold/warm):
+`wall == total` in all four runs, worst generation gap 2.5 s, no stall. The
+stall was a one-off, not a property of long prompts — so the rule is retired and
+retrieval is free to build a prompt of whatever length the candidates need.
+
+The same four runs measured speculative drafting rather than assumed it:
+
+| draft | prefill | generation | tok/s |
+|---|---|---|---|
+| off, cold | 124.3 s | 337 tok / 94.4 s | **3.57** |
+| off, warm | 0.3 s (cached) | 335 tok / 92.3 s | **3.63** |
+| on, cold | 160.5 s | 388 tok / 136.7 s | 2.84 |
+| on, warm | 0.4 s (cached) | 332 tok / 118.1 s | 2.81 |
+
+Drafting is a 22 % net loss on this CPU plus 36 s of extra prefill, and it
+changed the answer length for the same prompt. `draft_num_predict: 0` is now
+pinned in the one shared options object (`api/_aiChain.js`); it is a load-time
+option, accepted (the reload is visible in `load_duration`), and applied once.
+
+### The benchmark was measuring an input shape production never sends
+
+The retrieval benchmark fed `retrieveTemplates({summary, style})` — a brief
+written by hand in the harness. The pipeline feeds the **L1 goal**: summary,
+subject, purpose, audience, tone, style and `mustInclude` (3-7 content
+requirements such as "Event details (Date, Time, Venue TBA)").
+
+`mustInclude` items are copy requirements. No layout vocabulary will ever
+describe them, and because coverage is a SHARE of the brief's terms, they
+diluted every score. The same Diwali brief that retrieved `hero-split` at 51 %
+in the benchmark abstained at 16 % in the app — **retrieval never fired in
+production while the benchmark reported healthy numbers.** Found on the first
+live end-to-end run, which is the only reason it was found at all.
+
+Three fixes, all in `src/layout/retrieve.js`:
+
+- **`retrievalText()`** replaces `briefText()` as the query: summary, subject,
+  purpose and keywords — not tone/style/audience. Those are the generic design
+  words ("festive", "warm", "clean modern") that nearly every template's blurb
+  can claim; including them took top-1 from 60 % to 35 % because they inflate
+  the denominator without discriminating between layouts. Style is L2's job.
+- **Threshold 0.12, not 0.22.** Coverage is a share, so a colourful brief can
+  carry three adjectives no layout contains and still be a perfect brief. What
+  the threshold must reject is one accidental shared word; a brief with no
+  vocabulary overlap scores exactly 0 at any threshold (both negative controls
+  abstain at every value).
+- **`ment`/`ments` stemming.** "announcement" and "announce" did not share a
+  stem, so a goal saying "announce the celebration" missed every template whose
+  keyword is "announcement".
+
+The harness now builds the realistic goal shape (`subject`, `purpose`,
+`audience`, `tone`, `mustInclude`), and `tests/templates.test.mjs` pins it: a
+real L1 goal must retrieve, and adding `mustInclude` items must not change the
+ranking. Negative controls get only their own words — inventing an English
+`purpose` for the Hindi brief would give it English tokens and make the control
+test nothing.
+
+**Result on the labelled set (21 briefs, 2 negative controls, realistic goals):
+top-1 55 %, top-3 100 %, abstained 100 %, false-match 0 %.** Every labelled
+brief has the right layout inside the shortlist the model sees; both controls
+abstain. The cost is that the shortlist is usually 2-3 candidates, so the model
+arbitrates almost every time (~60-70 s) instead of taking a free pick — a
+deliberate trade, since a wrong layout is invisible and a slow call is not.
+
+### The defect the end-to-end run found: regions spilling out of their boxes
+
+The first live run of the full pipeline (Diwali, 1200x630, `poster-rail`) came
+back with a region rendering ~4x its reservation and three elements rendering
+outside the canvas:
+
+```
+L4 headline-main: 2 elements 258.4s  spill=2 fill=0.49
+L4 tagline-line:  1 element  117.8s  spill=1 fill=3.89
+CHECKS overflow=3 outsideCanvas=3
+```
+
+`fill=3.89` is the tell: the tagline slot reserved 1072x144 at 20px, and the
+model returned 120px type — the rendered extent is ~4x the box, which is also
+what put elements off the canvas. Nothing caught it: `validateDesign` checks
+each element's DECLARED box against the canvas, not the extent its type paints,
+and the quality gate's per-component pass looks for under-filled sections,
+never for overflow.
+
+Fixed in `src/layout/regionFit.js`, applied to every L4 result in
+`componentDesign` before the elements reach the editor:
+
+1. type is capped at the size the template fixed (the prompt already asks for
+   this — "the template fixed the box, so keep the type at this size" — this
+   makes it true, with 15 % tolerance so a deliberate micro-hierarchy survives);
+2. if the region still renders outside the reservation, the whole region is
+   scaled about the box origin, uniformly, so an icon keeps its place beside its
+   label.
+
+It never enlarges: a region that renders *smaller* than its box is an under-fill,
+which the gate already reports — blowing it up would hide that signal. Every
+correction is logged (`[ai] region <id>: type capped at 23px`), so a fix is
+never silent. Unit-tested against the live numbers (the 120px-in-a-20px-slot
+case reproduces exactly) and against a purely geometric overflow.
+
+Cost of the alternative: catching this with the model instead would be the
+per-region repair loop, one more full L4 call (~250s) per offending region,
+which this avoids entirely.
+
+## Elements appeared, then vanished in a cycle (post-build churn)
+
+Reported from a live run: elements land on the canvas, then disappear, repeat.
+Two causes, both in the region pipeline — not the save/persist path, which was
+the first suspicion (that path only writes localStorage and the library; it
+never reloads the canvas).
+
+### 1. Region refinement fired on cosmetic warnings
+
+`flagRegions()` in `App.js` decided which regions to regenerate from a set that
+included warning codes as well as errors. Regeneration is the most expensive
+action in the app (~250 s per region on this box) and it begins by *removing the
+region's elements* — so any region carrying `thin-section`, `alignment`,
+`spacing`, `typography` or `palette` was deleted and redrawn, up to four regions
+per build, while the user watched their finished design come apart.
+
+The refinement set is now `empty-section` + `missing` (plus every error,
+unchanged). Those two warnings genuinely mean "this region did not render what
+was planned". The rest are taste, and two are already handled elsewhere:
+`contrast` by L5's deterministic re-ink, `tiny-text`/`thin-section` by the gate's
+report. Dropping `thin-section` matters most: it is a *style* observation, and it
+was the trigger in the live run.
+
+### 2. A region with one bad element threw away the whole region
+
+If all `MAX_ATTEMPTS` failed validation, `componentDesign` threw. The caller then
+retracted the streamed elements — the ones the user had already watched arrive —
+leaving an empty reservation, which the gate reads as `empty-section`, which
+triggered regeneration: the same elements cycling in and out.
+
+Now the last parsed attempt is salvaged before giving up: each element is
+validated on its own and the valid ones are kept (`source: "salvage"`, logged
+with `kept=N/total`). Partial content beats a hole; the gate still evaluates the
+region as a whole, so a genuinely broken region is still reported. Covered by a
+unit test (valid pieces survive, the invalid one is dropped, junk yields nothing).
+
+Together these remove the cycle without weakening the gate: errors still refine,
+and a region that paints nothing still gets its retry.

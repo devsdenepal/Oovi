@@ -1,13 +1,13 @@
 /**
- * On-device provider probe (Ollama, OpenAI-compatible endpoint).
+ * On-device provider probe (Ollama native /api/chat, think:false).
  * Checks the daemon, lists installed models, then measures reliability,
  * JSON discipline, and behaviour under context pressure.
  *
  *   node scripts/local-check.mjs
- *   OLLAMA_URL=http://127.0.0.1:11434 OLLAMA_MODEL=gpt-oss:20b node scripts/local-check.mjs
+ *   OLLAMA_URL=http://127.0.0.1:11434 OLLAMA_MODEL=gemma4:e2b node scripts/local-check.mjs
  */
 const BASE = (process.env.OLLAMA_URL || 'http://127.0.0.1:11434').replace(/\/+$/, '');
-const MODEL = process.env.OLLAMA_MODEL || 'gpt-oss:20b';
+const MODEL = process.env.OLLAMA_MODEL || 'gemma4:e2b';
 
 console.log(`--- health ${BASE} ---`);
 try {
@@ -26,25 +26,30 @@ try {
 
 async function chat(messages, { maxTokens = 200, temperature = 0 } = {}) {
   const t = Date.now();
-  const res = await fetch(`${BASE}/v1/chat/completions`, {
+  const res = await fetch(`${BASE}/api/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model: MODEL, messages, max_tokens: maxTokens, temperature, stream: false }),
-    signal: AbortSignal.timeout(120000),
+    body: JSON.stringify({
+      model: MODEL,
+      messages,
+      stream: false,
+      think: false,
+      options: { num_ctx: 8192, num_predict: maxTokens, temperature },
+    }),
+    signal: AbortSignal.timeout(600000),
   });
   const ms = Date.now() - t;
   if (!res.ok) return { ok: false, ms, error: `http ${res.status}` };
   const data = await res.json();
-  const choice = data?.choices?.[0];
-  const completion = data?.usage?.completion_tokens;
+  const completion = data?.eval_count;
   return {
     ok: true,
     ms,
-    text: (choice?.message?.content || '').trim(),
-    promptTokens: data?.usage?.prompt_tokens,
+    text: (data?.message?.content || '').trim(),
+    promptTokens: data?.prompt_eval_count,
     completionTokens: completion,
     tps: completion ? completion / (ms / 1000) : undefined,
-    truncated: choice?.finish_reason,
+    truncated: data?.done_reason,
   };
 }
 

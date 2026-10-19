@@ -7,7 +7,14 @@
  * the style string propagates the visual theme to all later calls.
  * Pass 2 (per component): DSL elements for one component, aware of its
  * role, the theme, and sibling boxes (alignment, no accidental overlap).
+ *
+ * In the layered pipeline (layerPrompt.js) pass 1 is split into goal,
+ * palette and skeleton layers; pass 2 is unchanged except that it also
+ * receives the refined goal as a brief.
  */
+
+import { DESIGN_CORE, formatGoal } from "./layerPrompt";
+import { templateExample } from "../layout/templates";
 
 export function buildPlanPrompt(userPrompt, canvas) {
   const w = canvas.width;
@@ -67,7 +74,7 @@ export function buildPlanPrompt(userPrompt, canvas) {
   ].join("\n");
 }
 
-export function buildComponentPrompt(component, canvas, plan) {
+export function buildComponentPrompt(component, canvas, plan, goal = null) {
   const b = component.box;
   const palette = plan.palette;
   const siblings = (plan.components || [])
@@ -82,16 +89,61 @@ export function buildComponentPrompt(component, canvas, plan) {
         : component.role === "header"
           ? " Header is a kicker: single line, small (at most 4% of canvas height)."
           : "";
+  // One worked example of THIS slot, chosen lexically from the template's own
+  // copy (see src/layout/templates.js). A few dozen prompt tokens against a
+  // prefill that already costs ~90s, and it pins the register of the copy.
+  const example = plan?.template ? templateExample(plan.template, component.id, goal) : "";
+  // Output budget per role. On-device generation is ~1-3 tok/s, so the ask
+  // itself is the wall clock: an unbounded "1-8 elements" got regions writing
+  // 700+ tokens. Density is bought with SIZE and grouping, not element count.
+  const budget =
+    component.role === "decoration"
+      ? "8-14 tiny shapes (dots, rects, short lines), grouped as one unit."
+      : component.role === "sections"
+        ? "4-6 elements: a heading plus 3-4 grouped cards (icon + title + one-liner)."
+        : component.role === "details"
+          ? "2-4 elements: one grouped row per fact."
+          : component.role === "header"
+            ? "2-3 elements: a bar or badge plus one kicker line."
+            : component.role === "headline"
+              ? "1-4 elements: the title (one text run per colour when multicolour, sharing a baseline)."
+              : component.role === "tagline"
+                ? "1-2 elements: a single supporting line."
+                : component.role === "audience"
+                  ? "2-4 elements: a label plus grouped entries."
+                  : component.role === "footer"
+                    ? "2-4 elements: grouped organizer/registration lines."
+                    : "2-5 elements.";
+  // L4 shares the byte-identical DESIGN_CORE prefix with L1-L3. Everything
+  // that varies lives in the [User] turn, ordered constant-within-design
+  // first (canvas, palette, theme, brief) and region-specific last, so a
+  // warmed prefix still covers as much of the prompt as possible.
   return [
-    "[System]",
-    "You are a graphic design layout engine. Generate ONLY the elements for ONE component.",
+    DESIGN_CORE,
+    "",
+    "Your task now: output the elements for exactly ONE region of the design. Another pass already decided the regions and this region's box; you only fill it.",
+    "Region rules:",
+    "- Fill the box deliberately; an empty-looking box is a failure. Every element stays fully inside this box AND inside the canvas.",
+    "- Match the box: a tall box wants larger type and more grouped rows; a thin bar wants a single line.",
+    "- Give every element an id prefixed with the region id.",
+    'Return ONLY valid JSON: {"elements":[...]}.',
+    "",
+    "[User]",
     `Canvas: ${canvas.width}x${canvas.height}. Palette: background ${palette.background}, ink ${palette.ink}, accent ${palette.accent}. Theme: ${plan.style || "clean modern"}.`,
-    `Component "${component.id}" (role ${component.role || "body"}): ${component.describe}.${roleRule}`,
-    `Its reserved box: x=${b.x} y=${b.y} width=${b.width} height=${b.height}. Fill the box deliberately; an empty-looking box is a failure. Every element must stay fully inside this box AND inside the canvas.`,
-    siblings ? `Sibling components (align edges with them, never overlap their text): ${siblings}.` : "",
-    "Types: text needs content,x,y,width,fontSize(12-120),fontWeight,fill; optional stroke,strokeWidth (outline in a contrasting color),angle(-8 to 8, stickers only),fontFamily, gradient {type:linear|radial, fractions 0-1, stops:[{offset,color}]} for hero bars, headline accents and backgrounds (body text stays solid ink); rectangle needs x,y,width,height,fill (+optional cornerRadius, gradient); circle needs x,y,radius,fill (+optional gradient); line needs x,y,x2,y2,stroke.",
-    "Facts: use ONLY facts from the request — never invent names, dates or venues (write \"TBA\" placeholders). Sections list REAL entries (3+ named items with one-liners), never a bare label. Text must contrast its backing bar, not just the canvas.",
-    "Every element needs a unique lowercase id (prefix with the component id). 1-8 elements; wrap each visual unit (card, badge, row) in a group.",
-    'Return ONLY valid JSON like {"elements":[...]}. No Markdown, no fences, no commentary.',
+    goal ? `The design brief:\n${formatGoal(goal)}` : "",
+    `Region "${component.id}" (role ${component.role || "body"}): ${component.describe}.${roleRule}`,
+    `Reserved box: x=${b.x} y=${b.y} width=${b.width} height=${b.height}.`,
+    component.fontSize
+      ? `Type: this region's main text is ${component.fontSize}px${component.align ? `, aligned ${component.align}` : ""} (the template fixed the box, so keep the type at this size).`
+      : "",
+    component.maxChars > 0
+      ? `Copy limit: at most ${component.maxChars} characters of text in this whole region.`
+      : "",
+    example
+      ? `Copy example for this region (follow its register and length, write your own words): "${example}"`
+      : "",
+    `Budget — ${budget}`,
+    siblings ? `Sibling regions (align edges with them, never overlap their text): ${siblings}.` : "",
+    "Generate the elements for this region now.",
   ].join("\n");
 }

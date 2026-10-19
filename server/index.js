@@ -3,7 +3,7 @@ import http from 'node:http';
 import pg from 'pg';
 import assetHandler from '../api/asset.js';
 import photosHandler from '../api/photos.js';
-import groqHandler from '../api/groq.js';
+import aiHandler from '../api/ai.js';
 
 // NOTE: stdlib http, not Express — the environment's npm tree cannot
 // materialize express's transitive deps (see DECISIONS). 8 JSON routes
@@ -80,16 +80,30 @@ function readBody(req) {
 
 // Adapt stdlib req/res to the (req, res) shape api/*.js handlers expect
 // (same shape Vercel provides: query/body + status().json()/.end()).
+//
+// It also forwards setHeader/write/end so a handler can STREAM a response
+// (api/ai.js does, for long on-device generations). Without this the local
+// route could only ever answer with one buffered JSON body.
 function adapt(req, res, query, body) {
-  const shimReq = { method: req.method, query, body };
+  const shimReq = { method: req.method, query, body, headers: req.headers };
   const shimRes = {
-    status: (code) => ({
-      json: (obj) => sendJson(res, code, obj),
-      end: () => {
-        res.writeHead(code);
-        res.end();
-      },
-    }),
+    statusCode: 200,
+    setHeader: (name, value) => res.setHeader(name, value),
+    write: (chunk) => res.write(chunk),
+    end: (chunk) => res.end(chunk),
+    flushHeaders: () => {
+      if (typeof res.flushHeaders === "function") res.flushHeaders();
+    },
+    status(code) {
+      shimRes.statusCode = code;
+      return {
+        json: (obj) => sendJson(res, code, obj),
+        end: () => {
+          res.writeHead(code);
+          res.end();
+        },
+      };
+    },
   };
   return [shimReq, shimRes];
 }
@@ -121,8 +135,8 @@ const server = http.createServer(async (req, res) => {
       }
     }
 
-    if (path === '/api/asset' || path === '/api/photos' || path === '/api/groq') {
-      const handler = path === '/api/asset' ? assetHandler : path === '/api/photos' ? photosHandler : groqHandler;
+    if (path === '/api/asset' || path === '/api/photos' || path === '/api/ai') {
+      const handler = path === '/api/asset' ? assetHandler : path === '/api/photos' ? photosHandler : aiHandler;
       if (req.method !== 'GET' && req.method !== 'POST') return finish(405, { error: 'GET or POST only' });
       const body = req.method === 'POST' ? await readBody(req).catch(() => undefined) : undefined;
       await handler(...adapt(req, res, query, body));

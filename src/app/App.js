@@ -1,10 +1,21 @@
-import { generateDesign, generatePatch, planDesign, componentDesign } from "../ai/aiClient";
+import {
+  generateDesign,
+  generatePatch,
+  planSkeleton,
+  planTemplate,
+  planPalette,
+  refineGoal,
+  componentDesign,
+} from "../ai/aiClient";
 import { evaluateDesign } from "../ai/quality";
+import { correctColors } from "../ai/colorCorrect";
 import { assetUrl, fetchAssetDataUrl, fetchAssetViaBackend } from "../ai/pollinations";
 import { searchPhotos, triggerDownload } from "../ai/unsplash";
 import { isMockEnabled, mockAssetDataUrl } from "../ai/mockProvider";
 import { validateDesign } from "../design/designValidator";
 import { DEFAULT_PRESET_ID, DESIGN_PRESETS, getPreset } from "../design/presets";
+import { templateFromDesign } from "../layout/saveAsTemplate";
+import { saveTemplate } from "../layout/templateStore";
 import { buildSemanticSvg } from "../reference/svg/semanticSvg";
 import { CanvasEditor } from "../editor/Canvas";
 import { LayersPanel } from "../editor/LayersPanel";
@@ -160,6 +171,7 @@ export class App {
       onRedo: () => this.onRedo(),
       onZoom: (mode) => this.onZoom(mode),
       onPreview: () => this.togglePreview(),
+      onSaveTemplate: () => this.saveCurrentAsTemplate(),
       onExport: (format) => this.exportDesign(format),
       onTitle: (title) => this.onTitle(title),
       onTab: (tab) => this.onTab(tab),
@@ -359,20 +371,58 @@ export class App {
     const canvas = { width: this.designPreset.width, height: this.designPreset.height };
     this.state.generating = true;
     this._clearPreviewUI();
+    // A previous run's wireframe must never linger over a new one.
+    this.editor.clearSkeletonGuides?.();
     const status = (msg) => this.generateButton.setLoading(true, msg);
+    // Live token counter for the running layer (the server throttles progress
+    // to ~1/s), so a minutes-long generation visibly moves instead of hanging.
+    const live = (label) => (chunks, secs) => {
+      if (chunks) status(`${label}: ${chunks} tok · ${secs}s…`);
+    };
     try {
-      status("Planning the build…");
+      // Layered cascade (raw -> best), so a terse request still lands a
+      // complete design: L1 redefine the goal, L2 choose the palette,
+      // L3 lay out the skeleton. L4 (add text) is the component build below;
+      // L5 (color correction) runs after the build.
+      status("1/5 Refining the goal…");
+      let goal;
       let plan;
       try {
-        plan = await planDesign(prompt, canvas);
+        goal = await refineGoal(prompt, canvas, live("1/5 goal"));
+        this.assistant.pushAssistant(`Goal: ${goal.summary}`);
+        status("2/5 Choosing the palette…");
+        const palette = await planPalette(goal, canvas, live("2/5 palette"));
+        this.assistant.pushAssistant(
+          `Palette: ${palette.background} / ${palette.ink} / ${palette.accent} — ${palette.style}` +
+            `${palette.source === "library" ? " (library)" : ""}.`,
+        );
+        status("3/5 Choosing the layout…");
+        // Phase 2D: a template's boxes cannot collide, so L3 is normally a
+        // keyword pre-filter plus a small tuning call instead of a five-minute
+        // free-form skeleton. The full L3 stays as the fallback whenever no
+        // template fits this canvas or the instantiated plan fails its check.
+        plan = await planTemplate(goal, palette, canvas, live("3/5 layout"));
+        if (plan) {
+          this.assistant.pushAssistant(
+            `Layout: template "${plan.template}" (${plan.tuning.variant}, ${plan.tuning.density}).`,
+          );
+        } else {
+          status("3/5 Laying out the skeleton…");
+          plan = await planSkeleton(goal, palette, canvas, "", live("3/5 skeleton"));
+        }
       } catch (error) {
-        console.warn("[architect] plan failed, falling back to direct:", error.message);
-        this.assistant.pushAssistant(`Plan failed (${error.message}) — falling back to one-shot generation.`);
+        console.warn("[architect] planning failed, falling back to direct:", error.message);
+        this.assistant.pushAssistant(`Planning failed (${error.message}) — falling back to one-shot generation.`);
         this.state.generating = false;
         return await this.onGenerateDirect(prompt);
       }
 
       this.editor.loadDesign({ canvas: { ...canvas, background: plan.palette.background }, elements: [] });
+      // Show the planned regions as a dashed wireframe right away, so the
+      // canvas reflects the skeleton during the long per-region generation
+      // instead of sitting blank. Each box is replaced by real content as its
+      // component lands.
+      this.editor.showSkeletonGuides?.(plan.components);
       this._updateCanvasMeta(canvas);
       this._renderJsonPreview();
       this.scheduleSave();
@@ -389,26 +439,27 @@ export class App {
       // One pass over the plan; extracted so a thin first pass can retry
       // with corrections without duplicating the loop.
       //
-      // Speed: component calls are independent (full plan + box + sibling
-      // context each), so they fan out — at most 3 at once with a 2s gap
-      // between request starts (user rule; politeness to a gateway that
-      // hangs under bursts). Each result paints AS IT LANDS (the old
-      // batch-apply left the canvas blank for 10+ minutes), inserted at its
-      // plan-rank position so final layer order is exactly plan order
-      // regardless of arrival order. Undo entries stay one-per-component.
+      // The on-device model serves ONE generation at a time
+      // (OLLAMA_NUM_PARALLEL=1). Fanning component calls out does not make
+      // them faster — Ollama just queues them, and while queued they receive
+      // no bytes, so a queued request eventually dies on a client timeout
+      // ("fetch failed") while the total wall clock stays the same. So run
+      // them strictly serially: same speed, no queue-timeout failures.
+      //
+      // Each result paints AS IT LANDS (the old batch-apply left the canvas
+      // blank for 10+ minutes), inserted at its plan-rank position so final
+      // layer order is exactly plan order regardless of arrival order. Undo
+      // entries stay one-per-component.
       const fanOut = async (tasks, onSettled) => {
-        const limit = Math.max(1, Math.min(3, tasks.length));
+        const limit = 1;
         const results = new Array(tasks.length);
         const order = [];
         let next = 0;
-        let started = 0;
-        console.log(`[build] fan-out ${tasks.length} tasks, ${limit} wide, 2s start gaps`);
+        console.log(`[build] fan-out ${tasks.length} tasks, serial (on-device model, 1 slot)`);
         const workers = Array.from({ length: limit }, async () => {
           while (next < tasks.length) {
             const i = next++;
-            const slot = started++;
-            if (slot > 0) await new Promise((r) => setTimeout(r, slot * 2000));
-            console.log(`[build] start ${tasks[i].label} (slot ${slot})`);
+            console.log(`[build] start ${tasks[i].label}`);
             try {
               results[i] = { ok: true, value: await tasks[i].run() };
             } catch (error) {
@@ -428,18 +479,77 @@ export class App {
       const buildAll = async (activePlan) => {
         const out = { done: 0, failed: 0, appliedTotal: 0, renderedIds: [] };
         const n = activePlan.components.length;
+        // Generation ORDER is independent of LAYER order. The headline and the
+        // hero are what the eye wants first, so they are generated first, while
+        // each region's insert position stays its plan rank (slotFor(planIndex))
+        // so the final z-order is still plan order. On-device this is the
+        // difference between seeing the title at ~2 minutes and seeing nothing
+        // for ~9.
+        const priority = (c) =>
+          c.role === "headline" ? 0
+          : c.role === "hero" ? 1
+          : c.kind === "image" ? 2
+          : c.role === "decoration" ? 4
+          : 3;
+        const queue = activePlan.components
+          .map((component, i) => ({ component, i }))
+          .sort((a, b) => priority(a.component) - priority(b.component) || a.i - b.i);
         // Placed pieces as {i: plan index, count: elements}; a component's
         // slot = total elements of placed components ranked below it.
         const placed = [];
         const slotFor = (i) => placed.filter((p) => p.i < i).reduce((s, p) => s + p.count, 0);
-        status(`Building ${n} components (3 at a time, 2s apart)…`);
-        const applyOne = async (i, settled) => {
-          const component = activePlan.components[i];
+        // Per-region bookkeeping for the refinement pass: pieces placed (0 =
+        // failed) and the top-level element ids the region owns, so a later
+        // refinement can remove them before regenerating just that region.
+        const regions = new Map();
+        const note = (id, count, ids = []) => regions.set(id, { count, ids });
+        // Chunk development: elements painted straight from the live token
+        // stream, before the component's validated set lands. Tracked per
+        // region so the final apply can retract them first (they carry the
+        // same ids as the validated elements and must not double up).
+        const streamed = new Map(); // component.id -> string[] of element ids
+        const retractStreamed = (id) => {
+          const ids = streamed.get(id) || [];
+          streamed.set(id, []);
+          if (!ids.length) return;
+          try {
+            this.editor.applyPatchOps(ids.map((x) => ({ op: "remove", id: x })), {
+              history: false,
+              quiet: true,
+            });
+          } catch {
+            // already gone
+          }
+        };
+        const streamElement = (i, id, element) => {
+          if (!element || typeof element.id !== "string") return;
+          const ids = streamed.get(id) || [];
+          if (ids.includes(element.id)) return; // already painted
+          const at = slotFor(i) + ids.length;
+          // Track optimistically: if the apply throws (or the element is
+          // invalid) the id is still retracted later, and removing a
+          // non-existent id is a no-op.
+          ids.push(element.id);
+          streamed.set(id, ids);
+          try {
+            this.editor.applyPatchOps([{ op: "add", element, at }], { history: false, quiet: true });
+          } catch {
+            // a malformed partial must never break the build
+          }
+        };
+        status(`4/5 Adding text — ${n} regions (serially, on-device model)…`);
+        const applyOne = async (q, settled) => {
+          const { component, i } = queue[q];
           out.done += 1;
+          // The region's turn has come: retire its wireframe. It stays visible
+          // for the whole (slow) generation and disappears as content lands.
+          this.editor.clearGuideFor?.(component.id);
           status(`Placing ${out.done}/${n}: ${component.id}…`);
           const at = slotFor(i);
           if (!settled || !settled.ok) {
             out.failed += 1;
+            note(component.id, 0);
+            retractStreamed(component.id);
             console.warn(`[build] place ${component.id} FAILED: ${settled && settled.error ? settled.error.message : "unknown error"}`);
             this.assistant.pushAssistant(
               `${component.id} skipped: ${settled && settled.error ? settled.error.message : "unknown error"}`,
@@ -449,12 +559,14 @@ export class App {
             const fetched = settled.value.fetched;
             if (!fetched) {
               out.failed += 1;
+              note(component.id, 0);
             } else {
               try {
                 this.editor.addImageElement(fetched.src, fetched.w, fetched.h, component.box, at);
                 out.appliedTotal += 1;
                 out.renderedIds.push(component.id);
                 placed.push({ i, count: 1 });
+                note(component.id, 1);
                 const imagetag = isMockEnabled()
                   ? "mock"
                   : fetched.note || "";
@@ -467,21 +579,28 @@ export class App {
                 }
               } catch (error) {
                 out.failed += 1;
+                note(component.id, 0);
                 this.assistant.pushAssistant(`${component.id} skipped: ${error.message}`, "error");
               }
             }
           } else {
             try {
+              // Drop whatever the token stream painted, then apply the
+              // validated set in one undo step (as before).
+              retractStreamed(component.id);
               const res = this.editor.applyPatchOps(
                 settled.value.elements.map((element, k) => ({ op: "add", element, at: at + k })),
               );
               out.appliedTotal += res.applied.length;
               out.renderedIds.push(component.id);
               placed.push({ i, count: res.applied.length });
+              note(component.id, res.applied.length, res.changedIds || []);
               console.log(`[build] placed ${component.id} ${res.applied.length} pieces at=${at}`);
               this.assistant.pushAssistant(`+ ${component.id} (${res.applied.length} pieces)`);
             } catch (error) {
               out.failed += 1;
+              note(component.id, 0);
+              retractStreamed(component.id);
               this.assistant.pushAssistant(`${component.id} skipped: ${error.message}`, "error");
             }
           }
@@ -489,7 +608,7 @@ export class App {
           this._refreshChrome();
         };
         await fanOut(
-          activePlan.components.map((component) => ({
+          queue.map(({ component, i }) => ({
             label: component.id,
             run: async () => {
               const t = Date.now();
@@ -498,14 +617,22 @@ export class App {
                 console.log(`[build] fetched ${component.id} ${Date.now() - t}ms ${fetched ? fetched.note || "ok" : "FAILED"}`);
                 return { kind: "image", fetched };
               }
-              const { elements } = await componentDesign(component, canvas, activePlan);
+              const { elements } = await componentDesign(component, canvas, activePlan, goal, {
+                onProgress: (chunks, secs) => {
+                  const painted = (streamed.get(component.id) || []).length;
+                  live(`4/5 ${component.id}`)(chunks, secs);
+                  if (painted) status(`4/5 ${component.id}: ${painted} element(s) placed · ${chunks} tok · ${secs}s…`);
+                },
+                onStreamStart: () => retractStreamed(component.id),
+                onElement: (element) => streamElement(i, component.id, element),
+              });
               console.log(`[build] ready ${component.id} ${Date.now() - t}ms elements=${elements.length}`);
               return { kind: "dsl", elements };
             },
           })),
           applyOne,
         );
-        return out;
+        return { ...out, regions };
       };
       const evalOpts = (activePlan, ids) => ({
         plannedIds: activePlan.components.map((c) => c.id),
@@ -521,42 +648,171 @@ export class App {
           .map((i) => i.message)
           .join(" ");
 
+      // Maps the quality gate's complaints back to the regions that own the
+      // offending elements. Issues name element ids (e.g. "headline-txt",
+      // "card-1"); a region owns an element whose id equals its id or is
+      // prefixed by it (component ids are the element-id prefix by convention).
+      const flagRegions = (rep, activePlan) => {
+        const out = new Map();
+        // Regenerating a region is the most expensive action in the app (~250 s
+        // of on-device generation, and the user watches the region they just
+        // got disappear and redraw). So it is reserved for defects that mean
+        // "this region failed", not for taste:
+        //
+        //   - every ERROR always qualifies (checked below);
+        //   - these WARNINGS qualify because they describe a region that did
+        //     not render what was asked: an empty reservation, or a missing
+        //     planned region.
+        //
+        // Deliberately absent: `thin-section` (a sparse box is a style — and
+        // this is what made elements vanish in a cycle on a real run: a region
+        // that filled its box only partly was deleted and regenerated, up to
+        // four times per build), plus `contrast` (L5 re-inks faded text
+        // deterministically and for free), `alignment`, `spacing`,
+        // `typography`, `tiny-text` and `palette`, which are advisory.
+        const REFINE_CODES = new Set(["empty-section", "missing"]);
+        const idsIn = (msg) => [...String(msg).matchAll(/"([^"]+)"/g)].map((m) => m[1]);
+        for (const issue of rep.issues) {
+          if (issue.severity !== "error" && !REFINE_CODES.has(issue.code)) continue;
+          for (const id of idsIn(issue.message)) {
+            const comp = activePlan.components.find(
+              (c) => c.kind === "dsl" && (id === c.id || id.startsWith(`${c.id}-`) || id.startsWith(`${c.id}_`)),
+            );
+            if (!comp) continue;
+            const list = out.get(comp.id) || [];
+            if (!list.includes(issue.message)) list.push(issue.message);
+            out.set(comp.id, list);
+          }
+        }
+        return out;
+      };
+
+      const reEval = (activePlan) => {
+        const appliedIds = [...result.regions.entries()].filter(([, r]) => r.count > 0).map(([id]) => id);
+        return evaluateDesign(this.editor.toDesign(), evalOpts(activePlan, appliedIds));
+      };
+
       let result = await buildAll(plan);
       let report = evaluateDesign(this.editor.toDesign(), evalOpts(plan, result.renderedIds));
       console.log(`[build] pass complete: ${result.done - result.failed}/${result.done} components, ${result.appliedTotal} pieces, quality=${report.score}`);
 
-      // Thin plans get ONE replanned retry (costs tokens, so bounded);
-      // collisions get the deterministic resolver (costs nothing) — unless
-      // the plan itself stacks sections on top of each other (mass overlap),
-      // which no amount of nudging can fix: that replans instead.
-      const UNDERBUILT = new Set(["sparse", "missing", "hero", "headline"]);
+      // Refinement is PER REGION, not a whole replan: complaints map back to
+      // the regions that own the offending elements, and only those are
+      // regenerated — each in its own call. A region fix cannot repair a
+      // skeleton that stacks sections on top of each other (mass overlap), so
+      // that — and complaints with no owning region at all — still replan once.
       const overlapErrors = report.issues.filter((i) => i.severity === "error" && i.code === "overlap").length;
       const crowded = overlapErrors >= 5;
-      if (report.issues.some((i) => i.severity === "error" && UNDERBUILT.has(i.code)) || crowded) {
-        const why = crowded
-          ? `Sections overlap (${overlapErrors} collisions) — stagger boxes vertically with breathing room, keep bars behind their own text.`
-          : `First pass under-built (${topDefects(report)}).`;
+      const failing = crowded ? new Map() : flagRegions(report, plan);
+      const hasErrors = report.issues.some((i) => i.severity === "error");
+
+      const replanOnce = async (why) => {
         console.warn(`[build] replanning once: ${why}`);
         this.assistant.pushAssistant(`${why} Retrying the plan once…`);
-        status("Replanning with corrections…");
+        status("3/5 Re-laying out with corrections…");
         try {
-          const plan2 = await planDesign(
-            `${prompt}\n\n[Correction] Your previous plan failed quality checks: ${topDefects(report)}. Fix every defect above; keep the rest of the brief.`,
+          const plan2 = await planSkeleton(
+            goal,
+            plan.palette,
             canvas,
+            `Your previous skeleton failed quality checks: ${topDefects(report)}. Fix every defect above; keep the rest of the brief.`,
+            live("3/5 re-skeleton"),
           );
           this.editor.loadDesign({ canvas: { ...canvas, background: plan2.palette.background }, elements: [] });
+          this.editor.showSkeletonGuides?.(plan2.components);
           if (plan2.warnings.length) {
             this.assistant.pushAssistant(`Replan notes: ${plan2.warnings.join("; ")}`);
           }
           this.assistant.pushAssistant(`Replan: ${plan2.components.length} components (${plan2.source}).`);
           plan = plan2;
           result = await buildAll(plan2);
-          report = evaluateDesign(this.editor.toDesign(), evalOpts(plan2, result.renderedIds));
+          report = reEval(plan2);
         } catch (error) {
           this.assistant.pushAssistant(`Replan failed (${error.message}) — keeping the first pass.`, "error");
         }
+      };
+
+      if (crowded) {
+        await replanOnce(
+          `Sections overlap (${overlapErrors} collisions) — stagger boxes vertically with breathing room, keep bars behind their own text.`,
+        );
+      } else if (failing.size) {
+        const ids = [...failing.keys()].slice(0, 4);
+        console.warn(`[build] per-region refinement: ${ids.join(", ")}`);
+        this.assistant.pushAssistant(`Refining ${ids.length} region(s) individually: ${ids.join(", ")}.`);
+        for (const cid of ids) {
+          const component = plan.components.find((c) => c.id === cid);
+          if (!component || component.kind !== "dsl") continue;
+          status(`Refining ${cid}…`);
+          const owned = result.regions.get(cid)?.ids || [];
+          if (owned.length) {
+            try {
+              this.editor.applyPatchOps(owned.map((id) => ({ op: "remove", id })));
+            } catch {
+              // element already gone; regenerate regardless
+            }
+          }
+          // Elements painted from this refinement's own token stream, retracted
+          // before the validated set lands (same policy as the build loop).
+          const liveIds = [];
+          const retractLive = () => {
+            if (!liveIds.length) return;
+            const ids = liveIds.splice(0);
+            try {
+              this.editor.applyPatchOps(ids.map((id) => ({ op: "remove", id })), { history: false, quiet: true });
+            } catch {
+              // already gone
+            }
+          };
+          try {
+            const { elements } = await componentDesign(component, canvas, plan, goal, {
+              onProgress: live(`Refining ${cid}`),
+              correction: `This region was flagged by the quality gate: ${failing.get(cid).join(" ")} Rewrite ONLY this region's elements to fix it. Keep every element inside the reserved box.`,
+              onStreamStart: retractLive,
+              onElement: (element) => {
+                if (!element || typeof element.id !== "string" || liveIds.includes(element.id)) return;
+                liveIds.push(element.id);
+                try {
+                  this.editor.applyPatchOps([{ op: "add", element }], { history: false, quiet: true });
+                } catch {
+                  // a malformed partial must never break the build
+                }
+              },
+            });
+            retractLive();
+            const at = component.role === "decoration" ? 0 : undefined;
+            const res = this.editor.applyPatchOps(
+              elements.map((element, k) => ({
+                op: "add",
+                element,
+                ...(typeof at === "number" ? { at: at + k } : {}),
+              })),
+            );
+            result.regions.set(cid, { count: res.applied.length, ids: res.changedIds || [] });
+            console.log(`[build] refined ${cid} ${res.applied.length} pieces`);
+            this.assistant.pushAssistant(`+ refined ${cid} (${res.applied.length} pieces)`);
+          } catch (error) {
+            retractLive();
+            this.assistant.pushAssistant(`Refine ${cid} failed: ${error.message}`, "error");
+          }
+        }
+        report = reEval(plan);
+      } else if (hasErrors) {
+        await replanOnce(`First pass under-built (${topDefects(report)}).`);
       }
-      ({ done, failed, appliedTotal, renderedIds } = result);
+
+      // Recount from per-region state so the summary reflects any refinement.
+      {
+        const applied = [...result.regions.entries()].filter(([, r]) => r.count > 0);
+        done = plan.components.length;
+        failed = plan.components.length - applied.length;
+        appliedTotal = applied.reduce((s, [, r]) => s + r.count, 0);
+        renderedIds = applied.map(([id]) => id);
+      }
+
+      // The wireframe has served its purpose: the design is settled, so retire
+      // any guides left by regions that failed to generate.
+      this.editor.clearSkeletonGuides?.();
 
       const COLLISION = new Set(["overlap", "overflow"]);
       if (report.issues.some((i) => i.severity === "error" && COLLISION.has(i.code))) {
@@ -575,6 +831,21 @@ export class App {
             "error",
           );
         }
+      }
+
+      // L5 — Color correction: re-ink text that fades into its backdrop and
+      // snap off-palette fills back to the palette. Applied as one undo step.
+      status("5/5 Correcting colors…");
+      const colorFix = correctColors(this.editor.toDesign(), plan.palette);
+      if (colorFix.ops.length) {
+        this.editor.applyPatchOps(colorFix.ops);
+        this.assistant.pushAssistant(
+          `Color correction: ${colorFix.notes.slice(0, 4).join("; ")}` +
+            `${colorFix.notes.length > 4 ? ` (+${colorFix.notes.length - 4} more)` : ""}`,
+        );
+        report = evaluateDesign(this.editor.toDesign(), evalOpts(plan, renderedIds));
+      } else {
+        this.assistant.pushAssistant("Color correction: palette and contrast are clean.");
       }
 
       this.state.design = this.editor.toDesign();
@@ -619,6 +890,9 @@ export class App {
       notify(message, "error");
       console.error(error);
     } finally {
+      // Safety net: however the run ends (error, latency, fallback), no
+      // skeleton wireframe may outlive it.
+      this.editor.clearSkeletonGuides?.();
       this.state.generating = false;
     }
   }
@@ -1038,6 +1312,41 @@ export class App {
       notify(`Export failed: ${error.message}`, "error");
       console.error(error);
     }
+  }
+
+  /**
+   * "Save as template": turn the current canvas into a reusable layout.
+   * The converter reads the RENDERED design and the result must clear the same
+   * quality gate the template tests use — a layout that would overflow, collide
+   * or fade is refused with the reasons rather than stored.
+   */
+  saveCurrentAsTemplate() {
+    const design = this.editor.toDesign();
+    if (!design?.elements?.length) {
+      notify("Nothing to save yet — generate or draw a design first.", "error");
+      return;
+    }
+    const title = (this.state?.title || "Saved layout").trim() || "Saved layout";
+    const result = templateFromDesign(design, {
+      label: title,
+      blurb: "a layout saved from a finished design",
+      keywords: title.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 3),
+    });
+    if (!result.ok) {
+      notify(`Not saved: ${result.reason}`, "error");
+      console.warn("[template] save refused", result);
+      return;
+    }
+    const saved = saveTemplate(result.template);
+    if (!saved.ok) {
+      notify(`Not saved: ${saved.reason}`, "error");
+      return;
+    }
+    const regions = result.template.build("as-saved", 0.025).filter((s) => s.role !== "decoration").length;
+    notify(`Saved "${result.template.label}" as a ${regions}-region template (${saved.count} in the library).`, "success");
+    console.log(
+      `[template] saved ${result.template.id} regions=${regions} warnings=${result.issues.filter((i) => i.severity === "warning").length}`,
+    );
   }
 
   async onPhotoInsert(photo) {

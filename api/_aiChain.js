@@ -1,46 +1,139 @@
 /**
- * Multi-provider AI chain (server-only).
+ * Server-side AI provider (server-only).
  *
- * One call — `runChain({ messages, schema, name, maxTokens, effort, model })`
- * — walks the configured providers in order and returns the first success.
- * Any provider failure advances the chain: rate limits (429), 5xx, network
- * faults, timeouts and empty replies all just mean "try the next one".
- * Only cheap transient faults (network blips, fast 5xx under ~25s) get one
- * bounded same-provider retry first; slow verdicts advance immediately so
- * one struggling model can't burn the whole budget.
+ * One call — `runChain({ messages, schema, name, maxTokens, effort })` —
+ * runs the configured on-device provider and returns its reply. The
+ * provider is Ollama serving the local Gemma model: no API key, no outbound
+ * network, nothing bundled into the browser.
  *
- * OPEN-WEIGHT ONLY: every rung runs an open-weight model — Groq
- * gpt-oss-120b and Gemini's Gemma 4 are open weights; the local rung is
- * Ollama on your own machine (default gpt-oss:20b, sized for 16GB RAM).
- * No closed/proprietary model is ever called.
+ * We call Ollama's NATIVE endpoint (/api/chat), not its OpenAI shim, for two
+ * reasons that matter on CPU:
+ *   - `think: false` — Gemma 4 is a thinking model (default: on); letting it
+ *     reason first burns minutes of tokens before any JSON appears.
+ *   - real per-token streaming (the OpenAI shim buffers), so we get liveness
+ *     and can log progress.
+ * The reply is read as an NDJSON stream over Node's core HTTP client, which
+ * (unlike undici, i.e. global fetch) imposes no 300s headers/body timeout.
+ * That matters here: with a single Ollama slot a queued request receives no
+ * bytes until the generation ahead of it finishes, and undici would abort it
+ * at 300s with "fetch failed" long before our own budget elapses.
+ *
+ * A provider failure (network fault, 5xx, timeout, empty reply) surfaces as
+ * an error; only cheap transient faults (network blips, fast 5xx) get one
+ * bounded same-provider retry first.
  *
  * Config lives ONLY in server env (never VITE_-prefixed, never bundled):
- *   GROQ_API_KEY / GROQ_MODEL
- *   GEMINI_API_KEY / GEMINI_MODEL
- *   OPENROUTER_API_KEY / OPENROUTER_MODEL
- *   OLLAMA_URL / OLLAMA_MODEL   (on-device, no key)
- *   AI_CHAIN (order, default "groq,gemini,openrouter,ollama")
+ *   OLLAMA_URL     (default http://127.0.0.1:11434)
+ *   OLLAMA_MODEL   (default gemma4:e2b)
+ *   OLLAMA_NUM_CTX (default 8192)
+ *   AI_CHAIN       (provider order, default "ollama")
  *
- * Every provider is normalised to OpenAI-style `messages` in and plain
- * `text` out, so the browser keeps calling one route (/api/groq) and never
- * learns which provider answered.
+ * Requests are normalised to OpenAI-style `messages` in and plain `text`
+ * out, so the browser keeps calling one route (/api/ai) and never learns
+ * which model answered.
  */
 
+import http from "node:http";
+import https from "node:https";
+
 const PROVIDER_TIMEOUT = 75_000;
-const CHAIN_DEADLINE = 165_000;
+// On-device CPU generation is slow (~1-3 tok/s on a 4-core box), so the chain
+// gets a long wall clock — far more than a hosted provider would ever need.
+const CHAIN_DEADLINE = 1_800_000;
 const MAX_ATTEMPTS = 2;
 
-const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
-const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 const OLLAMA_URL_DEFAULT = "http://127.0.0.1:11434";
-// On-device generation is slow on CPU; allow more wall time than the cloud
-// rungs (still bounded by the chain deadline).
-const OLLAMA_TIMEOUT = 120_000;
+const OLLAMA_NUM_CTX_DEFAULT = 8192;
+// 2 physical cores (this box is a 2c/4t i5-2520M, AVX only). Measured: 2
+// threads beat 3 on both prefill (10.1 vs 9.6 tok/s) and generation
+// (2.73 vs 2.62 tok/s).
+const OLLAMA_NUM_THREAD_DEFAULT = 2;
+// Truncation guard ONLY — caps are measured never to bind (a ~30-token answer
+// cost 425 generated tokens while e2b was thinking silently; with think:false
+// it costs 9). One constant, so the options object below is byte-identical on
+// every call.
+const OLLAMA_NUM_PREDICT_DEFAULT = 1100;
+// Per-request cap: a real component can take minutes to generate on CPU.
+// Core http has no default timeout, so this is the only per-request bound.
+const OLLAMA_TIMEOUT = 1_200_000;
+// How often to log streaming progress (ms) so a long call is visible.
+const PROGRESS_EVERY = 15_000;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const nsToMs = (ns) => (Number.isFinite(Number(ns)) ? Math.round(Number(ns) / 1e6) : null);
 
-function clampTokens(value, dflt) {
-  return Math.min(8000, Math.max(256, Math.round(Number(value) || dflt)));
+function positiveInt(value, dflt) {
+  const n = Math.round(Number(value));
+  return Number.isFinite(n) && n > 0 ? n : dflt;
+}
+
+/**
+ * The ONE options object sent on every single call.
+ *
+ * A differing load-time option (num_ctx, num_thread, ...) makes Ollama tear
+ * the model down and reload it — measured ~19-22s here — which also throws
+ * away the prompt cache the shared static prefix depends on. So nothing
+ * per-layer lives in here: `num_predict` is fixed too, because the caps never
+ * bind and a truncation guard needs no per-layer value.
+ *
+ * `draft_num_predict: 0` disables speculative drafting. Measured on this box
+ * with an identical 1144-token prompt (gemma4:e2b, -t 2, CPU only):
+ *
+ *   draft on   cold: prefill 160.5s, eval 388 tok @ 136.7s = 2.84 tok/s
+ *   draft off  cold: prefill 124.3s, eval 337 tok @  94.4s = 3.57 tok/s
+ *   draft off  warm: prefill cached, eval 335 tok @  92.3s = 3.63 tok/s
+ *
+ * Drafting loses on both ends: the draft model costs ~36s of extra prefill and
+ * a third of the generation rate, and it changed the answer length (388 vs 337
+ * tokens for the same prompt). It is a load-time option, so setting it here
+ * reloads the model once and then holds for every call.
+ */
+function buildOptions() {
+  return {
+    num_ctx: positiveInt(process.env.OLLAMA_NUM_CTX, OLLAMA_NUM_CTX_DEFAULT),
+    num_thread: positiveInt(process.env.OLLAMA_NUM_THREAD, OLLAMA_NUM_THREAD_DEFAULT),
+    num_predict: positiveInt(process.env.OLLAMA_NUM_PREDICT, OLLAMA_NUM_PREDICT_DEFAULT),
+    temperature: 0.2,
+    draft_num_predict: 0,
+  };
+}
+
+/**
+ * `format` turns on Ollama's constrained decoding. A JSON schema pins the
+ * SYNTAX (never malformed/truncated JSON) and the SHAPE (required keys,
+ * enums), which removes the repair retries that each cost a full
+ * minute-scale call. The browser downgrades a rejected schema once to
+ * "json_object" (which maps to Ollama's plain `format: "json"` here), and
+ * OLLAMA_FORMAT=0 disables it entirely if a schema will not compile.
+ */
+function resolveFormat(schema) {
+  if (String(process.env.OLLAMA_FORMAT || "").trim() === "0") return null;
+  if (!schema) return null;
+  if (typeof schema === "object") return schema;
+  if (schema === "json_object" || schema === "json") return "json";
+  return null;
+}
+
+/**
+ * Renders Ollama's own timing fields, the only trustworthy answer to "where
+ * did the minute go". `load_duration` is pure reload overhead (killed by
+ * keep_alive); `prompt_eval_duration` is prefix processing (shrunk by a
+ * stable system prefix); `eval_duration` is real token generation. Comparing
+ * `eval_count` against the visible token count exposes any hidden reasoning
+ * tokens that never appear in the reply.
+ */
+function formatTiming(usage, wallMs) {
+  if (!usage) return "";
+  const s = (ms) => (ms == null ? "?" : `${(ms / 1000).toFixed(1)}s`);
+  const rate = (tokens, ms) => (tokens && ms ? `${(tokens / (ms / 1000)).toFixed(1)}tok/s` : "?");
+  const prompt = usage.prompt_tokens ?? "?";
+  const cached = usage.cached_tokens ?? "?";
+  return (
+    `load=${s(usage.load_duration_ms)} ` +
+    `prefill=${prompt}tok(cached ${cached})/${s(usage.prompt_eval_duration_ms)}(${rate(usage.prompt_tokens, usage.prompt_eval_duration_ms)}) ` +
+    `eval=${usage.completion_tokens ?? "?"}tok/${s(usage.eval_duration_ms)}(${rate(usage.completion_tokens, usage.eval_duration_ms)}) ` +
+    `total=${s(usage.total_duration_ms)} wall=${(wallMs / 1000).toFixed(1)}s`
+  );
 }
 
 function providerError(provider, message, opts = {}) {
@@ -51,206 +144,206 @@ function providerError(provider, message, opts = {}) {
   return error;
 }
 
-/** OpenAI `messages` -> { system, turns } with Gemini's user/model roles. */
-function splitMessages(messages) {
-  const system = [];
-  const turns = [];
-  for (const m of Array.isArray(messages) ? messages : []) {
-    if (!m || typeof m.content !== "string") continue;
-    if (m.role === "system") system.push(m.content);
-    else turns.push({ role: m.role === "assistant" ? "model" : "user", text: m.content });
-  }
-  if (!turns.length) turns.push({ role: "user", text: "Return the requested JSON." });
-  return { system: system.join("\n\n"), turns };
-}
-
-function openAiResponseFormat(schema, name) {
-  if (schema && typeof schema === "object") {
-    return { type: "json_schema", json_schema: { name: name || "oovi", strict: true, schema } };
-  }
-  if (schema === "json_object") return { type: "json_object" };
-  return null;
-}
-
-async function postJson(url, headers, body, upstream) {
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", ...headers },
-    body: JSON.stringify(body),
-    signal: AbortSignal.timeout(upstream),
-  });
-  let data = null;
-  try {
-    data = await res.json();
-  } catch {
-    // Non-JSON body (gateway HTML error page): keep data null.
-  }
-  return { res, data };
-}
-
 function budget(deadline, cap = PROVIDER_TIMEOUT) {
   return Math.max(5000, Math.min(cap, deadline - Date.now()));
 }
 
-function firstText(data) {
-  const text = data?.choices?.[0]?.message?.content;
-  return typeof text === "string" ? text.trim() : "";
+/**
+ * Reads Ollama's NDJSON chat stream: one JSON object per line. Accumulates
+ * `message.content`, fires `onProgress(chunks)` per content chunk (liveness)
+ * and `onDelta(piece)` per token (so callers can forward the raw text), and
+ * captures end-of-stream token counts as `usage`.
+ */
+async function readChatStream(stream, onProgress, onDelta) {
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let text = "";
+  let usage = null;
+  let chunks = 0;
+  const consume = (line) => {
+    const trimmed = line.trim();
+    if (!trimmed) return;
+    let obj;
+    try {
+      obj = JSON.parse(trimmed);
+    } catch {
+      return; // ignore a malformed line, keep the stream alive
+    }
+    const piece = obj?.message?.content;
+    if (typeof piece === "string" && piece) {
+      text += piece;
+      onDelta?.(piece);
+      onProgress?.(++chunks);
+    }
+    if (obj?.done) {
+      const prompt = obj.prompt_eval_count ?? null;
+      const completion = obj.eval_count ?? null;
+      usage = {
+        prompt_tokens: prompt,
+        completion_tokens: completion,
+        total_tokens: prompt != null && completion != null ? prompt + completion : null,
+        // 0.40.6 exposes the prefix-cache hit count — the number that tells us
+        // whether the shared static prompt prefix is actually being reused.
+        cached_tokens: obj.prompt_eval_cached_count ?? null,
+        load_duration_ms: nsToMs(obj.load_duration),
+        prompt_eval_duration_ms: nsToMs(obj.prompt_eval_duration),
+        eval_duration_ms: nsToMs(obj.eval_duration),
+        total_duration_ms: nsToMs(obj.total_duration),
+      };
+    }
+  };
+  for await (const value of stream) {
+    buffer += decoder.decode(value, { stream: true });
+    let nl;
+    while ((nl = buffer.indexOf("\n")) !== -1) {
+      consume(buffer.slice(0, nl));
+      buffer = buffer.slice(nl + 1);
+    }
+  }
+  consume(buffer);
+  return { text: text.trim(), usage, visible: chunks };
 }
 
-// --- Providers -----------------------------------------------------------
+// --- Provider: Ollama (on-device, Gemma) ---------------------------------
 
-async function callGroq(req, deadline) {
-  const key = process.env.GROQ_API_KEY;
-  if (!key) throw providerError("groq", "GROQ_API_KEY not configured", { status: 500 });
-  const model = process.env.GROQ_MODEL || req.model || "openai/gpt-oss-120b";
-  const body = {
-    model,
-    messages: req.messages,
-    max_completion_tokens: clampTokens(req.maxTokens, 2000),
-  };
-  if (["low", "medium", "high"].includes(req.effort)) body.reasoning_effort = req.effort;
-  const rf = openAiResponseFormat(req.schema, req.name);
-  if (rf) body.response_format = rf;
-  const { res, data } = await postJson(
-    GROQ_URL,
-    { Authorization: `Bearer ${key}` },
-    body,
-    budget(deadline),
-  );
-  if (!res.ok) {
-    const detail = data?.error?.message || `${res.status}`;
-    throw providerError("groq", detail, {
-      status: res.status,
-      retryable: res.status >= 500 || res.status === 429,
-    });
-  }
-  const text = firstText(data);
-  if (!text) throw providerError("groq", "empty response", { retryable: true });
-  return { text, model, usage: data?.usage || null };
+/**
+ * Opens Ollama's /api/chat endpoint over Node's CORE http(s) client.
+ *
+ * We deliberately avoid global fetch here. Node's fetch is undici, whose
+ * default `headersTimeout`/`bodyTimeout` is 300s. With OLLAMA_NUM_PARALLEL=1 a
+ * queued request receives no bytes until the generation ahead of it completes,
+ * so undici aborts it at 300s with "fetch failed" — far short of our own
+ * budget. Core http has no such default, so a queued request simply waits,
+ * bounded only by the AbortSignal we hand it.
+ */
+function openChatStream(url, body, signal) {
+  return new Promise((resolve, reject) => {
+    const target = new URL(url);
+    const lib = target.protocol === "https:" ? https : http;
+    const payload = Buffer.from(JSON.stringify(body));
+    const req = lib.request(
+      {
+        protocol: target.protocol,
+        hostname: target.hostname,
+        port: target.port,
+        path: `${target.pathname}${target.search}`,
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Content-Length": payload.length },
+        signal,
+      },
+      resolve,
+    );
+    req.on("error", reject);
+    req.end(payload);
+  });
 }
 
-async function callOpenRouter(req, deadline) {
-  const key = process.env.OPENROUTER_API_KEY;
-  if (!key) throw providerError("openrouter", "OPENROUTER_API_KEY not configured", { status: 500 });
-  const model = process.env.OPENROUTER_MODEL || "openai/gpt-oss-120b:free";
-  const headers = {
-    Authorization: `Bearer ${key}`,
-    "HTTP-Referer": process.env.OPENROUTER_REFERER || "https://oovi.studio",
-    "X-Title": process.env.OPENROUTER_TITLE || "Oovi Studio",
-  };
-  const rf = openAiResponseFormat(req.schema, req.name);
-  const send = (body) => postJson(OPENROUTER_URL, headers, body, budget(deadline));
-  const build = (format) => {
-    const body = { model, messages: req.messages, max_tokens: clampTokens(req.maxTokens, 2000) };
-    if (format) body.response_format = format;
-    return body;
-  };
-  let { res, data } = await send(build(rf));
-  // A model that rejects strict json_schema gets one plain-JSON retry; our
-  // lenient repair loop downstream handles the rest.
-  if (res.status === 400 && rf && rf.type === "json_schema") {
-    ({ res, data } = await send(build({ type: "json_object" })));
-  }
-  if (!res.ok) {
-    const detail = data?.error?.message || `${res.status}`;
-    throw providerError("openrouter", detail, {
-      status: res.status,
-      retryable: res.status >= 500 || res.status === 429,
-    });
-  }
-  const text = firstText(data);
-  if (!text) throw providerError("openrouter", "empty response", { retryable: true });
-  return { text, model, usage: data?.usage || null };
-}
-
-async function callGemini(req, deadline) {
-  const key = process.env.GEMINI_API_KEY;
-  if (!key) throw providerError("gemini", "GEMINI_API_KEY not configured", { status: 500 });
-  const model = process.env.GEMINI_MODEL || "gemma-4-31b-it";
-  const { system, turns } = splitMessages(req.messages);
-  const generationConfig = {
-    maxOutputTokens: clampTokens(req.maxTokens, 2000),
-    temperature: 0.7,
-  };
-  // Gemini's responseSchema is an OpenAPI subset without anyOf/nullable
-  // unions, so our schemas cannot round-trip. JSON mime + our lenient
-  // parser is the reliable path; the prompt already dictates the shape.
-  if (req.schema) generationConfig.responseMimeType = "application/json";
-  const body = {
-    contents: turns.map((t) => ({ role: t.role, parts: [{ text: t.text }] })),
-    generationConfig,
-  };
-  if (system) body.systemInstruction = { parts: [{ text: system }] };
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
-  const { res, data } = await postJson(url, { "x-goog-api-key": key }, body, budget(deadline));
-  if (!res.ok) {
-    const detail = data?.error?.message || `${res.status}`;
-    throw providerError("gemini", detail, {
-      status: res.status,
-      retryable: res.status >= 500 || res.status === 429,
-    });
-  }
-  const parts = data?.candidates?.[0]?.content?.parts;
-  const text = Array.isArray(parts) ? parts.map((p) => p?.text || "").join("").trim() : "";
-  if (!text) throw providerError("gemini", "empty response", { retryable: true });
-  return { text, model, usage: data?.usageMetadata || null };
+/** Drains a response body to a string (error path only). */
+async function drain(stream) {
+  let out = "";
+  for await (const chunk of stream) out += chunk.toString();
+  return out;
 }
 
 /**
- * On-device rung: Ollama's OpenAI-compatible endpoint, no key.
- * Ollama is optional and often not running — a 1.5s health probe keeps a
- * down daemon an instant fall-through instead of a dead 75s wait. Model
- * output is plain text + our lenient repair (Ollama's structured-output
- * support varies by version, so we don't depend on response_format).
+ * On-device provider: Ollama's native /api/chat. Ollama may not be running —
+ * a 1.5s health probe fails fast instead of waiting out the request timeout.
+ * `think: false` skips the model's reasoning phase; `num_ctx` pins the
+ * context window so a large plan prompt is never silently truncated.
  */
-async function callOllama(req, deadline) {
+async function callOllama(req, deadline, onProgress, onDelta) {
   const base = (process.env.OLLAMA_URL || OLLAMA_URL_DEFAULT).replace(/\/+$/, "");
-  const model = process.env.OLLAMA_MODEL || "gpt-oss:20b";
+  const model = process.env.OLLAMA_MODEL || "gemma4:e2b";
   try {
     const health = await fetch(`${base}/api/tags`, { signal: AbortSignal.timeout(1500) });
     if (!health.ok) throw new Error(`health ${health.status}`);
   } catch (error) {
     throw providerError("ollama", `not reachable at ${base} (${error.message})`, { retryable: true });
   }
+  const keepAlive = process.env.OLLAMA_KEEP_ALIVE || "30m";
+  const format = resolveFormat(req.schema);
+  const options = buildOptions();
   const body = {
     model,
     messages: req.messages,
-    max_tokens: clampTokens(req.maxTokens, 2000),
-    temperature: 0.2,
-    stream: false,
+    stream: true,
+    // Verified against Ollama 0.40.6 with a direct curl: `think:false` is the
+    // right field name, and it is what stops e2b from burning ~2 minutes of
+    // silent reasoning on every call.
+    think: false,
+    // Keeps the model resident; a reload costs ~19-22s AND drops the prompt
+    // cache (server default is 5 minutes).
+    keep_alive: keepAlive,
+    // Constrained decoding, when the caller supplied a schema.
+    ...(format ? { format } : {}),
+    options,
   };
+  const started = Date.now();
   let res;
-  let data = null;
   try {
-    ({ res, data } = await postJson(`${base}/v1/chat/completions`, {}, body, budget(deadline, OLLAMA_TIMEOUT)));
+    res = await openChatStream(
+      `${base}/api/chat`,
+      body,
+      AbortSignal.timeout(budget(deadline, OLLAMA_TIMEOUT)),
+    );
   } catch (error) {
     throw providerError("ollama", `request failed (${error.message})`, { retryable: true });
   }
-  if (!res.ok) {
-    const detail = data?.error?.message || data?.error || `${res.status}`;
+  if (res.statusCode !== 200) {
+    const raw = await drain(res).catch(() => "");
+    let detail = `${res.statusCode}`;
+    try {
+      const data = JSON.parse(raw);
+      detail = data?.error?.message || data?.error || detail;
+    } catch {
+      // non-JSON error body
+    }
     throw providerError("ollama", String(detail), {
-      status: res.status,
-      retryable: res.status >= 500 || res.status === 429,
+      status: res.statusCode,
+      retryable: res.statusCode >= 500 || res.statusCode === 429,
     });
   }
-  const text = firstText(data);
+  let lastLog = started;
+  let streamed;
+  try {
+    streamed = await readChatStream(res, (chunks) => {
+      const now = Date.now();
+      if (now - lastLog >= PROGRESS_EVERY) {
+        lastLog = now;
+        const secs = ((now - started) / 1000).toFixed(0);
+        console.log(`[ai-chain] ollama generating… ${chunks} chunks ${secs}s`);
+      }
+      onProgress?.(chunks, Math.round((now - started) / 1000));
+    }, onDelta);
+  } catch (error) {
+    throw providerError("ollama", `stream interrupted (${error.message})`, { retryable: true });
+  }
+  const { text, usage, visible } = streamed;
   if (!text) throw providerError("ollama", "empty response", { retryable: true });
-  return { text, model, usage: data?.usage || null };
+  console.log(`[ai-chain] ${req.name || "ollama"} timing ${formatTiming(usage, Date.now() - started)} visible=${visible}`);
+  if (usage?.completion_tokens != null && visible && usage.completion_tokens > visible * 1.5) {
+    console.warn(
+      `[ai-chain] hidden reasoning? eval_count=${usage.completion_tokens} but only ${visible} chunks reached the reply`,
+    );
+  }
+  return { text, model, usage };
 }
 
-const CALLERS = { groq: callGroq, gemini: callGemini, openrouter: callOpenRouter, ollama: callOllama };
+const CALLERS = { ollama: callOllama };
 
 /**
- * Tries providers in order; returns { text, provider, model, usage, attempts }.
- * Throws the FIRST provider error when every rung fails (so a genuine
- * request/schema problem still surfaces instead of a downstream mask).
+ * Runs the configured provider; returns { text, provider, model, usage, attempts }.
+ * Throws the provider error when it fails, so a genuine request/schema
+ * problem still surfaces instead of a downstream mask.
  */
-export async function runChain(req) {
-  const order = (process.env.AI_CHAIN || "groq,gemini,openrouter,ollama")
+export async function runChain(req, opts = {}) {
+  const onProgress = typeof opts.onProgress === "function" ? opts.onProgress : null;
+  const onDelta = typeof opts.onDelta === "function" ? opts.onDelta : null;
+  const order = (process.env.AI_CHAIN || "ollama")
     .split(",")
     .map((s) => s.trim().toLowerCase())
     .filter((s) => CALLERS[s]);
-  if (!order.length) order.push("groq");
+  if (!order.length) order.push("ollama");
 
   const started = Date.now();
   const deadline = started + CHAIN_DEADLINE;
@@ -264,17 +357,15 @@ export async function runChain(req) {
     let lastError = null;
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
       try {
-        const out = await call(req, deadline);
+        const out = await call(req, deadline, onProgress, onDelta);
         const ms = Date.now() - started;
-        console.log(`[ai-chain] ${name} ok ${ms}ms${attempt > 1 ? ` (attempt ${attempt})` : ""}`);
+        console.log(`[ai-chain] ${name} ok ${ms}ms`);
         return { ...out, provider: name, attempts: attempts.concat([{ provider: name, ok: true, ms }]) };
       } catch (error) {
         lastError = error;
-        // 429 means this provider is spent for now — advance immediately.
-        // A slow failure already burned budget (31b's 503s land after
-        // 20-40s) — retrying it would double the burn, so only cheap
-        // transient faults (network blips, fast 5xx) get a same-provider
-        // retry. Every other verdict advances to the next rung.
+        // 429 means this provider is spent for now — stop immediately. Only
+        // cheap transient faults (network blips, fast 5xx) get a same-provider
+        // retry; slow verdicts are not worth doubling the burn.
         const spent = Date.now() - rungStart;
         if (error.status === 429 || !error.retryable || attempt === MAX_ATTEMPTS || spent > 25000) break;
         await sleep(500 * attempt);
@@ -287,10 +378,10 @@ export async function runChain(req) {
       status: lastError.status,
       error: String(lastError.message).slice(0, 160),
     });
-    console.warn(`[ai-chain] ${lastError.message} → next provider`);
+    console.warn(`[ai-chain] ${lastError.message}`);
   }
 
-  const error = firstError || providerError("chain", "no AI providers configured", { status: 500 });
+  const error = firstError || providerError("chain", "no AI provider configured", { status: 500 });
   error.attempts = attempts;
   throw error;
 }

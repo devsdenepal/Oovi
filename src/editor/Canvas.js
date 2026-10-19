@@ -1,6 +1,6 @@
 import { createFabricCanvas, renderDesign, canvasToDesign, createDesignObject, hydrateImages } from "../renderer/fabricRenderer";
 import { HistoryManager } from "./HistoryManager";
-import { ActiveSelection, Group, FabricImage } from "fabric";
+import { ActiveSelection, Group, FabricImage, Rect, Textbox } from "fabric";
 
 /**
  * Flattens the canvas object tree for the layers panel, top-most first at
@@ -70,6 +70,8 @@ export class CanvasEditor {
     this.onDirty = null;
     this._removeListeners = [];
     this._resizeDebounce = null;
+    // Non-destructive skeleton wireframe objects (see showSkeletonGuides).
+    this._guides = [];
   }
 
   /**
@@ -94,6 +96,9 @@ export class CanvasEditor {
 
   loadDesign(design) {
     this.suppressHistory = true;
+    // renderDesign() wipes the object list, so stale guide references (and any
+    // wireframe drawn for the previous plan) die with it.
+    this._guides = [];
     renderDesign(this.canvas, design);
     this.suppressHistory = false;
     this.history.snapshot();
@@ -106,6 +111,134 @@ export class CanvasEditor {
       this._syncSelection();
     });
     requestAnimationFrame(() => this.fitToContainer());
+  }
+
+  /**
+   * Draws the planned skeleton as a non-destructive wireframe: one dashed box
+   * plus a role label per region.
+   *
+   * Guides carry NO `designId`, so canvasToDesign() skips them — they never
+   * enter the design, exports, patches, history or the quality gate. They
+   * exist only so the canvas shows the planned structure while the slow
+   * per-region generation fills it in; each guide is dropped as its real
+   * elements land (clearGuideFor). Interactive selection is disabled so they
+   * cannot be moved, deleted or exported by accident.
+   *
+   * @param {Array<{id:string, kind:string, role?:string, box?:{x:number,y:number,width:number,height:number}}>} components
+   */
+  showSkeletonGuides(components) {
+    this.clearSkeletonGuides();
+    const c = this.canvas;
+    if (!c || !Array.isArray(components) || components.length === 0) return;
+    let at = 0;
+    this.suppressHistory = true;
+    try {
+      for (const comp of components) {
+        const box = comp && comp.box;
+        if (!box || !["x", "y", "width", "height"].every((k) => Number.isFinite(box[k]))) continue;
+        const image = comp.kind === "image";
+        const accent = image ? "#F59E0B" : "#6366F1";
+        const rect = new Rect({
+          left: box.x,
+          top: box.y,
+          width: Math.max(8, box.width),
+          height: Math.max(8, box.height),
+          originX: "left",
+          originY: "top",
+          fill: image ? "rgba(245,158,11,0.07)" : "rgba(99,102,241,0.05)",
+          stroke: accent,
+          strokeWidth: 1,
+          strokeDashArray: [6, 4],
+          strokeUniform: true,
+          selectable: false,
+          evented: false,
+          excludeFromExport: true,
+          hoverCursor: "default",
+          objectCaching: false,
+        });
+        const label = new Textbox(`${comp.role || "region"}${image ? " · image" : ""}`, {
+          left: box.x + 6,
+          top: box.y + 6,
+          width: Math.max(48, box.width - 12),
+          fontSize: 12,
+          fontFamily: "Inter, system-ui, sans-serif",
+          fill: accent,
+          selectable: false,
+          evented: false,
+          excludeFromExport: true,
+          hoverCursor: "default",
+          objectCaching: false,
+        });
+        for (const guide of [rect, label]) {
+          guide.isGuide = true;
+          guide.guideFor = comp.id;
+          c.insertAt(at++, guide);
+          this._guides.push(guide);
+        }
+      }
+      c.requestRenderAll();
+    } finally {
+      this.suppressHistory = false;
+    }
+  }
+
+  /** Removes every skeleton guide (no-op when there are none). */
+  clearSkeletonGuides() {
+    const c = this.canvas;
+    const guides = this._guides || [];
+    this._guides = [];
+    if (!c || guides.length === 0) return;
+    this.suppressHistory = true;
+    try {
+      for (const guide of guides) {
+        try {
+          c.remove(guide);
+        } catch {
+          // already gone (undo/redo replaced the object list)
+        }
+      }
+      c.requestRenderAll();
+    } finally {
+      this.suppressHistory = false;
+    }
+  }
+
+  /** Guides still owned by the canvas — undo/redo can swap the object list. */
+  _liveGuides() {
+    const c = this.canvas;
+    if (!c) return [];
+    const objects = c.getObjects();
+    return (this._guides || []).filter((g) => objects.includes(g));
+  }
+
+  /** Drops one region's guide — called as its real elements land. */
+  clearGuideFor(id) {
+    const c = this.canvas;
+    if (!c || !this._guides || this._guides.length === 0) return;
+    const keep = [];
+    this.suppressHistory = true;
+    try {
+      for (const guide of this._liveGuides()) {
+        if (guide.guideFor === id) {
+          try {
+            c.remove(guide);
+          } catch {
+            // already gone
+          }
+        } else {
+          keep.push(guide);
+        }
+      }
+    } finally {
+      this.suppressHistory = false;
+    }
+    this._guides = keep;
+    c.requestRenderAll();
+  }
+
+  /** Guides sit below the design content; used to offset plan-rank inserts. */
+  guideCount() {
+    return this._liveGuides().length;
   }
 
   /**
@@ -796,7 +929,7 @@ export class CanvasEditor {
     // level so the panel shows top-most first, matching the spec order
     // (Footer on top of Rectangle...). Group children are nested under their
     // parent group.
-    const layers = flattenLayers(this.canvas.getObjects());
+    const layers = flattenLayers(this.canvas.getObjects().filter((o) => !o.isGuide));
     const activeIds = new Set(this.canvas.getActiveObjects().map((o) => o.designId));
     this.layersCallback(layers, activeIds);
   }
@@ -1046,7 +1179,7 @@ export class CanvasEditor {
     const W = c.width || 0;
     const H = c.height || 0;
     if (!W || !H) return empty;
-    const tops = c.getObjects().filter((o) => o && o.visible !== false);
+    const tops = c.getObjects().filter((o) => o && o.visible !== false && !o.isGuide);
     if (tops.length < 1) return empty;
     const isText = (o) =>
       o.elementType === "text" ||
@@ -1209,7 +1342,10 @@ export class CanvasEditor {
    * @param {Array} ops validated ops (see src/ai/patch.js)
    * @returns {{applied: string[], changedIds: string[]}}
    */
-  applyPatchOps(ops) {
+  applyPatchOps(ops, options = {}) {
+    // `quiet` paints without touching selection/panels/dirty (used for the
+    // live token-stream preview); `history` controls the undo snapshot.
+    const { history = true, quiet = false } = options;
     const c = this.canvas;
     if (!c) return { applied: [], changedIds: [] };
     const readOld = (o, key) => {
@@ -1260,7 +1396,10 @@ export class CanvasEditor {
           // inserts at the position the piece holds in plan order, so the
           // final stack matches the plan regardless of network timing.
           if (typeof op.at === "number" && typeof c.insertAt === "function") {
-            c.insertAt(Math.max(0, Math.min(op.at, c.getObjects().length)), obj);
+            // Guides occupy the bottom of the stack; offset so a plan-rank slot
+            // still means "rank among design elements".
+            const at = op.at + this.guideCount();
+            c.insertAt(Math.max(0, Math.min(at, c.getObjects().length)), obj);
           } else c.add(obj);
           if (typeof obj.setCoords === "function") obj.setCoords();
           changed.add(op.element.id);
@@ -1278,9 +1417,9 @@ export class CanvasEditor {
           const i = objs.indexOf(obj);
           const j =
             op.to === "front" ? objs.length - 1
-            : op.to === "back" ? 0
+            : op.to === "back" ? this.guideCount()
             : op.to === "forward" ? Math.min(objs.length - 1, i + 1)
-            : Math.max(0, i - 1);
+            : Math.max(this.guideCount(), i - 1);
           if (i !== j) {
             c.remove(obj);
             if (typeof c.insertAt === "function") c.insertAt(j, obj);
@@ -1294,16 +1433,20 @@ export class CanvasEditor {
       this.suppressHistory = false;
     }
     const changedIds = [...changed];
-    const tops = changedIds
-      .map((id) => findById(c.getObjects(), id))
-      .filter((o) => o && c.getObjects().includes(o));
-    if (tops.length === 1) c.setActiveObject(tops[0]);
-    else if (tops.length > 1) c.setActiveObject(new ActiveSelection(tops, { canvas: c }));
+    if (!quiet) {
+      const tops = changedIds
+        .map((id) => findById(c.getObjects(), id))
+        .filter((o) => o && c.getObjects().includes(o));
+      if (tops.length === 1) c.setActiveObject(tops[0]);
+      else if (tops.length > 1) c.setActiveObject(new ActiveSelection(tops, { canvas: c }));
+    }
     c.requestRenderAll();
-    this.history.snapshot();
-    this.onDirty?.();
-    this._syncLayers();
-    this._syncSelection();
+    if (history) this.history.snapshot();
+    if (!quiet) {
+      this.onDirty?.();
+      this._syncLayers();
+      this._syncSelection();
+    }
     return { applied, changedIds };
   }
 

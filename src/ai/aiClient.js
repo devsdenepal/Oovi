@@ -1,8 +1,42 @@
 import { buildDesignPrompt, buildRevalidationPrompt } from "./designPrompt";
 import { buildPlanPrompt, buildComponentPrompt } from "./architectPrompt";
+import { createElementScanner } from "./streamJson";
+import {
+  buildGoalPrompt,
+  buildPalettePrompt,
+  buildSkeletonPrompt,
+  GOAL_SCHEMA,
+  PALETTE_SCHEMA,
+  SKELETON_SCHEMA,
+} from "./layerPrompt";
+import {
+  buildTemplateChoicePrompt,
+  buildTuningPrompt,
+  templateChoiceSchema,
+  TUNING_SCHEMA,
+} from "./templatePrompt";
+import {
+  getTemplate,
+  instantiateTemplate,
+  sanitizeTuning,
+  sizeClassOf,
+} from "../layout/templates";
+import { retrieveTemplates, RETRIEVAL_LIMIT, DEFAULT_COVERAGE_THRESHOLD } from "../layout/retrieve";
+import { listSavedTemplates } from "../layout/templateStore";
+import { lookupPalette, paletteIsUsable } from "../layout/palettes";
 import { buildPatchPrompt } from "./patchPrompt";
 import { validatePatch } from "./patch";
-import { isMockEnabled, mockDesign, mockPatch, mockPlan, mockComponent } from "./mockProvider";
+import { contrastRatio } from "./quality";
+import { fitRegion } from "../layout/regionFit";
+import {
+  isMockEnabled,
+  mockDesign,
+  mockPatch,
+  mockPlan,
+  mockComponent,
+  mockGoal,
+  mockPalette,
+} from "./mockProvider";
 import {
   buildSemanticDesignPrompt,
   buildSemanticRevalidationPrompt,
@@ -18,14 +52,13 @@ import { validateDesign } from "../design/designValidator";
  *
  * Every request goes through one same-origin server route:
  *
- *   POST /api/groq   { messages, schema, maxTokens, effort }
- *   ->               { text, provider }
+ *   POST /api/ai   { messages, schema, maxTokens, effort }
+ *   ->             { text, provider }
  *
- * The provider order (Groq gpt-oss-120b -> Gemini Gemma 4 -> OpenRouter
- * Nemotron -> on-device Ollama) lives server-side in api/_aiChain.js, so the
- * API keys never reach the browser and no call ever leaves this pipeline.
- * Swapping providers only means editing that chain - the renderer and
- * validator are untouched.
+ * The provider (on-device Ollama serving the local Gemma model) lives
+ * server-side in api/_aiChain.js, so nothing provider-specific reaches the
+ * browser and no API key ever leaves the server. Swapping the model only
+ * means editing that file — the renderer and validator are untouched.
  */
 
 // How many times we ask the model to fix an invalid design before giving up.
@@ -122,9 +155,9 @@ function splitPrompt(full) {
   return { system: sys.join("\n").trim(), user: lines.slice(at + 1).join("\n").trim() };
 }
 
-/** All validator-tolerated styling fields. Groq strict mode demands every
- * property key appear in `required`, so optionals are nullable unions —
- * and normalizeElement strips nulls back out before validation. */
+/** All validator-tolerated styling fields. Strict json_schema mode demands
+ * every property key appear in `required`, so optionals are nullable
+ * unions — and normalizeElement strips nulls back out before validation. */
 const OPT_COMMON = {
   role: { type: ["string", "null"] },
   stroke: { type: ["string", "null"] },
@@ -270,63 +303,126 @@ const PLAN_SCHEMA = {
 };
 
 /**
- * Same-origin /api/groq proxy, now a server-side provider CHAIN
- * (groq → gemini → openrouter, order via AI_CHAIN). The browser sends one
- * normalized request; the proxy returns whichever provider answered, so a
- * rate-limited provider never drops a component. Keys stay server-side.
- *
- * Strict json_schema first; a 400 (schema unsupported by every provider)
+ * Same-origin /api/ai proxy. The browser sends one normalized request and
+ * the server routes it to the on-device provider (Ollama serving the local
+ * Gemma model). Strict json_schema first; a 400 (schema unsupported)
  * downgrades once to plain json_object, where our repair loop takes over.
+ *
+ * The response is a progress STREAM (NDJSON), not one buffered body: on-device
+ * generation runs for minutes, and a silent response is what idle timeouts at
+ * any hop are built to kill. Streaming also lets `opts.onProgress(chunks, secs)`
+ * drive the UI while it waits.
  */
-async function fetchGroqChat(prompt, opts = {}) {
+async function fetchAiChat(prompt, opts = {}) {
   const tStart = Date.now();
   const ms = () => Date.now() - tStart;
-  const model = import.meta.env.VITE_GROQ_MODEL || "openai/gpt-oss-120b";
   const { system, user } = splitPrompt(prompt);
   const messages = [
     ...(system ? [{ role: "system", content: system }] : []),
     { role: "user", content: user },
   ];
+  const onProgress = typeof opts.onProgress === "function" ? opts.onProgress : null;
+  const onPartial = typeof opts.onPartial === "function" ? opts.onPartial : null;
+  const signal = AbortSignal.timeout(1800000);
+
+  // Drains the NDJSON progress stream: accumulates the final text while
+  // forwarding live token counts to the UI.
+  const readStream = async (res) => {
+    const reader = res.body?.getReader();
+    if (!reader) throw new Error("ai returned no response stream");
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let text = "";
+    let provider = "ollama";
+    let failure = null;
+    const consume = (line) => {
+      const trimmed = line.trim();
+      if (!trimmed) return;
+      let obj;
+      try {
+        obj = JSON.parse(trimmed);
+      } catch {
+        return; // ignore a malformed line, keep the stream alive
+      }
+      if (obj.t === "progress") onProgress?.(obj.chunks, obj.secs);
+      else if (obj.t === "delta") {
+        // Raw token text: lets a caller parse elements out of the response
+        // while it is still being written.
+        text += obj.text || "";
+        onPartial?.(text);
+      } else if (obj.t === "done") {
+        text = obj.text || "";
+        provider = obj.provider || provider;
+      } else if (obj.t === "error") failure = obj;
+    };
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let nl;
+      while ((nl = buffer.indexOf("\n")) !== -1) {
+        consume(buffer.slice(0, nl));
+        buffer = buffer.slice(nl + 1);
+      }
+    }
+    consume(buffer);
+    if (failure) {
+      const error = new Error(`ai request failed: ${failure.error}`);
+      if (failure.retryable) error.retryable = true;
+      error.status = failure.status || 502;
+      throw error;
+    }
+    return { text, provider };
+  };
+
   const post = async (schema) => {
     let res;
     try {
-      res = await fetch("/api/groq", {
+      res = await fetch("/api/ai", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages, model, schema, name: opts.name, maxTokens: opts.maxTokens, effort: opts.effort }),
-        signal: AbortSignal.timeout(180000),
+        headers: { "Content-Type": "application/json", "x-ai-stream": "1" },
+        body: JSON.stringify({
+          messages,
+          schema,
+          name: opts.name,
+          maxTokens: opts.maxTokens,
+          effort: opts.effort,
+          stream: true,
+          delta: !!onPartial,
+        }),
+        signal,
       });
     } catch (error) {
       throw networkError(`ai request failed (network): ${error.message}`);
     }
-    let data = null;
-    try {
-      data = await res.json();
-    } catch {
-      // keep data null
-    }
-    if (!res.ok) {
+    if (!res.ok || !res.body) {
+      // Pre-stream rejection (bad request, method, etc.) — read the JSON body.
+      let data = null;
+      try {
+        data = await res.json();
+      } catch {
+        // keep data null
+      }
       const error = new Error(`ai request failed: ${data?.error || res.status}`);
       if (data?.retryable) error.retryable = true;
       error.status = res.status;
       throw error;
     }
-    if (typeof data?.text !== "string" || !data.text.trim()) {
-      throw new Error("ai returned an empty response");
-    }
-    // provider = which rung of the chain answered (groq/gemini/openrouter/ollama).
-    return { text: data.text, provider: data.provider || "groq" };
+    const out = await readStream(res);
+    if (!out.text.trim()) throw new Error("ai returned an empty response");
+    return out;
   };
-  console.log(`[ai] chain POST /api/groq model=${model} promptChars=${prompt.length} strict=${opts.schema ? "schema" : "json_object"}`);
+
+  console.log(`[ai] POST /api/ai promptChars=${prompt.length} strict=${opts.schema ? "schema" : "json_object"}`);
   try {
     const out = await post(opts.schema);
-    console.log(`[ai] chain ok via ${out.provider} ${ms()}ms respChars=${out.text.length}`);
+    console.log(`[ai] ok via ${out.provider} ${ms()}ms respChars=${out.text.length}`);
     return out.text;
   } catch (error) {
     if (error && error.status === 400 && opts.schema && typeof opts.schema === "object") {
-      console.warn(`[ai] chain strict rejected (400), downgrading to json_object: ${error.message}`);
+      console.warn(`[ai] strict rejected (400), downgrading to json_object: ${error.message}`);
       const out = await post("json_object");
-      console.log(`[ai] chain ok-downgraded via ${out.provider} ${ms()}ms respChars=${out.text.length}`);
+      console.log(`[ai] ok-downgraded via ${out.provider} ${ms()}ms respChars=${out.text.length}`);
       return out.text;
     }
     throw error;
@@ -348,7 +444,7 @@ async function generateSemantic(userPrompt, analysis, influence) {
         ? buildSemanticDesignPrompt(userPrompt, { analysis, influence })
         : buildSemanticRevalidationPrompt(userPrompt, previousSemantic, errors, { analysis, influence });
 
-    const text = await fetchGroqChat(requestPrompt);
+    const text = await fetchAiChat(requestPrompt);
 
     const parsed = regexRepairJson(text);
     if (parsed === null) {
@@ -432,7 +528,7 @@ export async function generateDesign(userPrompt, options = {}) {
     const requestPrompt =
       attempt === 1 ? prompt : buildRevalidationPrompt(userPrompt, previousOutput, errors, canvas);
 
-    const text = await fetchGroqChat(requestPrompt);
+    const text = await fetchAiChat(requestPrompt);
     previousOutput = text;
 
     const parsed = regexRepairJson(text);
@@ -478,7 +574,7 @@ export async function generatePatch(message, context) {
     return { ops: valid, errors, note, source: "mock" };
   }
 
-  const text = await fetchGroqChat(buildPatchPrompt(message, design, selectedIds));
+  const text = await fetchAiChat(buildPatchPrompt(message, design, selectedIds));
   const parsed = regexRepairJson(text);
   if (parsed === null) {
     throw new Error("AI response was not recoverable JSON. Ask again, more specifically.");
@@ -584,6 +680,343 @@ function sanitizePlan(raw, canvas) {
   return { palette, style, components, warnings };
 }
 
+// --- Layered pipeline (raw -> best) --------------------------------------
+//
+// These three passes replace the single monolithic plan call so a terse
+// request still produces a complete, on-palette design. See layerPrompt.js
+// for what each layer receives; the sanitizers below make any layer's output
+// safe to consume even when the model answers partially.
+
+const DEFAULT_PALETTE = { background: "#FFFFFF", ink: "#111111", accent: "#4F46E5" };
+
+function asText(value, fallback = "") {
+  return typeof value === "string" && value.trim() ? value.trim() : fallback;
+}
+
+function hexOrNull(value) {
+  if (typeof value !== "string") return null;
+  const m = value.trim().match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i);
+  if (!m) return null;
+  let hex = m[1].toLowerCase();
+  if (hex.length === 3) hex = hex.split("").map((c) => c + c).join("");
+  return `#${hex.toUpperCase()}`;
+}
+
+/** Tolerates a partial goal: always returns the full shape. */
+function sanitizeGoal(raw) {
+  const list = (v) =>
+    Array.isArray(v)
+      ? v.filter((s) => typeof s === "string" && s.trim()).map((s) => s.trim()).slice(0, 10)
+      : [];
+  return {
+    summary: asText(raw?.summary, asText(raw?.subject, "Design")),
+    subject: asText(raw?.subject, asText(raw?.summary, "Design")),
+    audience: asText(raw?.audience, "general audience"),
+    purpose: asText(raw?.purpose, "present the subject clearly"),
+    tone: asText(raw?.tone, "clean and confident"),
+    mustInclude: list(raw?.mustInclude),
+    avoid: list(raw?.avoid),
+    style: asText(raw?.style, "clean modern"),
+  };
+}
+
+/** Requires usable hex; repairs a background/ink pair that would fade. */
+function sanitizePalette(raw, styleFallback) {
+  const background = hexOrNull(raw?.background) || DEFAULT_PALETTE.background;
+  let ink = hexOrNull(raw?.ink) || DEFAULT_PALETTE.ink;
+  const accent = hexOrNull(raw?.accent) || DEFAULT_PALETTE.accent;
+  if ((contrastRatio(ink, background) ?? 0) < 3) {
+    const dark = contrastRatio("#111111", background) ?? 0;
+    const light = contrastRatio("#FFFFFF", background) ?? 0;
+    ink = dark >= light ? "#111111" : "#FFFFFF";
+  }
+  return { background, ink, accent, style: asText(raw?.style, styleFallback || "clean modern") };
+}
+
+/**
+ * L1 — Refine the raw request into an explicit goal. Soft-fails: if the
+ * model cannot answer, the raw prompt itself becomes the brief, so the
+ * cascade never dies at the cheap first step.
+ */
+export async function refineGoal(userPrompt, canvas, onProgress = null) {
+  if (isMockEnabled()) return { ...mockGoal(userPrompt, canvas), source: "mock" };
+  const tStart = Date.now();
+  console.log(`[ai] goal start promptChars=${userPrompt.length}`);
+  try {
+    const text = await fetchAiChat(buildGoalPrompt(userPrompt, canvas), {
+      schema: GOAL_SCHEMA,
+      name: "oovi_goal",
+      maxTokens: 600,
+      effort: "low",
+      onProgress,
+    });
+    const parsed = regexRepairJson(text);
+    if (parsed) {
+      const goal = sanitizeGoal(parsed);
+      console.log(`[ai] goal ok ${Date.now() - tStart}ms mustInclude=${goal.mustInclude.length}`);
+      return { ...goal, source: "ai" };
+    }
+    console.warn("[ai] goal unrecoverable JSON — raw prompt used as the brief");
+  } catch (error) {
+    console.warn(`[ai] goal failed (${error.message}) — raw prompt used as the brief`);
+  }
+  return { ...sanitizeGoal({ summary: userPrompt, subject: userPrompt }), source: "fallback" };
+}
+
+/** L2 — Choose ONE palette for the goal, guaranteed to not fade. */
+export async function planPalette(goal, canvas, onProgress = null) {
+  if (isMockEnabled()) return { ...mockPalette(goal, canvas), source: "mock" };
+  const tStart = Date.now();
+  // Phase 2D: a brief the curated library recognises needs no model call at
+  // all — this is ~88s of prefill saved on exact, pre-verified colours.
+  const known = lookupPalette(goal);
+  if (known && paletteIsUsable(known)) {
+    const ratio = contrastRatio(known.ink, known.background);
+    console.log(
+      `[ai] palette ok ${Date.now() - tStart}ms (library:${known.id}) bg=${known.background} ` +
+        `ink=${known.ink} accent=${known.accent} contrast=${ratio ? ratio.toFixed(1) : "?"}`,
+    );
+    return { background: known.background, ink: known.ink, accent: known.accent, style: known.style, paletteId: known.id, source: "library" };
+  }
+  console.log("[ai] palette start (no library match)");
+  try {
+    const text = await fetchAiChat(buildPalettePrompt(goal, canvas), {
+      schema: PALETTE_SCHEMA,
+      name: "oovi_palette",
+      maxTokens: 300,
+      effort: "low",
+      onProgress,
+    });
+    const parsed = regexRepairJson(text);
+    if (parsed) {
+      const palette = sanitizePalette(parsed, goal?.style);
+      const ratio = contrastRatio(palette.ink, palette.background);
+      console.log(
+        `[ai] palette ok ${Date.now() - tStart}ms bg=${palette.background} ink=${palette.ink} ` +
+          `accent=${palette.accent} contrast=${ratio ? ratio.toFixed(1) : "?"}`,
+      );
+      return { ...palette, source: "ai" };
+    }
+    console.warn("[ai] palette unrecoverable JSON — default palette used");
+  } catch (error) {
+    console.warn(`[ai] palette failed (${error.message}) — default palette used`);
+  }
+  return { ...sanitizePalette({}, goal?.style), source: "fallback" };
+}
+
+/**
+ * L3 — Skeleton: ordered regions (boxes, roles, content requirements), no
+ * final copy. Returns the SAME shape as planDesign so the build loop, the
+ * quality gate and the collision tidy all work unchanged. `correction` lets
+ * the caller re-run the skeleton with quality feedback without replanning
+ * the goal or palette.
+ */
+export async function planSkeleton(goal, palette, canvas, correction = "", onProgress = null) {
+  if (isMockEnabled()) {
+    const clean = sanitizePlan(mockPlan(goal?.summary || "design", canvas), canvas);
+    return {
+      ...clean,
+      palette: { background: palette.background, ink: palette.ink, accent: palette.accent },
+      style: palette.style,
+      source: "mock",
+    };
+  }
+  const tStart = Date.now();
+  console.log(`[ai] skeleton start canvas=${canvas.width}x${canvas.height}`);
+  let errors = [];
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    const base = buildSkeletonPrompt(goal, palette, canvas);
+    const requestPrompt =
+      attempt === 1 && !correction
+        ? base
+        : `${base}\n\n[Correction]\n${correction ? `${correction} ` : ""}Your previous skeleton was not usable JSON (${errors.join("; ")}). Return ONLY the JSON skeleton.`;
+    let text;
+    try {
+      text = await fetchAiChat(requestPrompt, {
+        schema: SKELETON_SCHEMA,
+        name: "oovi_skeleton",
+        maxTokens: 1200,
+        effort: "medium",
+        onProgress,
+      });
+    } catch (error) {
+      throw new Error(`Could not lay out the skeleton: ${error.message}`);
+    }
+    const parsed = regexRepairJson(text);
+    if (parsed === null) {
+      errors = ["unrecoverable JSON"];
+      continue;
+    }
+    const clean = sanitizePlan(parsed, canvas);
+    if (clean.components.length === 0) {
+      errors = ["no usable regions"];
+      continue;
+    }
+    const warnings = clean.warnings;
+    console.log(
+      `[ai] skeleton ok ${Date.now() - tStart}ms attempts=${attempt} ` +
+        `components=${clean.components.map((c) => `${c.id}(${c.kind}/${c.role})`).join(",")}`,
+    );
+    return {
+      palette: { background: palette.background, ink: palette.ink, accent: palette.accent },
+      style: palette.style || clean.style,
+      components: clean.components,
+      warnings,
+      source: "ai",
+    };
+  }
+  throw new Error(`Could not lay out the skeleton: ${errors.slice(0, 3).join("; ")}`);
+}
+
+/**
+ * A template by id, whether it shipped with the app or the user saved it.
+ * Saved layouts are stored as data and rehydrated on read, so they never live
+ * in the TEMPLATES table but must be just as usable.
+ */
+function findAnyTemplate(id) {
+  if (!id) return null;
+  return getTemplate(id) || listSavedTemplates().find((t) => t.id === id) || null;
+}
+
+/**
+ * L3a — choose ONE template.
+ *
+ * Retrieval does the work: src/layout/retrieve.js filters by canvas shape and
+ * ranks the survivors with BM25 over each template's own document. Three
+ * outcomes:
+ *
+ *   - nothing clears the coverage threshold  -> { id: null }, the caller falls
+ *     back to the free-form L3 rather than forcing a wrong layout;
+ *   - the top candidate is clearly ahead of the runner-up -> taken for free
+ *     (0 tokens, 0 ms);
+ *   - the shortlist is genuinely close -> ONE small call that sees only the
+ *     retrieved shortlist (and is grammar-constrained to it).
+ *
+ * @returns {Promise<{id: string|null, candidates: string[], source: string, coverage: number}>}
+ */
+export async function chooseTemplate(goal, palette, canvas, onProgress = null) {
+  const found = retrieveTemplates(goal, canvas, { limit: RETRIEVAL_LIMIT, extra: listSavedTemplates() });
+  const candidates = found.candidates;
+  if (!candidates.length) {
+    console.log(
+      `[ai] template none — no template clears the similarity threshold ` +
+        `(best coverage ${(found.coverage || 0).toFixed(2)} < ${DEFAULT_COVERAGE_THRESHOLD})`,
+    );
+    return { id: null, candidates, source: "none", coverage: found.coverage };
+  }
+  // `decisive` is retrieval's own judgement that the top hit is not a tie; the
+  // selection policy lives in src/layout/retrieve.js so the benchmark and the
+  // pipeline cannot drift apart.
+  if (found.decisive || candidates.length === 1) {
+    const winner = found.decisive?.id || candidates[0];
+    const runner = found.scored.find((s) => s.id !== winner);
+    console.log(
+      `[ai] template ok 0ms (retrieval) -> ${winner} coverage=${found.coverage.toFixed(2)}` +
+        `${runner ? ` next=${runner.id}@${runner.coverage.toFixed(2)}` : ""}`,
+    );
+    return { id: winner, candidates, source: "retrieval", coverage: found.coverage };
+  }
+  if (isMockEnabled()) return { id: candidates[0], candidates, source: "mock", coverage: found.coverage };
+  const tStart = Date.now();
+  console.log(
+    `[ai] template start candidates=${candidates.join(",")} ` +
+      `coverage=${found.scored.map((s) => `${s.id}:${s.coverage.toFixed(2)}`).join(" ")}`,
+  );
+  try {
+    const text = await fetchAiChat(buildTemplateChoicePrompt(goal, palette, canvas, found.scored), {
+      schema: templateChoiceSchema(candidates),
+      name: "oovi_template",
+      maxTokens: 220,
+      effort: "low",
+      onProgress,
+    });
+    const parsed = regexRepairJson(text);
+    const id = typeof parsed?.template === "string" ? parsed.template : "";
+    // Retrieval is a preference, not a cage: any real template id the model
+    // returns is honoured (the size check in planTemplate still applies).
+    if (id && (candidates.includes(id) || findAnyTemplate(id))) {
+      console.log(`[ai] template ok ${Date.now() - tStart}ms -> ${id}`);
+      return { id, candidates, source: "ai", coverage: found.coverage };
+    }
+    console.warn(`[ai] template choice "${id}" unknown — using ${candidates[0]}`);
+  } catch (error) {
+    console.warn(`[ai] template choice failed (${error.message}) — using ${candidates[0]}`);
+  }
+  return { id: candidates[0], candidates, source: "fallback", coverage: found.coverage };
+}
+
+/**
+ * L3b — bounded tuning patch for a chosen template. Always returns a usable
+ * tuning object: the default (untouched template) is a valid answer.
+ */
+export async function planTemplateTuning(template, goal, palette, canvas, onProgress = null) {
+  const t = typeof template === "string" ? getTemplate(template) : template;
+  const defaults = sanitizeTuning(null, t);
+  if (!t || isMockEnabled()) return { ...defaults, source: "default" };
+  const tStart = Date.now();
+  console.log(`[ai] template-tuning start ${t.id}`);
+  try {
+    const text = await fetchAiChat(buildTuningPrompt(t, goal, palette, canvas), {
+      schema: TUNING_SCHEMA,
+      name: "oovi_tuning",
+      maxTokens: 320,
+      effort: "low",
+      onProgress,
+    });
+    const parsed = regexRepairJson(text);
+    if (parsed) {
+      const tuning = sanitizeTuning(parsed, t);
+      console.log(
+        `[ai] template-tuning ok ${t.id} ${Date.now() - tStart}ms variant=${tuning.variant} ` +
+          `density=${tuning.density} hide=${tuning.hide.length} scale=${Object.keys(tuning.scale).length}`,
+      );
+      return { ...tuning, source: "ai" };
+    }
+    console.warn("[ai] template-tuning unrecoverable JSON — template left untouched");
+  } catch (error) {
+    console.warn(`[ai] template-tuning failed (${error.message}) — template left untouched`);
+  }
+  return { ...defaults, source: "fallback" };
+}
+
+/**
+ * L3 via templates: pre-filter -> choose -> tune -> instantiate. Returns the
+ * SAME plan shape as planSkeleton, or `null` when no template fits this canvas
+ * or the instantiated plan fails its own collision/coverage check — the caller
+ * then falls back to the free-form skeleton (requirement: keep full L3 as the
+ * safety net).
+ */
+export async function planTemplate(goal, palette, canvas, onProgress = null) {
+  const tStart = Date.now();
+  const choice = await chooseTemplate(goal, palette, canvas, onProgress);
+  if (!choice.id) return null;
+  const template = findAnyTemplate(choice.id);
+  if (!template) return null;
+  if (!template.sizes.includes(sizeClassOf(canvas))) {
+    console.warn(`[ai] template ${template.id} does not suit a ${sizeClassOf(canvas)} canvas — falling back to free-form skeleton`);
+    return null;
+  }
+  const tuning = await planTemplateTuning(template, goal, palette, canvas, onProgress);
+  const built = instantiateTemplate(template, tuning, canvas);
+  if (!built.ok) {
+    console.warn(`[ai] template ${template.id} unusable (${built.reason}) — falling back to free-form skeleton`);
+    return null;
+  }
+  console.log(
+    `[ai] template plan ok ${Date.now() - tStart}ms template=${template.id} variant=${built.tuning.variant} ` +
+      `regions=${built.components.map((c) => c.id).join(",")}`,
+  );
+  return {
+    palette: { background: palette.background, ink: palette.ink, accent: palette.accent },
+    style: palette.style || template.label,
+    template: template.id,
+    tuning: built.tuning,
+    components: built.components,
+    warnings: [],
+    source: "template",
+  };
+}
+
 /**
  * Architect pass 1: natural-language request → build plan (palette +
  * ordered components, each routed dsl|image with a fixed box).
@@ -606,7 +1039,7 @@ export async function planDesign(userPrompt, canvas) {
     // of burning (attempts × timeout) on a hung provider.
     let text;
     try {
-      text = await fetchGroqChat(requestPrompt, { schema: PLAN_SCHEMA, name: "oovi_plan", maxTokens: 4000, effort: "medium" });
+      text = await fetchAiChat(requestPrompt, { schema: PLAN_SCHEMA, name: "oovi_plan", maxTokens: 1500, effort: "medium" });
     } catch (error) {
       throw new Error(`Could not plan the design: ${error.message}`);
     }
@@ -633,26 +1066,64 @@ export async function planDesign(userPrompt, canvas) {
  * Architect pass 2: one DSL component → validated elements.
  * @returns {Promise<{elements: Array, source: "mock"|"ai"}>}
  */
-export async function componentDesign(component, canvas, plan) {
+/**
+ * The planned box and the planned type size are authoritative, so a region that
+ * renders outside them is corrected here rather than shipped (see
+ * src/layout/regionFit.js). Logged, never silent.
+ */
+function fitRegionChecked(elements, component) {
+  const { elements: fitted, notes } = fitRegion(elements, component);
+  for (const note of notes) console.warn(`[ai] region ${component?.id || "?"}: ${note}`);
+  return fitted;
+}
+
+export async function componentDesign(component, canvas, plan, goal = null, opts = {}) {
   const palette = plan.palette;
+  const onProgress = typeof opts.onProgress === "function" ? opts.onProgress : null;
+  const onElement = typeof opts.onElement === "function" ? opts.onElement : null;
+  const onStreamStart = typeof opts.onStreamStart === "function" ? opts.onStreamStart : null;
+  const correction = typeof opts.correction === "string" ? opts.correction.trim() : "";
   if (isMockEnabled()) {
     const elements = mockComponent(component, canvas);
     const check = validateDesign({ canvas, elements });
     if (!check.ok) throw new Error(`Mock component invalid: ${check.errors.slice(0, 2).join("; ")}`);
-    return { elements: check.design.elements, source: "mock" };
+    return { elements: fitRegionChecked(check.design.elements, component), source: "mock" };
   }
   const tStart = Date.now();
-  console.log(`[ai] component start ${component.id} (${component.kind}/${component.role || "?"})`);
+  console.log(
+    `[ai] component start ${component.id} (${component.kind}/${component.role || "?"})${correction ? " [refine]" : ""}`,
+  );
   let errors = [];
+  let lastParsed = null;
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    const base = buildComponentPrompt(component, canvas, plan, goal);
     const requestPrompt =
       attempt === 1
-        ? buildComponentPrompt(component, canvas, plan)
-        : `${buildComponentPrompt(component, canvas, plan)}\n\n[Correction]\nYour previous response failed (${errors.join("; ")}). Return ONLY {"elements":[...]}.`;
+        ? correction
+          ? `${base}\n\n[Correction]\n${correction}`
+          : base
+        : `${base}\n\n[Correction]\nYour previous response failed (${errors.join("; ")}). Return ONLY {"elements":[...]}.`;
     // Same fail-fast rule as planning: corrections fix bad JSON, not networks.
+    // Each attempt gets a fresh scanner and tells the caller to retract
+    // anything painted from the previous attempt's partial output.
+    onStreamStart?.();
+    const scan = onElement ? createElementScanner() : null;
     let text;
     try {
-      text = await fetchGroqChat(requestPrompt, { schema: COMPONENTS_SCHEMA, name: "oovi_component", maxTokens: 1200, effort: "low" });
+      text = await fetchAiChat(requestPrompt, {
+        schema: COMPONENTS_SCHEMA,
+        name: "oovi_component",
+        maxTokens: 800,
+        effort: "low",
+        onProgress,
+        // Chunk development: hand each completed element to the caller as the
+        // model writes it, instead of only at the end.
+        onPartial: scan
+          ? (partial) => {
+              for (const element of scan(partial)) onElement(element);
+            }
+          : null,
+      });
     } catch (error) {
       throw new Error(`Component "${component.id}" failed: ${error.message}`);
     }
@@ -662,17 +1133,52 @@ export async function componentDesign(component, canvas, plan) {
       errors = ["unrecoverable JSON"];
       continue;
     }
+    lastParsed = parsed;
     const check = validateDesign({ canvas, elements: parsed.elements });
     if (check.ok) {
       console.log(
         `[ai] component ok ${component.id} ${Date.now() - tStart}ms attempts=${attempt} elements=${check.design.elements.length}`,
       );
-      return { elements: check.design.elements, source: "ai" };
+      return { elements: fitRegionChecked(check.design.elements, component), source: "ai" };
     }
     console.warn(
       `[ai] component retry ${component.id} attempt=${attempt} errors=${check.errors.slice(0, 2).join("; ")}`,
     );
     errors = check.errors;
   }
+  // Salvage before giving up. The region's elements are ALREADY on the canvas
+  // from the token stream — the user watched them arrive — so rejecting the
+  // whole set means retracting them and leaving a hole where their content was
+  // (and the hole then reads as `empty-section`, which triggers a full
+  // ~250 s regeneration). When one bad piece is what failed validation, keep
+  // the pieces that are valid on their own: partial content beats an empty
+  // region, and the quality gate still checks the result as a whole.
+  const salvaged = salvageElements(lastParsed, canvas);
+  if (salvaged.length) {
+    console.warn(
+      `[ai] component salvage ${component.id} ${Date.now() - tStart}ms kept=${salvaged.length}/${lastParsed.elements.length} errors=${errors.slice(0, 2).join("; ")}`,
+    );
+    return { elements: fitRegionChecked(salvaged, component), source: "salvage" };
+  }
   throw new Error(`Component "${component.id}" failed: ${errors.slice(0, 3).join("; ")}`);
+}
+
+/**
+ * Keep whichever elements are valid on their own. Validation is run per
+ * element, so a set that only failed because of one out-of-bounds or malformed
+ * piece still yields everything else.
+ */
+export function salvageElements(parsed, canvas) {
+  const elements = parsed && Array.isArray(parsed.elements) ? parsed.elements : [];
+  if (!elements.length) return [];
+  const kept = [];
+  for (const element of elements) {
+    if (!element || typeof element !== "object") continue;
+    try {
+      if (validateDesign({ canvas, elements: [element] }).ok) kept.push(element);
+    } catch {
+      // a malformed element must never take the rest of the region down
+    }
+  }
+  return kept;
 }

@@ -3,12 +3,16 @@
 Vite + vanilla JS + Fabric.js. Prompt → Design JSON → validated → editable
 canvas. No React. `npm run dev` (hot-reloads, :5173) + `npm run dev:api`
 (:3001, stdlib node:http + Postgres); `npm run build` (must stay green).
-AI goes through the same-origin `/api/groq` route, which walks the
-server-side OPEN-WEIGHT chain (Groq gpt-oss-120b → Gemini Gemma 4 →
-OpenRouter Nemotron → on-device Ollama). No closed model, ever.
+AI goes through the same-origin `/api/ai` route, which calls the
+server-side open-weight provider (on-device Ollama serving the local
+Gemma model). No closed model, ever.
 
 ## Layer map (respect it)
 - `src/design` — schema, validator, size presets. Pure data + checks.
+- `src/layout` — the design system: semantic types/validator, the constraint
+  layout engine, the template library (`templates.js`, Phase 2D), the curated
+  palette library (`palettes.js`) and grid/type-scale snapping (`grid.js`).
+  Pure functions, no Fabric and no network, so node tests drive them directly.
 - `src/ai` — open-weight chain client, prompts, JSON repair. Knows the DSL only.
 - `src/renderer` — the ONLY Fabric touchpoint besides `src/editor`.
   DSL ↔ Fabric objects, nothing else.
@@ -28,13 +32,15 @@ OpenRouter Nemotron → on-device Ollama). No closed model, ever.
    entry). No side-channel state changes.
 4. All colors/fonts/spacing use `var(--oovi-*)` from `tokens.css`. No hex
    in CSS, no new deps without asking. No dark mode (explicitly out).
-5. Keep the browser↔server contract: one `POST /api/groq`, OpenAI-style
-   `messages` in / `{ text, provider }` out. Provider choice is server-side
-   (`api/_aiChain.js`) and keys never reach the browser. Reference images
-   stay client-side (analysis flattened to text).
+5. Keep the browser↔server contract: one `POST /api/ai`, OpenAI-style
+   `messages` in / `{ text, provider }` out. The provider is server-side
+   (`api/_aiChain.js`, on-device Ollama) and no key reaches the browser.
+   Reference images stay client-side (analysis flattened to text).
 6. Mounts live in `index.html`, wired in `main.js` → `App`. Don't rename
    a mount without updating all three.
 7. Check `DECISIONS.md` before relitigating a call; append new ones.
    `DESIGN.md` documents visual-identity choices.
 8. Verify with `npm run build` after every change chunk. Small diffs,
-   existing-file edits over new files.
+   existing-file edits over new files. `npm test` bundles `tests/*.test.mjs`
+   with the esbuild Vite ships and runs node's test runner — every template
+   variant is checked against the real quality gate there, so keep it green.

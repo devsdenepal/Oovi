@@ -8,6 +8,7 @@
     "dev": "vite",
     "dev:api": "node server/index.js",
     "build": "vite build",
+    "test": "node scripts/run-tests.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

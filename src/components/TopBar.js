@@ -15,6 +15,7 @@ export class TopBar {
    * @param {() => void} handlers.onRedo
    * @param {(mode: "fit"|"actual"|"in"|"out") => void} handlers.onZoom
    * @param {() => void} handlers.onPreview
+   * @param {() => void} [handlers.onSaveTemplate]
    * @param {(format: "png"|"jpg"|"svg"|"pdf") => void} handlers.onExport
    * @param {(title: string) => void} handlers.onTitle
    * @param {(tab: "design"|"code"|"pipeline") => void} handlers.onTab
@@ -51,6 +52,7 @@ export class TopBar {
           <button data-tb="zoom-100" class="btn btn-light border" title="Actual size (100%)">100%</button>
         </div>
         <span id="save-status" class="save-status save-saved" title="Autosave state">Saved</span>
+        <button data-tb="save-template" class="btn btn-sm btn-light border" title="Save this layout as a reusable template"><i class="fa-solid fa-bookmark"></i> Template</button>
         <button data-tb="preview" class="btn btn-sm btn-light border" title="Preview without editor chrome"><i class="fa-solid fa-eye"></i> Preview</button>
         <div class="tb-export-wrap">
           <button data-tb="export-menu" class="btn btn-sm btn-primary" title="Download the design"><i class="fa-solid fa-download"></i> Export</button>
@@ -95,6 +97,7 @@ export class TopBar {
       else if (action === "zoom-in") this.handlers.onZoom("in");
       else if (action === "zoom-100") this.handlers.onZoom("actual");
       else if (action === "preview") this.handlers.onPreview();
+      else if (action === "save-template") this.handlers.onSaveTemplate?.();
       else if (action === "export-menu") this.exportMenu.hidden = !this.exportMenu.hidden;
       else if (action === "home") this.handlers.onHome();
     });

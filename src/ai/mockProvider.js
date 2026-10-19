@@ -171,3 +171,33 @@ export function mockAssetDataUrl(describe, box) {
     `<text x="${w / 2}" y="${h / 2}" font-size="${Math.round(Math.min(w, h) * 0.5)}" font-weight="800" fill="#FFFFFF" font-family="Arial" text-anchor="middle" dominant-baseline="central">${letter}</text></svg>`;
   return `data:image/svg+xml,${encodeURIComponent(svg)}`;
 }
+
+/**
+ * Deterministic refined goal (L1) for the layered pipeline — offline/tests.
+ * Mirrors the shape refineGoal() returns for the real model.
+ */
+export function mockGoal(prompt, canvas) {
+  const text = String(prompt || "").trim() || "a clean modern design";
+  return {
+    summary: `A designed layout about: ${text}`,
+    subject: text,
+    audience: "general audience",
+    purpose: "present the subject clearly and attractively",
+    tone: "clean and confident",
+    mustInclude: ["title", "supporting line", "key details", "footer"],
+    avoid: ["invented facts", "low-contrast text"],
+    style: "clean modern, generous whitespace",
+  };
+}
+
+/** Deterministic palette (L2) for the layered pipeline — offline/tests. */
+export function mockPalette(goal, canvas) {
+  const seed = String(goal?.summary || goal?.subject || goal || "");
+  const pal = PALETTES[hash(seed) % PALETTES.length];
+  return {
+    background: pal.bg,
+    ink: pal.ink,
+    accent: pal.accent,
+    style: goal?.style || "clean modern",
+  };
+}
