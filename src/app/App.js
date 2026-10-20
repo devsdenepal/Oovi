@@ -401,7 +401,7 @@ export class App {
         // keyword pre-filter plus a small tuning call instead of a five-minute
         // free-form skeleton. The full L3 stays as the fallback whenever no
         // template fits this canvas or the instantiated plan fails its check.
-        plan = await planTemplate(goal, palette, canvas, live("3/5 layout"));
+        plan = await planTemplate(goal, palette, canvas, live("3/5 layout"), { rawPrompt: prompt });
         if (plan) {
           this.assistant.pushAssistant(
             `Layout: template "${plan.template}" (${plan.tuning.variant}, ${plan.tuning.density}).`,
@@ -618,6 +618,7 @@ export class App {
                 return { kind: "image", fetched };
               }
               const { elements } = await componentDesign(component, canvas, activePlan, goal, {
+                rawPrompt: prompt,
                 onProgress: (chunks, secs) => {
                   const painted = (streamed.get(component.id) || []).length;
                   live(`4/5 ${component.id}`)(chunks, secs);
@@ -706,6 +707,22 @@ export class App {
       const failing = crowded ? new Map() : flagRegions(report, plan);
       const hasErrors = report.issues.some((i) => i.severity === "error");
 
+      // A small headline is a copy/fit problem, not a skeleton problem.
+      // Replanning the whole canvas for it sends a template build down the
+      // slow free-form path (and usually produces a worse layout). Route the
+      // complaint to the headline region and regenerate just that box.
+      const headlineIssue = !crowded && report.issues.find((i) => i.severity === "error" && i.code === "headline");
+      if (headlineIssue) {
+        const headlineComponent = plan.components.find((c) => c.kind === "dsl" && c.role === "headline");
+        if (headlineComponent) {
+          const notes = failing.get(headlineComponent.id) || [];
+          notes.push(
+            `${headlineIssue.message} Make this the dominant headline: at least ${Math.max(24, Math.round(canvas.height * 0.06))}px, with fewer words if the box is tight.`,
+          );
+          failing.set(headlineComponent.id, notes);
+        }
+      }
+
       const replanOnce = async (why) => {
         console.warn(`[build] replanning once: ${why}`);
         this.assistant.pushAssistant(`${why} Retrying the plan once…`);
@@ -766,6 +783,7 @@ export class App {
           };
           try {
             const { elements } = await componentDesign(component, canvas, plan, goal, {
+              rawPrompt: prompt,
               onProgress: live(`Refining ${cid}`),
               correction: `This region was flagged by the quality gate: ${failing.get(cid).join(" ")} Rewrite ONLY this region's elements to fix it. Keep every element inside the reserved box.`,
               onStreamStart: retractLive,

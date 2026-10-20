@@ -14,7 +14,6 @@
  */
 
 import { DESIGN_CORE, formatGoal } from "./layerPrompt";
-import { templateExample } from "../layout/templates";
 import { formatPaletteRoles, textRoleFor } from "../layout/paletteRoles";
 
 export function buildPlanPrompt(userPrompt, canvas) {
@@ -75,7 +74,7 @@ export function buildPlanPrompt(userPrompt, canvas) {
   ].join("\n");
 }
 
-export function buildComponentPrompt(component, canvas, plan, goal = null) {
+export function buildComponentPrompt(component, canvas, plan, goal = null, rawPrompt = "") {
   const b = component.box;
   const palette = plan.palette;
   const siblings = (plan.components || [])
@@ -84,12 +83,16 @@ export function buildComponentPrompt(component, canvas, plan, goal = null) {
     .join("; ");
   const roleRule =
     component.role === "headline"
-      ? ` Headline floor: fontSize at least ${Math.max(24, Math.round(canvas.height * 0.06))}px and larger than any other text.`
+      ? ` Headline floor: fontSize at least ${Math.max(24, Math.round(canvas.height * 0.06))}px and larger than any other text. Keep it short (at most 6 words) so it fits on one line at the planned size.`
       : component.role === "details"
-        ? " Details floor: every text at least 16px."
-        : component.role === "header"
-          ? " Header is a kicker: single line, small (at most 4% of canvas height)."
-          : "";
+        ? " Details floor: every text at least 16px. Use the exact date, time and venue from the original request — never a template example."
+        : component.role === "footer"
+          ? " Footer: use the booking/registration link, price and organiser from the request. Do not repeat the venue already shown in details."
+          : component.role === "tagline"
+            ? " Tagline: one short supporting line (audience, price or what is included), not a repeat of the headline."
+            : component.role === "header"
+              ? " Header is a kicker: single line, small (at most 4% of canvas height)."
+              : "";
   // Colour is a ROLE decision, not a hex decision. The prompt names the role
   // this region paints with, so L5 corrects mistakes instead of inventing a
   // scheme after the fact.
@@ -104,10 +107,11 @@ export function buildComponentPrompt(component, canvas, plan, goal = null) {
   const rolesLine = palette?.roles
     ? `Palette roles — ${formatPaletteRoles(palette.roles)}.`
     : `Palette: background ${palette.background}, ink ${palette.ink}, accent ${palette.accent}.`;
-  // One worked example of THIS slot, chosen lexically from the template's own
-  // copy (see src/layout/templates.js). A few dozen prompt tokens against a
-  // prefill that already costs ~90s, and it pins the register of the copy.
-  const example = plan?.template ? templateExample(plan.template, component.id, goal) : "";
+  // No worked example here. The template examples are useful for the offline
+  // benchmark, but at this model size q8 copies them verbatim into the design
+  // (a pottery poster came back as "HACKTOBERFEST 2026" / "Kestrel Studio").
+  // The brief plus the raw request is the factual source; the budget and slot
+  // description set the register.
   // Output budget per role. On-device generation is ~1-3 tok/s, so the ask
   // itself is the wall clock: an unbounded "1-8 elements" got regions writing
   // 700+ tokens. Density is bought with SIZE and grouping, not element count.
@@ -115,7 +119,9 @@ export function buildComponentPrompt(component, canvas, plan, goal = null) {
     component.role === "decoration"
       ? "8-14 tiny shapes (dots, rects, short lines), grouped as one unit."
       : component.role === "sections"
-        ? "4-6 elements: a heading plus 3-4 grouped cards (icon + title + one-liner)."
+        ? /card|caption|item/i.test(component.id)
+          ? "2-3 elements: one short label and one line of detail — this is a single card, not a section."
+          : "4-6 elements: a heading plus 3-4 grouped cards (icon + title + one-liner)."
         : component.role === "details"
           ? "2-4 elements: one grouped row per fact."
           : component.role === "header"
@@ -148,6 +154,10 @@ export function buildComponentPrompt(component, canvas, plan, goal = null) {
     "[User]",
     `Canvas: ${canvas.width}x${canvas.height}. ${rolesLine} Theme: ${plan.style || "clean modern"}.`,
     goal ? `The design brief:\n${formatGoal(goal)}` : "",
+    rawPrompt
+      ? `Original request (source of truth for concrete facts — copy dates, times, venues, addresses, prices and links exactly as written; keep them in this region if they belong here):\n${String(rawPrompt).slice(0, 1600)}`
+      : "",
+    "Treat every brief line as a requirement, never as copy. Do not print requirement labels, design rules, or template examples. Use only facts stated in the brief or original request; do not invent dates, prices, names or venues.",
     `Region "${component.id}" (role ${component.role || "body"}): ${component.describe}.${roleRule}`,
     `Reserved box: x=${b.x} y=${b.y} width=${b.width} height=${b.height} — this is the whole region; keep every element inside it.`,
     component.fontSize
@@ -159,9 +169,6 @@ export function buildComponentPrompt(component, canvas, plan, goal = null) {
       ? `Copy limit: at most ${component.maxChars} characters of text in this whole region.`
       : "",
     `Colour for this region: ${colourRole}.`,
-    example
-      ? `Copy example for this region (follow its register and length, write your own words): "${example}"`
-      : "",
     `Budget — ${budget}`,
     siblings ? `Sibling regions (align edges with them, never overlap their text): ${siblings}.` : "",
     "Generate the elements for this region now.",

@@ -1028,6 +1028,25 @@ function findAnyTemplate(id) {
 }
 
 /**
+ * A request that names a layout this system actually has should not be left to
+ * a 270m chooser. These cues are deliberately narrow: "facts rail" is the
+ * poster-rail blueprint, "sidebar rail" is sidebar-rail, and so on. Anything
+ * less explicit still goes through retrieval.
+ */
+const LAYOUT_CUES = [
+  [/\b(?:three[- ]up\s+)?facts?[-\s]?rail\b|\bposter[-\s]?rail\b/i, "poster-rail"],
+  [/\bsidebar[-\s]?rail\b/i, "sidebar-rail"],
+  [/\bhero[-\s]?split\b|\bartwork (?:on the )?(?:left|right)\b/i, "hero-split"],
+  [/\bteam[-\s]?roster\b/i, "team-roster"],
+];
+
+function requestedTemplate(rawPrompt) {
+  const text = String(rawPrompt || "");
+  for (const [pattern, id] of LAYOUT_CUES) if (pattern.test(text)) return id;
+  return "";
+}
+
+/**
  * L3a — choose ONE template.
  *
  * Retrieval does the work: src/layout/retrieve.js filters by canvas shape and
@@ -1043,7 +1062,16 @@ function findAnyTemplate(id) {
  *
  * @returns {Promise<{id: string|null, candidates: string[], source: string, coverage: number}>}
  */
-export async function chooseTemplate(goal, palette, canvas, onProgress = null) {
+export async function chooseTemplate(goal, palette, canvas, onProgress = null, rawPrompt = "") {
+  const requested = requestedTemplate(rawPrompt);
+  if (requested) {
+    const template = findAnyTemplate(requested);
+    if (template && template.sizes.includes(sizeClassOf(canvas))) {
+      console.log(`[ai] template ok 0ms (request) -> ${requested}`);
+      return { id: requested, candidates: [requested], source: "request", coverage: 1 };
+    }
+    console.warn(`[ai] requested template ${requested} does not suit a ${sizeClassOf(canvas)} canvas — using retrieval`);
+  }
   const found = retrieveTemplates(goal, canvas, { limit: RETRIEVAL_LIMIT, extra: listSavedTemplates() });
   const candidates = found.candidates;
   if (!candidates.length) {
@@ -1053,27 +1081,50 @@ export async function chooseTemplate(goal, palette, canvas, onProgress = null) {
     );
     return { id: null, candidates, source: "none", coverage: found.coverage };
   }
+  // Retrieval matches vocabulary, not intent: a workshop brief can share
+  // "workshop"/"members" with a team roster even when there are no people,
+  // portraits or speaker names in the request. Filling those portrait and
+  // name slots then produces a grid of placeholders. Require an explicit
+  // people/team signal before allowing a roster template.
+  const brief = [goal?.summary, goal?.subject, goal?.purpose, goal?.audience, ...(goal?.keywords || []), ...(goal?.mustInclude || [])]
+    .filter(Boolean)
+    .join(" ");
+  const wantsPeople =
+    goal?.designType === "team" ||
+    /\b(team|roster|speaker|panel|cast|staff|lineup|portrait)\b|meet the (people|team|makers)/i.test(brief);
+  const shortlist = candidates.filter((id) => {
+    const template = findAnyTemplate(id);
+    if (template?.type === "roster" && !wantsPeople) {
+      console.log(`[ai] template skip ${id} — roster layout but the brief has no people/team content`);
+      return false;
+    }
+    return true;
+  });
+  if (!shortlist.length) {
+    console.log("[ai] template none — every retrieved candidate is a poor content match");
+    return { id: null, candidates, source: "none", coverage: found.coverage };
+  }
   // `decisive` is retrieval's own judgement that the top hit is not a tie; the
   // selection policy lives in src/layout/retrieve.js so the benchmark and the
   // pipeline cannot drift apart.
-  if (found.decisive || candidates.length === 1) {
-    const winner = found.decisive?.id || candidates[0];
-    const runner = found.scored.find((s) => s.id !== winner);
+  const decisive = found.decisive?.id && shortlist.includes(found.decisive.id) ? found.decisive.id : shortlist.length === 1 ? shortlist[0] : null;
+  if (decisive) {
+    const runner = found.scored.find((s) => s.id !== decisive);
     console.log(
-      `[ai] template ok 0ms (retrieval) -> ${winner} coverage=${found.coverage.toFixed(2)}` +
+      `[ai] template ok 0ms (retrieval) -> ${decisive} coverage=${found.coverage.toFixed(2)}` +
         `${runner ? ` next=${runner.id}@${runner.coverage.toFixed(2)}` : ""}`,
     );
-    return { id: winner, candidates, source: "retrieval", coverage: found.coverage };
+    return { id: decisive, candidates: shortlist, source: "retrieval", coverage: found.coverage };
   }
-  if (isMockEnabled()) return { id: candidates[0], candidates, source: "mock", coverage: found.coverage };
+  if (isMockEnabled()) return { id: shortlist[0], candidates: shortlist, source: "mock", coverage: found.coverage };
   const tStart = Date.now();
   console.log(
-    `[ai] template start candidates=${candidates.join(",")} ` +
+    `[ai] template start candidates=${shortlist.join(",")} ` +
       `coverage=${found.scored.map((s) => `${s.id}:${s.coverage.toFixed(2)}`).join(" ")}`,
   );
   try {
     const text = await fetchAiChat(buildTemplateChoicePrompt(goal, palette, canvas, found.scored), {
-      schema: templateChoiceSchema(candidates),
+      schema: templateChoiceSchema(shortlist),
       name: "oovi_template",
       maxTokens: 220,
       effort: "low",
@@ -1081,17 +1132,17 @@ export async function chooseTemplate(goal, palette, canvas, onProgress = null) {
     });
     const parsed = regexRepairJson(text);
     const id = typeof parsed?.template === "string" ? parsed.template : "";
-    // Retrieval is a preference, not a cage: any real template id the model
-    // returns is honoured (the size check in planTemplate still applies).
-    if (id && (candidates.includes(id) || findAnyTemplate(id))) {
+    // The grammar already restricts the answer to the shortlist; keep the
+    // check anyway so a malformed local response cannot escape it.
+    if (id && shortlist.includes(id)) {
       console.log(`[ai] template ok ${Date.now() - tStart}ms -> ${id}`);
-      return { id, candidates, source: "ai", coverage: found.coverage };
+      return { id, candidates: shortlist, source: "ai", coverage: found.coverage };
     }
-    console.warn(`[ai] template choice "${id}" unknown — using ${candidates[0]}`);
+    console.warn(`[ai] template choice "${id}" outside shortlist — using ${shortlist[0]}`);
   } catch (error) {
-    console.warn(`[ai] template choice failed (${error.message}) — using ${candidates[0]}`);
+    console.warn(`[ai] template choice failed (${error.message}) — using ${shortlist[0]}`);
   }
-  return { id: candidates[0], candidates, source: "fallback", coverage: found.coverage };
+  return { id: shortlist[0], candidates: shortlist, source: "fallback", coverage: found.coverage };
 }
 
 /**
@@ -1152,9 +1203,10 @@ function planPaletteObject(palette) {
  * then falls back to the free-form skeleton (requirement: keep full L3 as the
  * safety net).
  */
-export async function planTemplate(goal, palette, canvas, onProgress = null) {
+export async function planTemplate(goal, palette, canvas, onProgress = null, opts = {}) {
   const tStart = Date.now();
-  const choice = await chooseTemplate(goal, palette, canvas, onProgress);
+  const rawPrompt = typeof opts.rawPrompt === "string" ? opts.rawPrompt : "";
+  const choice = await chooseTemplate(goal, palette, canvas, onProgress, rawPrompt);
   if (!choice.id) return null;
   const template = findAnyTemplate(choice.id);
   if (!template) return null;
@@ -1260,6 +1312,7 @@ export async function componentDesign(component, canvas, plan, goal = null, opts
   const onElement = typeof opts.onElement === "function" ? opts.onElement : null;
   const onStreamStart = typeof opts.onStreamStart === "function" ? opts.onStreamStart : null;
   const correction = typeof opts.correction === "string" ? opts.correction.trim() : "";
+  const rawPrompt = typeof opts.rawPrompt === "string" ? opts.rawPrompt.trim() : "";
   if (isMockEnabled()) {
     const elements = mockComponent(component, canvas);
     const check = validateDesign({ canvas, elements });
@@ -1273,7 +1326,7 @@ export async function componentDesign(component, canvas, plan, goal = null, opts
   let errors = [];
   let lastParsed = null;
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-    const base = buildComponentPrompt(component, canvas, plan, goal);
+    const base = buildComponentPrompt(component, canvas, plan, goal, rawPrompt);
     const requestPrompt =
       attempt === 1
         ? correction
@@ -1325,7 +1378,27 @@ export async function componentDesign(component, canvas, plan, goal = null, opts
         return id === component.id || id.startsWith(`${component.id}-`) || id.startsWith(`${component.id}_`);
       };
       const owned = check.design.elements.filter(owns);
-      const finished = finishRegion(owned.length ? owned : check.design.elements, component, plan);
+      let usable = owned.length ? owned : check.design.elements;
+      // Decoration is a shape layer. The 270m sometimes puts a sentence in it;
+      // the fitter then shrinks that text into an unreadable 7px strip. Drop
+      // text there, and if nothing shape-like is left, draw one accent rule.
+      if (component.role === "decoration") {
+        const shapes = usable.filter((e) => e.type !== "text");
+        usable = shapes.length
+          ? shapes
+          : [
+              {
+                id: `${component.id}-bar`,
+                type: "rectangle",
+                x: component.box.x,
+                y: component.box.y,
+                width: component.box.width,
+                height: Math.min(8, component.box.height),
+                fill: palette.accent,
+              },
+            ];
+      }
+      const finished = finishRegion(usable, component, plan);
       console.log(
         `[ai] component ok ${component.id} ${Date.now() - tStart}ms attempts=${attempt} elements=${check.design.elements.length}`,
       );

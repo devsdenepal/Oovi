@@ -1123,3 +1123,30 @@ Warnings still do not trigger refinement; only errors plus
   abstention survives a wrong scope, and an off-slot region is translated in.
 - `scripts/quality-check.mjs` grows the same sparse product-announcement
   regression, no model calls.
+
+### Facts survive the cascade
+
+L1 deliberately turns concrete facts into content labels ("date and time",
+"venue address"). That is useful for planning, but L4 never saw the original
+request, so q8 filled slots with the labels, repeated the venue, or copied a
+template example. The raw request now travels to `componentDesign` as
+`opts.rawPrompt` and is included in the region prompt as the source of truth
+for dates, times, venues, prices and links. The goal remains the design intent;
+the request is the factual record.
+
+Template examples were removed from the L4 prompt. They were useful for the
+offline benchmark, but on this model they are copied verbatim: a pottery brief
+returned "HACKTOBERFEST 2026" and "Kestrel Studio · Free". The slot
+description, copy limit and budget are enough register anchoring.
+
+Explicit layout cues are honoured before retrieval: "facts rail"/"poster rail"
+selects `poster-rail`, "sidebar rail" selects `sidebar-rail`, "hero split"
+selects `hero-split`, and "team roster" selects `team-roster` when the canvas
+shape fits. Roster templates are otherwise rejected unless the brief has an
+explicit people/team signal, because their portrait/name slots turn a workshop
+brief into three empty "Workshop title" cards.
+
+A template build that fails only the global headline check now refines the
+headline region in place instead of replanning the whole canvas through the
+free-form skeleton. That replan cost ~3.5 minutes per attempt and then rebuilt
+every region with the slow fallback copy model.

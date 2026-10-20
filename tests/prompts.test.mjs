@@ -146,7 +146,7 @@ test("L1 asks for the scope fields L3 and L2 need", () => {
   assert.ok(GOAL_SCHEMA.required.includes("composition"));
 });
 
-test("L4 gives a template region a worked copy example", () => {
+test("L4 passes the raw request as the fact source, not a template example", () => {
   const component = {
     id: "headline-main",
     role: "headline",
@@ -161,8 +161,11 @@ test("L4 gives a template region a worked copy example", () => {
     CANVAS,
     { palette: PALETTE, style: PALETTE.style, components: [component], template: "hero-split" },
     GOAL,
+    "When: Saturday 14 November 2026, 10:00–13:00",
   );
-  assert.match(prompt, /Copy example for this region/);
+  assert.match(prompt, /Original request \(source of truth for concrete facts/);
+  assert.match(prompt, /Saturday 14 November 2026/);
+  assert.ok(!/Copy example for this region/.test(prompt));
 });
 
 test("L4 omits the fixed-type lines for a free-form skeleton region", () => {
