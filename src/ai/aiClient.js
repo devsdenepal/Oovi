@@ -937,12 +937,14 @@ export async function planSkeleton(goal, palette, canvas, correction = "", onPro
   const tStart = Date.now();
   console.log(`[ai] skeleton start canvas=${canvas.width}x${canvas.height}`);
   let errors = [];
+  let fallback = null;
+  let fallbackScore = Infinity;
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     const base = buildSkeletonPrompt(goal, palette, canvas);
     const requestPrompt =
       attempt === 1 && !correction
         ? base
-        : `${base}\n\n[Correction]\n${correction ? `${correction} ` : ""}Your previous skeleton was not usable JSON (${errors.join("; ")}). Return ONLY the JSON skeleton.`;
+        : `${base}\n\n[Correction]\n${correction ? `${correction} ` : ""}Your previous skeleton was not usable (${errors.join("; ")}). Return ONLY the JSON skeleton.`;
     let text;
     try {
       text = await fetchAiChat(requestPrompt, {
@@ -965,6 +967,28 @@ export async function planSkeleton(goal, palette, canvas, correction = "", onPro
       errors = ["no usable regions"];
       continue;
     }
+    // A plan can be valid JSON and still be unusable: a 26px-wide tagline
+    // forces L4 down to 5px type, and overlapping boxes collide by
+    // construction. Those are retryable planning errors, not styling choices.
+    const tiny = clean.components.filter(
+      (c) => c.kind === "dsl" && c.role !== "decoration" && (c.box.width < 80 || c.box.height < 24),
+    );
+    const overlaps = clean.warnings.some((w) => w.includes("boxes overlap"));
+    if (tiny.length || overlaps) {
+      const score = tiny.length + (overlaps ? 1 : 0);
+      if (score < fallbackScore) {
+        fallback = clean;
+        fallbackScore = score;
+      }
+      errors = [
+        tiny.length
+          ? `boxes too small: ${tiny.map((c) => `${c.id} ${Math.round(c.box.width)}x${Math.round(c.box.height)}`).join(", ")}`
+          : "",
+        overlaps ? "overlapping boxes" : "",
+      ].filter(Boolean);
+      console.warn(`[ai] skeleton retry ${errors.join("; ")}`);
+      continue;
+    }
     const warnings = clean.warnings;
     console.log(
       `[ai] skeleton ok ${Date.now() - tStart}ms attempts=${attempt} ` +
@@ -975,6 +999,18 @@ export async function planSkeleton(goal, palette, canvas, correction = "", onPro
       style: palette.style || clean.style,
       components: clean.components,
       warnings,
+      source: "ai",
+    };
+  }
+  // All attempts were poor. Keep the least-bad plan rather than dropping to
+  // the one-shot generator, which is slower and loses the layered structure.
+  if (fallback) {
+    console.warn(`[ai] skeleton using best of ${MAX_ATTEMPTS} after: ${errors.join("; ")}`);
+    return {
+      palette: planPaletteObject(palette),
+      style: palette.style || fallback.style,
+      components: fallback.components,
+      warnings: [...fallback.warnings, `plan: ${errors.join("; ")}`],
       source: "ai",
     };
   }
@@ -1253,7 +1289,10 @@ export async function componentDesign(component, canvas, plan, goal = null, opts
     try {
       text = await fetchAiChat(requestPrompt, {
         schema: COMPONENTS_SCHEMA,
-        name: "oovi_component",
+        // Template plans carry a slot-specific example that anchors q8 copy.
+        // A free-form skeleton has no such anchor; the tiny model tends to
+        // echo the prompt rules there, so that path stays on the fallback.
+        name: plan?.template ? "oovi_component" : "oovi_component_free",
         maxTokens: 800,
         effort: "low",
         onProgress,
@@ -1277,10 +1316,20 @@ export async function componentDesign(component, canvas, plan, goal = null, opts
     lastParsed = parsed;
     const check = validateDesign({ canvas, elements: parsed.elements });
     if (check.ok) {
+      // The model sometimes draws a sibling region (usually the CTA) inside
+      // this one. Those elements are valid on their own, so validation passes;
+      // the fitter then scales the whole set until it becomes unreadable.
+      // Keep elements this component owns by id, and drop leaked siblings.
+      const owns = (e) => {
+        const id = String(e.id || "");
+        return id === component.id || id.startsWith(`${component.id}-`) || id.startsWith(`${component.id}_`);
+      };
+      const owned = check.design.elements.filter(owns);
+      const finished = finishRegion(owned.length ? owned : check.design.elements, component, plan);
       console.log(
         `[ai] component ok ${component.id} ${Date.now() - tStart}ms attempts=${attempt} elements=${check.design.elements.length}`,
       );
-      return { elements: finishRegion(check.design.elements, component, plan), source: "ai" };
+      return { elements: finished, source: "ai" };
     }
     console.warn(
       `[ai] component retry ${component.id} attempt=${attempt} errors=${check.errors.slice(0, 2).join("; ")}`,

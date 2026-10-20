@@ -909,11 +909,13 @@ Three fixes, all in `src/layout/retrieve.js`:
   words ("festive", "warm", "clean modern") that nearly every template's blurb
   can claim; including them took top-1 from 60 % to 35 % because they inflate
   the denominator without discriminating between layouts. Style is L2's job.
-- **Threshold 0.12, not 0.22.** Coverage is a share, so a colourful brief can
+- **Threshold 0.11, not 0.22.** Coverage is a share, so a colourful brief can
   carry three adjectives no layout contains and still be a perfect brief. What
   the threshold must reject is one accidental shared word; a brief with no
   vocabulary overlap scores exactly 0 at any threshold (both negative controls
-  abstain at every value).
+  abstain at every value). The last 0.01 admits near matches (the tutorial
+  thumbnail retrieved `sidebar-rail` at 0.113) that are still better than a
+  free-form skeleton on the small model.
 - **`ment`/`ments` stemming.** "announcement" and "announce" did not share a
   stem, so a goal saying "announce the celebration" missed every template whose
   keyword is "announcement".
@@ -1063,7 +1065,7 @@ composition, +0.12 industry, capped at 0.40 total. Crucially this multiplies
 EFFECTIVE coverage while the abstain guarantee still reads base coverage and a
 non-zero BM25 score, so:
 
-- a matching design type can lift a close candidate over the 0.12 threshold;
+- a matching design type can lift a close candidate over the 0.11 threshold;
 - a brief with no shared vocabulary still abstains (`base === 0`);
 - a wrong scope guess can reorder candidates but cannot invent a layout.
 

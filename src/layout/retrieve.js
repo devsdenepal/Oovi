@@ -54,7 +54,7 @@ const STOP = new Set([
  * exactly 0 whatever the threshold is (that is what the two negative controls
  * in the benchmark check, and they abstain at every value).
  */
-export const DEFAULT_COVERAGE_THRESHOLD = 0.12;
+export const DEFAULT_COVERAGE_THRESHOLD = 0.11;
 /**
  * Largest weight one query term may carry in the coverage measure. A term the
  * corpus has never seen is the rarest of all, so without a cap one novel word
