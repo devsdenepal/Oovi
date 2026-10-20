@@ -57,6 +57,8 @@ const OLLAMA_MODEL_DEFAULT = "gemma4:e2b";
 // swap also costs ~19-22s reload AND drops the prompt cache, so only split the
 // layers when the narrow call's prompt is small enough to win that back.
 const LAYER_MODEL_ENV = {
+  oovi_goal: "OLLAMA_MODEL_FALLBACK", // L1 free-form goal refinement
+  oovi_palette: "OLLAMA_MODEL_FALLBACK", // L2 free-form palette
   oovi_template: "OLLAMA_MODEL_TUNE", // L3a template choice
   oovi_tuning: "OLLAMA_MODEL_TUNE", // L3b tuning patch
   oovi_component: "OLLAMA_MODEL_COPY", // L4 slot copy
