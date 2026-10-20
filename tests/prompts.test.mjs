@@ -14,6 +14,7 @@ import assert from "node:assert/strict";
 
 import {
   DESIGN_CORE,
+  GOAL_SCHEMA,
   buildGoalPrompt,
   buildPalettePrompt,
   buildSkeletonPrompt,
@@ -25,6 +26,7 @@ import {
 } from "../src/ai/templatePrompt";
 import { buildComponentPrompt } from "../src/ai/architectPrompt";
 import { getTemplate, TEMPLATE_IDS } from "../src/layout/templates";
+import { derivePaletteRoles } from "../src/layout/paletteRoles";
 
 const CANVAS = { width: 1200, height: 630 };
 const GOAL = {
@@ -105,10 +107,43 @@ test("L4 receives the template's fixed box, type size and copy limit", () => {
     align: "center",
   };
   const prompt = buildComponentPrompt(component, CANVAS, { palette: PALETTE, style: PALETTE.style, components: [component] }, GOAL);
-  assert.match(prompt, /Reserved box: x=64 y=80 width=640 height=220\./);
+  assert.match(prompt, /Reserved box: x=64 y=80 width=640 height=220/);
   assert.match(prompt, /54px/);
   assert.match(prompt, /at most 40 characters/);
   assert.match(prompt, /aligned center/);
+  assert.match(prompt, /do not move or resize the region/, "the slot's box is authoritative");
+  assert.match(prompt, /Colour for this region: textPrimary/, "the region is told its colour role");
+});
+
+test("L4 hands the model the semantic palette roles, not just three hexes", () => {
+  const component = {
+    id: "cta-row",
+    role: "cta",
+    kind: "dsl",
+    describe: "the registration call to action",
+    box: { x: 64, y: 520, width: 500, height: 70 },
+    fontSize: 24,
+    align: "left",
+  };
+  const palette = { ...PALETTE, roles: derivePaletteRoles(PALETTE) };
+  const prompt = buildComponentPrompt(component, CANVAS, { palette, style: palette.style, components: [component] }, GOAL);
+  assert.match(prompt, /Palette roles —/);
+  for (const role of ["surface", "secondary text", "CTA surface", "CTA text", "border"]) {
+    assert.match(prompt, new RegExp(`${role} #`), `${role} reaches L4`);
+  }
+  assert.match(prompt, /Colour for this region: ctaText on a ctaSurface block/);
+  assert.match(prompt, /never invent a hue/i);
+});
+
+test("L1 asks for the scope fields L3 and L2 need", () => {
+  const prompt = buildGoalPrompt("a product launch poster", CANVAS);
+  for (const word of ["designType", "industry", "keywords", "composition"]) {
+    assert.ok(prompt.includes(word), `L1 prompt names ${word}`);
+  }
+  assert.ok(GOAL_SCHEMA.required.includes("designType"));
+  assert.ok(GOAL_SCHEMA.required.includes("industry"));
+  assert.ok(GOAL_SCHEMA.required.includes("keywords"));
+  assert.ok(GOAL_SCHEMA.required.includes("composition"));
 });
 
 test("L4 gives a template region a worked copy example", () => {

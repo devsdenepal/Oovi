@@ -24,6 +24,7 @@ import {
 import { retrieveTemplates, RETRIEVAL_LIMIT, DEFAULT_COVERAGE_THRESHOLD } from "../layout/retrieve";
 import { listSavedTemplates } from "../layout/templateStore";
 import { lookupPalette, paletteIsUsable } from "../layout/palettes";
+import { ensurePaletteRoles, applyRoleFills } from "../layout/paletteRoles";
 import { buildPatchPrompt } from "./patchPrompt";
 import { validatePatch } from "./patch";
 import { contrastRatio } from "./quality";
@@ -703,21 +704,116 @@ function hexOrNull(value) {
 }
 
 /** Tolerates a partial goal: always returns the full shape. */
+/**
+ * Controlled vocabularies for the L1 scope fields. The model is asked for a
+ * free string; these maps snap it onto the words the rest of the pipeline
+ * reasons about, so "product launch" and "product-launch" and "launch" all
+ * become one value instead of three that no comparison catches.
+ */
+const DESIGN_TYPES = [
+  "poster", "banner", "social-post", "story", "cover", "newsletter", "notice",
+  "invitation", "certificate", "menu", "schedule", "listing", "product-launch",
+  "gallery", "quote", "comparison", "team", "ticket", "map", "metrics", "statement",
+];
+
+/** Words that commonly appear in a model's designType answer, mapped to ours. */
+const DESIGN_TYPE_ALIASES = {
+  "social post": "social-post", social: "social-post", instagram: "social-post",
+  "product launch": "product-launch", launch: "product-launch", product: "product-launch",
+  "cover": "cover", "magazine": "cover", "editorial": "cover",
+  "event": "poster", "flyer": "poster", "announcement": "poster",
+  "invite": "invitation", "wedding": "invitation",
+  "award": "certificate", "diploma": "certificate",
+  "timetable": "schedule", "agenda": "schedule", "programme": "schedule", "program": "schedule",
+  "price list": "menu", "restaurant": "menu",
+  "team roster": "team", "roster": "team", "speakers": "team",
+  "stats": "metrics", "results": "metrics", "report": "metrics",
+  "gallery": "gallery", "photos": "gallery",
+  "quote": "quote", "testimonial": "quote",
+  "compare": "comparison", "versus": "comparison",
+  "map": "map", "location": "map", "venue": "map",
+  "certificate of": "certificate",
+  "story": "story", "reel": "story",
+};
+
+/** Composition vocabulary; matches the template variants that exist. */
+const COMPOSITIONS = ["hero-left", "hero-right", "centered", "split", "stacked", "grid", "banner", "type-only"];
+
+const COMPOSITION_ALIASES = {
+  "hero left": "hero-left", "artwork left": "hero-left", "image left": "hero-left",
+  "hero right": "hero-right", "artwork right": "hero-right", "image right": "hero-right",
+  center: "centered", centred: "centered", "center-stack": "centered", symmetric: "centered",
+  "side-by-side": "split", "two-column": "split", "two column": "split", columns: "split",
+  vertical: "stacked", "top-down": "stacked", "one-column": "stacked",
+  cards: "grid", "multi-column": "grid", columns3: "grid",
+  strip: "banner", wide: "banner",
+  "text-only": "type-only", "no image": "type-only", typographic: "type-only",
+};
+
+function pickVocab(raw, vocab, aliases, fallback) {
+  const v = String(raw || "").trim().toLowerCase();
+  if (!v) return fallback;
+  if (vocab.includes(v)) return v;
+  if (aliases[v]) return aliases[v];
+  // Containment, longest key first so "product launch" beats "product".
+  const keys = Object.keys(aliases).sort((a, b) => b.length - a.length);
+  for (const key of keys) if (v.includes(key)) return aliases[key];
+  for (const candidate of vocab) if (v.includes(candidate)) return candidate;
+  return fallback;
+}
+
 function sanitizeGoal(raw) {
-  const list = (v) =>
+  const list = (v, cap = 10) =>
     Array.isArray(v)
-      ? v.filter((s) => typeof s === "string" && s.trim()).map((s) => s.trim()).slice(0, 10)
+      ? v.filter((s) => typeof s === "string" && s.trim()).map((s) => s.trim()).slice(0, cap)
       : [];
+  const summary = asText(raw?.summary, asText(raw?.subject, "Design"));
   return {
-    summary: asText(raw?.summary, asText(raw?.subject, "Design")),
+    summary,
     subject: asText(raw?.subject, asText(raw?.summary, "Design")),
     audience: asText(raw?.audience, "general audience"),
     purpose: asText(raw?.purpose, "present the subject clearly"),
     tone: asText(raw?.tone, "clean and confident"),
+    // Scope fields (L1). A goal built by hand or by an older model answer has
+    // none of these; infer the design type from the summary so retrieval and
+    // the palette still get a usable signal instead of "general".
+    designType: pickVocab(raw?.designType, DESIGN_TYPES, DESIGN_TYPE_ALIASES, inferDesignType(summary)),
+    industry: asText(raw?.industry, "general"),
+    keywords: list(raw?.keywords, 8),
+    composition: pickVocab(raw?.composition, COMPOSITIONS, COMPOSITION_ALIASES, ""),
     mustInclude: list(raw?.mustInclude),
     avoid: list(raw?.avoid),
     style: asText(raw?.style, "clean modern"),
   };
+}
+
+/**
+ * Last-resort design type from the summary. Only used when L1 answered without
+ * a usable designType (an old prompt, a mock goal, a hand-written fixture).
+ */
+export function inferDesignType(text) {
+  const s = String(text || "").toLowerCase();
+  if (/certificate|award|diploma|recogni[sz]/.test(s)) return "certificate";
+  if (/invitation|invite|wedding|save the date/.test(s)) return "invitation";
+  if (/ticket|admission|pass\b/.test(s)) return "ticket";
+  if (/menu|dishes|price list/.test(s)) return "menu";
+  if (/schedule|timetable|agenda|programme|program\b/.test(s)) return "schedule";
+  if (/listing|itinerary|expo|fair\b/.test(s)) return "listing";
+  if (/newsletter|digest|bulletin/.test(s)) return "newsletter";
+  if (/cover|magazine|issue\b|journal/.test(s)) return "cover";
+  if (/gallery|photo|recap|album/.test(s)) return "gallery";
+  if (/comparison|versus|compare/.test(s)) return "comparison";
+  if (/team|roster|speakers|panel|lineup/.test(s)) return "team";
+  if (/map|directions|venue|location|address/.test(s)) return "map";
+  if (/metric|results|stats|impact|quarterly|milestone/.test(s)) return "metrics";
+  if (/quote|testimonial|saying/.test(s)) return "quote";
+  if (/statement|manifesto|mission|vision|pledge/.test(s)) return "statement";
+  if (/banner|header|linkedin|timeline cover/.test(s)) return "banner";
+  if (/story|reel|vertical/.test(s)) return "story";
+  if (/social|instagram|feed|post\b/.test(s)) return "social-post";
+  if (/launch|product|app\b|software|assistant/.test(s)) return "product-launch";
+  if (/notice|memo|circular/.test(s)) return "notice";
+  return "poster";
 }
 
 /** Requires usable hex; repairs a background/ink pair that would fade. */
@@ -730,7 +826,13 @@ function sanitizePalette(raw, styleFallback) {
     const light = contrastRatio("#FFFFFF", background) ?? 0;
     ink = dark >= light ? "#111111" : "#FFFFFF";
   }
-  return { background, ink, accent, style: asText(raw?.style, styleFallback || "clean modern") };
+  // Semantic roles are DERIVED, not taken from the model: the model is asked
+  // for three colours (a cheap, reliable answer), and a role set it invented
+  // could contradict itself. Any roles it does supply are honoured by
+  // ensurePaletteRoles() when they are valid hex.
+  const base = { background, ink, accent, style: asText(raw?.style, styleFallback || "clean modern") };
+  const roles = ensurePaletteRoles({ ...base, ...(raw && typeof raw.roles === "object" ? raw.roles : {}) });
+  return { ...base, roles };
 }
 
 /**
@@ -765,7 +867,10 @@ export async function refineGoal(userPrompt, canvas, onProgress = null) {
 
 /** L2 — Choose ONE palette for the goal, guaranteed to not fade. */
 export async function planPalette(goal, canvas, onProgress = null) {
-  if (isMockEnabled()) return { ...mockPalette(goal, canvas), source: "mock" };
+  if (isMockEnabled()) {
+    const p = mockPalette(goal, canvas);
+    return { ...p, roles: ensurePaletteRoles(p), source: "mock" };
+  }
   const tStart = Date.now();
   // Phase 2D: a brief the curated library recognises needs no model call at
   // all — this is ~88s of prefill saved on exact, pre-verified colours.
@@ -776,7 +881,15 @@ export async function planPalette(goal, canvas, onProgress = null) {
       `[ai] palette ok ${Date.now() - tStart}ms (library:${known.id}) bg=${known.background} ` +
         `ink=${known.ink} accent=${known.accent} contrast=${ratio ? ratio.toFixed(1) : "?"}`,
     );
-    return { background: known.background, ink: known.ink, accent: known.accent, style: known.style, paletteId: known.id, source: "library" };
+    return {
+      background: known.background,
+      ink: known.ink,
+      accent: known.accent,
+      roles: known.roles,
+      style: known.style,
+      paletteId: known.id,
+      source: "library",
+    };
   }
   console.log("[ai] palette start (no library match)");
   try {
@@ -816,7 +929,7 @@ export async function planSkeleton(goal, palette, canvas, correction = "", onPro
     const clean = sanitizePlan(mockPlan(goal?.summary || "design", canvas), canvas);
     return {
       ...clean,
-      palette: { background: palette.background, ink: palette.ink, accent: palette.accent },
+      palette: planPaletteObject(palette),
       style: palette.style,
       source: "mock",
     };
@@ -858,7 +971,7 @@ export async function planSkeleton(goal, palette, canvas, correction = "", onPro
         `components=${clean.components.map((c) => `${c.id}(${c.kind}/${c.role})`).join(",")}`,
     );
     return {
-      palette: { background: palette.background, ink: palette.ink, accent: palette.accent },
+      palette: planPaletteObject(palette),
       style: palette.style || clean.style,
       components: clean.components,
       warnings,
@@ -980,6 +1093,23 @@ export async function planTemplateTuning(template, goal, palette, canvas, onProg
 }
 
 /**
+ * The palette a PLAN carries. Roles are attached here, once, so every
+ * downstream consumer (L4 prompt, L5 correction, the quality gate) reads the
+ * same role set instead of each re-deriving it — and so a plan is
+ * self-contained: it can be logged, replayed or saved without the L2 result.
+ */
+function planPaletteObject(palette) {
+  return {
+    background: palette.background,
+    ink: palette.ink,
+    accent: palette.accent,
+    roles: ensurePaletteRoles(palette),
+    paletteId: palette.paletteId,
+    style: palette.style,
+  };
+}
+
+/**
  * L3 via templates: pre-filter -> choose -> tune -> instantiate. Returns the
  * SAME plan shape as planSkeleton, or `null` when no template fits this canvas
  * or the instantiated plan fails its own collision/coverage check — the caller
@@ -1007,7 +1137,7 @@ export async function planTemplate(goal, palette, canvas, onProgress = null) {
       `regions=${built.components.map((c) => c.id).join(",")}`,
   );
   return {
-    palette: { background: palette.background, ink: palette.ink, accent: palette.accent },
+    palette: planPaletteObject(palette),
     style: palette.style || template.label,
     template: template.id,
     tuning: built.tuning,
@@ -1077,6 +1207,17 @@ function fitRegionChecked(elements, component) {
   return fitted;
 }
 
+/**
+ * The last deterministic step for a region: paint text onto its semantic role,
+ * then fit it to the reserved box. The role pass is what makes the palette true
+ * at the source; L5 correctColors() still runs over the finished design as a
+ * safety net (it can see artwork and local backdrops this cannot).
+ */
+function finishRegion(elements, component, plan) {
+  const painted = applyRoleFills(elements, component?.role, plan?.palette);
+  return fitRegionChecked(painted, component);
+}
+
 export async function componentDesign(component, canvas, plan, goal = null, opts = {}) {
   const palette = plan.palette;
   const onProgress = typeof opts.onProgress === "function" ? opts.onProgress : null;
@@ -1087,7 +1228,7 @@ export async function componentDesign(component, canvas, plan, goal = null, opts
     const elements = mockComponent(component, canvas);
     const check = validateDesign({ canvas, elements });
     if (!check.ok) throw new Error(`Mock component invalid: ${check.errors.slice(0, 2).join("; ")}`);
-    return { elements: fitRegionChecked(check.design.elements, component), source: "mock" };
+    return { elements: finishRegion(check.design.elements, component, plan), source: "mock" };
   }
   const tStart = Date.now();
   console.log(
@@ -1139,7 +1280,7 @@ export async function componentDesign(component, canvas, plan, goal = null, opts
       console.log(
         `[ai] component ok ${component.id} ${Date.now() - tStart}ms attempts=${attempt} elements=${check.design.elements.length}`,
       );
-      return { elements: fitRegionChecked(check.design.elements, component), source: "ai" };
+      return { elements: finishRegion(check.design.elements, component, plan), source: "ai" };
     }
     console.warn(
       `[ai] component retry ${component.id} attempt=${attempt} errors=${check.errors.slice(0, 2).join("; ")}`,
@@ -1158,7 +1299,7 @@ export async function componentDesign(component, canvas, plan, goal = null, opts
     console.warn(
       `[ai] component salvage ${component.id} ${Date.now() - tStart}ms kept=${salvaged.length}/${lastParsed.elements.length} errors=${errors.slice(0, 2).join("; ")}`,
     );
-    return { elements: fitRegionChecked(salvaged, component), source: "salvage" };
+    return { elements: finishRegion(salvaged, component, plan), source: "salvage" };
   }
   throw new Error(`Component "${component.id}" failed: ${errors.slice(0, 3).join("; ")}`);
 }

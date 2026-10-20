@@ -22,6 +22,7 @@ import { elementBoxes, evaluateDesign } from "../ai/quality";
 import { SIZE_FACTORS } from "./typeScale";
 import { instantiateTemplate, sizeClassOf } from "./templates";
 import { materializePlan } from "./materialize";
+import { ensurePaletteRoles } from "./paletteRoles";
 
 /** Fallback palette for validation when the caller has none to hand. */
 const DEFAULT_PALETTE = { background: "#FFFFFF", ink: "#111111", accent: "#E02020" };
@@ -213,7 +214,10 @@ export function paletteFromDesign(design) {
   const background = design?.canvas?.background || "#FFFFFF";
   const ink = ranked.find((c) => c !== background.toLowerCase()) || "#111111";
   const accent = ranked.find((c) => c !== background.toLowerCase() && c !== ink) || "#E02020";
-  return { background, ink, accent };
+  // A saved design's palette is re-used downstream (L4 role prompt, L5
+  // correction, the gate). Carry the derived role set with it so a template
+  // saved from a finished design behaves exactly like a library palette.
+  return { background, ink, accent, roles: ensurePaletteRoles({ background, ink, accent }) };
 }
 
 /**

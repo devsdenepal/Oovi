@@ -1,4 +1,4 @@
-import { evaluateDesign } from '../src/ai/quality.js';
+import { contrastRatio, evaluateDesign } from '../src/ai/quality.js';
 import { register } from 'node:module';
 
 // src/ uses extensionless relative imports — resolve them for plain node.
@@ -302,6 +302,72 @@ check('empty design still rejected (AI must produce something)', validateDesign(
   canvas: { width: 1200, height: 630, background: '#FFFFFF' },
   elements: [],
 }).ok === false);
+
+// 24. Pipeline regression: the sparse product announcement.
+// The shape that started this work: a headline in a field of empty containers.
+// This drives scope -> palette roles -> template retrieval -> instantiation ->
+// worst-case content -> the real quality gate, with no model calls. If any
+// stage regresses, the composition stops clearing the same gate the app uses.
+{
+  const { lookupPalette } = await import('../src/layout/palettes.js');
+  const { retrieveTemplates } = await import('../src/layout/retrieve.js');
+  const { getTemplate, instantiateTemplate } = await import('../src/layout/templates.js');
+  const { ensurePaletteRoles } = await import('../src/layout/paletteRoles.js');
+  const { materializePlan } = await import('../src/layout/materialize.js');
+  const { correctColors } = await import('../src/ai/colorCorrect.js');
+
+  const goal = {
+    summary: 'Ship faster with Acme',
+    subject: 'Acme workflow assistant',
+    purpose: 'announce the product launch',
+    audience: 'busy product teams',
+    tone: 'confident and clean',
+    designType: 'product-launch',
+    industry: 'technology',
+    keywords: ['product', 'launch', 'workflow', 'assistant'],
+    composition: 'hero-right',
+    mustInclude: ['product name', 'one-line promise', 'release date', 'call to action'],
+    avoid: ['invented pricing', 'clutter'],
+    style: 'clean modern, crisp blue',
+  };
+  const canvas = { width: 1200, height: 630 };
+
+  const palette = lookupPalette(goal);
+  check('sparse brief resolves a palette from the library', Boolean(palette), JSON.stringify(goal));
+  const roles = ensurePaletteRoles(palette);
+  check('palette carries semantic roles', Boolean(roles.ctaSurface && roles.ctaText && roles.surface && roles.border));
+  check('primary text is readable on the canvas', (contrastRatio(roles.textPrimary, roles.background) || 0) >= 4.5);
+  check('secondary text is readable on the canvas', (contrastRatio(roles.textSecondary, roles.background) || 0) >= 4.5);
+  check('CTA label is readable on its surface', (contrastRatio(roles.ctaText, roles.ctaSurface) || 0) >= 4.5);
+
+  const found = retrieveTemplates(goal, canvas);
+  check('sparse brief retrieves a layout', found.source === 'retrieval' && found.candidates.length > 0, JSON.stringify(found.scored?.[0] || {}));
+  const template = found.candidates.length ? getTemplate(found.candidates[0]) : null;
+  check('the retrieved layout exists', Boolean(template), found.candidates.join(','));
+  const built = template ? instantiateTemplate(template, {}, canvas) : { ok: false };
+  check('the layout instantiates', built.ok === true, built.reason || '');
+  check('every slot carries id, role, box, type and limit', (built.components || []).every((c) =>
+    c.id && c.role && c.box && (c.kind === 'image' || c.role === 'decoration' || (c.fontSize > 0 && c.maxChars > 0 && ['left', 'center', 'right'].includes(c.align))),
+  ));
+
+  const design = materializePlan(built.components || [], canvas, palette);
+  const report = evaluateDesign(design, {
+    plannedIds: (built.components || []).map((c) => c.id),
+    renderedIds: (built.components || []).map((c) => c.id),
+    expectHero: (built.components || []).some((c) => c.kind === 'image'),
+    components: built.components,
+    palette,
+  });
+  const cs = codes(report);
+  check('the composition clears the gate (no errors)', report.issues.filter((i) => i.severity === 'error').length === 0, JSON.stringify(cs));
+  check('no planned region renders empty', !cs.some((c) => c === 'warn:empty-section' || c === 'error:empty-hero'), JSON.stringify(cs));
+  const texts = design.elements.filter((e) => e.type === 'text');
+  check('the composition carries supporting copy', texts.length >= 3, 'text runs=' + texts.length);
+  const roleSet = new Set(Object.values(roles).map((c) => String(c).toUpperCase()));
+  check('every text run uses a palette role', texts.every((t) => roleSet.has(String(t.fill).toUpperCase())), JSON.stringify(texts.map((t) => t.fill)));
+  const corrected = correctColors(design, palette);
+  check('L5 has nothing to re-ink', corrected.ops.every((op) => !op.props || !op.props.fill), JSON.stringify(corrected.notes));
+}
 
 console.log(failures === 0 ? 'QUALITY CHECK DONE' : `QUALITY CHECK: ${failures} FAILURES`);
 process.exit(failures === 0 ? 0 : 1);

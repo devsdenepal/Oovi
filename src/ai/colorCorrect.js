@@ -16,6 +16,7 @@
  */
 
 import { contrastRatio, elementBoxes } from "./quality";
+import { ensurePaletteRoles, textRoleFor } from "../layout/paletteRoles";
 
 const NAMED = {
   white: "#ffffff", black: "#000000", red: "#ff0000", blue: "#0000ff",
@@ -96,21 +97,21 @@ function walk(elements, fn, context = {}) {
 
 /**
  * @param {object} design validated Design JSON (canvas + elements)
- * @param {{background?:string, ink?:string, accent?:string}} palette
+ * @param {{background?:string, ink?:string, accent?:string, roles?:object}} palette
  * @returns {{ops: Array, notes: string[]}} patch ops + human-readable notes
  */
 export function correctColors(design, palette) {
   const canvas = design?.canvas || {};
-  const planRaw = [palette?.background, palette?.ink, palette?.accent]
-    .map(normHex)
-    .filter(Boolean);
+  // Roles are the vocabulary, not the three base colours. A design that uses
+  // `surface` for a card or `ctaText` on a CTA is ON palette even though its
+  // fill matches none of background/ink/accent; the old three-colour test
+  // flagged those as rogue and snapped them back. Everything below reads roles.
+  const roles = ensurePaletteRoles(palette);
+  const planRaw = [...new Set(Object.values(roles).map(normHex).filter(Boolean))];
   const notes = [];
   if (!planRaw.length) return { ops: [], notes };
 
-  const planInk = normHex(palette?.ink) || "#111111";
-  const planBg = normHex(palette?.background) || "#FFFFFF";
-  const candidates = [planInk, planBg, normHex(palette?.accent)].filter(Boolean);
-
+  const candidates = planRaw;
   const boxes = elementBoxes(design?.elements);
   const texts = boxes.filter((b) => b.kind === "text");
 
@@ -149,23 +150,43 @@ export function correctColors(design, palette) {
     if (!backdrop) continue;
 
     const ratio = contrastRatio(t.fill, backdrop);
-    if (ratio === null || ratio >= 4.5) continue;
+    const n = normHex(t.fill);
+    const inPalette = n && planRaw.includes(n);
 
-    const pick = bestAgainst(backdrop, candidates) || { color: null, ratio: -1 };
-    let chosen = pick.color;
-    if (pick.ratio < 4.5) {
-      // Palette cannot clear the bar (e.g. mid-tone accent bar): fall back
-      // to pure black/white, whichever wins, so text never fades.
+    if (ratio !== null && ratio >= 4.5) {
+      // Readable but painted outside the palette: snap it to the nearest ROLE,
+      // which keeps the intended hue (a red headline becomes the accent) while
+      // ending the rogue colour. Neutrals (white/black/grey) are deliberate
+      // safe choices on artwork and are left alone.
+      if (n && !inPalette && !isNeutral(t.fill)) {
+        const near = nearest(n, candidates);
+        if (near && near !== n) {
+          change(t.id, { fill: near }, `snapped "${t.id}" ${t.fill} to palette role (${near})`);
+        }
+      }
+      continue;
+    }
+
+    // Failing contrast: prefer the colour its semantic role asks for, then the
+    // best-contrasting role, then pure black/white as an absolute floor.
+    const desired = roles[textRoleFor(t.role)];
+    const desiredRatio = desired ? contrastRatio(desired, backdrop) : null;
+    let chosen = desiredRatio !== null && desiredRatio >= 4.5 ? desired : null;
+    if (!chosen) {
+      const pick = bestAgainst(backdrop, candidates);
+      chosen = pick.ratio >= 4.5 ? pick.color : null;
+    }
+    if (!chosen) {
       chosen = (contrastRatio("#000000", backdrop) || 0) >= (contrastRatio("#ffffff", backdrop) || 0)
         ? "#000000"
         : "#ffffff";
     }
-    if (chosen && normHex(chosen) !== normHex(t.fill)) {
-      change(t.id, { fill: chosen }, `re-inked "${t.id}" ${t.fill} -> ${chosen} (${ratio.toFixed(1)}:1 on backdrop)`);
+    if (chosen && normHex(chosen) !== n) {
+      change(t.id, { fill: chosen }, `re-inked "${t.id}" ${t.fill} -> ${chosen} (${ratio === null ? "?" : ratio.toFixed(1)}:1 on backdrop)`);
     }
   }
 
-  // 2. Mismatch: snap shape fills that fall outside the palette.
+  // 2. Mismatch: snap shape fills that fall outside the palette role set.
   for (const b of boxes) {
     if (b.kind === "image") continue;
     if (typeof b.fill !== "string") continue;
@@ -173,9 +194,9 @@ export function correctColors(design, palette) {
     if (isNeutral(b.fill)) continue;
     const n = normHex(b.fill);
     if (!n || planRaw.includes(n)) continue;
-    const near = nearest(n, planRaw);
+    const near = nearest(n, candidates);
     if (near && near !== n) {
-      change(b.id, { fill: near }, `snapped "${b.id}" ${b.fill} to palette (${near})`);
+      change(b.id, { fill: near }, `snapped "${b.id}" ${b.fill} to palette role (${near})`);
     }
   }
 

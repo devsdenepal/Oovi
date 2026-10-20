@@ -184,6 +184,12 @@ export function mockGoal(prompt, canvas) {
     audience: "general audience",
     purpose: "present the subject clearly and attractively",
     tone: "clean and confident",
+    // Scope fields. The mock may be hand-written, but it must exercise the
+    // same contract as a real L1 answer or mock runs skip the new code paths.
+    designType: "poster",
+    industry: "general",
+    keywords: text.toLowerCase().split(/\s+/).filter((w) => w.length > 3).slice(0, 6),
+    composition: "split",
     mustInclude: ["title", "supporting line", "key details", "footer"],
     avoid: ["invented facts", "low-contrast text"],
     style: "clean modern, generous whitespace",

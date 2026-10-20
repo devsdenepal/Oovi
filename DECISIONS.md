@@ -2,6 +2,148 @@
 
 Conservative option wins every tie. Newest entries first.
 
+## Tiny models for the narrow layers — measured, not assumed
+
+Direction: a cheap model may handle a narrow layer while the big model keeps
+the heavy lift. Quality is unknown until measured, so the order is config →
+eval → dataset → stop. Nothing is trained yet.
+
+### Benchmark (this box: i5-2520M, CPU-only, Ollama 0.40.6)
+
+| model | prefill tok/s | generation tok/s |
+| --- | --- | --- |
+| gemma4:e2b (4.6B Q4_K_M, current default) | 10.9 | 3.3 |
+| gemma3:1b | 19.9 | 9.6 |
+| gemma3:270m | 103 | 27.8 |
+
+Wall time equals the sum of its parts (load + prefill + eval), so there is no
+hidden stall to chase. At 3.3 tok/s a 1100-token component reply is ~5.5
+minutes; the narrow layers answer in tens of tokens, which is exactly where a
+small model can pay for itself.
+
+### Per-layer model config (defaults unchanged)
+
+`api/_aiChain.js` resolves the model per REQUEST NAME, because every pipeline
+call already carries one:
+
+- `oovi_template`, `oovi_tuning` → `OLLAMA_MODEL_TUNE`
+- `oovi_component` → `OLLAMA_MODEL_COPY`
+- `oovi_plan`, `oovi_skeleton` → `OLLAMA_MODEL_FALLBACK`
+- `oovi_goal`, `oovi_palette` → `OLLAMA_MODEL`
+
+Blank or unset falls back to `OLLAMA_MODEL`, so an existing `.env` behaves
+exactly as before. `.env.example` documents the three vars. Options stay
+identical per model (`think:false`, `keep_alive 30m`, `num_ctx 8192`,
+`num_thread 2`, `temperature 0.2`, `draft_num_predict 0`). A model swap costs
+~19-22s reload AND drops the prompt cache, so splitting layers only pays when
+that call's prompt is small enough to earn the reload back.
+
+### Eval harness (`scripts/tiny-eval.mjs`)
+
+15 realistic briefs — product launch, Diwali office poster (Hindi summary),
+autumn menu (Spanish), jazz calendar (Japanese), certificate, summer camp,
+hackathon, wedding invitation, conference banner, pricing comparison,
+fundraising metrics, newsletter, blood drive, theatre ticket, gallery social —
+through the three narrow production calls: template choice, tuning patch and
+slot copy. The prompts are built by the production builders and split into
+system/user turns the same way `/api/ai` does; decoding is schema-constrained
+and options are identical for every model. Per call it records valid JSON,
+sanitized OK, template match against a hand label, wall latency and Ollama's
+prefill/eval token counts.
+
+The hand labels were checked BEFORE burning model time (`--preflight`): every
+label is in retrieval's shortlist and every case is non-decisive, i.e. the
+choice call is one production would actually make. Four briefs needed
+vocabulary that matches the intended template (agenda, card-grid, banner-strip,
+event-listing) — a reminder that retrieval, not the model, decides reachability
+through the schema enum.
+
+### Dataset (`scripts/make-dataset.mjs`, generated, nothing trained)
+
+2,500 examples — 2,169 train / 331 eval (13.2%), split by brief group so one
+brief's records never straddle the split:
+
+- 800 template-choice: `prompt -> {template, why}`
+- 800 tuning: `prompt -> {variant, density, hide, scale, align}`
+- 900 slot copy: `prompt -> {elements:[text element]}`
+
+All 30 templates appear in every task; 189 distinct copy slots. Languages:
+62% English, 38% split across Hindi, Spanish, French, German, Japanese. All
+five canvas shape classes. Prompts come from the production builders, so the
+static prefix is byte-identical (verified against `TEMPLATE_RULES` and
+`DESIGN_CORE` for all 2,500 records); targets re-sanitize unchanged, copy
+targets pass `validateDesign`, no duplicate prompts, no train/eval group
+overlap.
+
+**Copy targets carry the brief's own facts.** Every brief now generates a
+name, organiser, date, venue, booking link and item list; those values are
+written into `mustInclude` (so they are literally in the production prompt)
+and the copy target is built from them. The one-shot example still appears
+in the prompt — with *different* facts — so the model must learn "write this
+region from the brief", not "paraphrase the example". Verification requires
+every copy target to contain a word from the prompt's fact lines and to stay
+inside the region's `maxChars`; 900/900 pass both. Copy targets carry the
+full closed `COMPONENTS_SCHEMA` shape (optionals as null), so completion-only
+training matches what constrained decoding must emit. The two copy attempts
+that could not fit a fact into their slot were dropped rather than trained as
+nonsense (58 further attempts repeated an already-used prompt).
+
+**Held-out occasions.** Ten archetypes are reserved for eval and never appear
+in train: season preview, festival programme listing, festival ticket, cafe
+menu, community gallery, three-step process, quarterly metrics, course
+certificate, festival site map, weekend workshop timetable. They contribute
+168 eval records across 50 groups; the remaining eval split is the usual
+group-hash holdout. The 1-in-16 hash rate keeps the total at ~13% rather than
+letting held-out themes push it to ~17%.
+
+The dataset uses the production stack at a level the eval does not: retrieval
+must contain the chosen template or the record is dropped (1 brief was), and
+a documented doc-vocabulary boost was needed for 88 of 800 briefs — the same
+bias the scope fields already apply in L3.
+
+### Strict schemas for the tiny models (`--strict`)
+
+The baseline eval exposed the failure mode clearly: 270m can choose a
+template, but it invents tuning region ids (`region-1`, `region-2`) and its
+copy call runs to the flat 800-token cap. The strict mode does not change
+the prompt; it changes what the decoder is allowed to answer, per call:
+
+- tuning region ids are an `enum` of the chosen template's actual slots, the
+  variant is an enum of its variants, `hide` is limited to its optional
+  slots, and `scale`/`align` cannot exceed the slot count;
+- copy `elements` is bounded by the template's slot count, and text
+  `content` is bounded by the slot's `maxChars` (`maxLength`);
+- `num_predict` is derived from the slot budget instead of a flat 800
+  (`140 + ~maxChars + slots*12` tokens, clamped 180–800).
+
+This is a production-representable answer, not a trick: the same schema can
+be built in `api/_aiChain.js` from the chosen template and region. It also
+separates "the model needs training" from "the decoder was asked an
+unanswerable question".
+
+Writing schema-shaped targets exposed a live validator bug: a closed schema
+emits `gradient: null`, but `validateDesign` treated the null as a malformed
+gradient and rejected the region. The guard now ignores a null gradient
+(`normalizeElement` already dropped nulls), so strict-schema copy can pass
+validation instead of retrying forever.
+
+### Colab notebook (`train/colab_lora.ipynb`)
+
+Prepared, not run from this box. It reads the JSONL prompts verbatim (no
+re-phrasing), splits `[System]`/`[User]` exactly like `src/ai/aiClient.js`,
+trains LoRA (r=16, alpha=32, all linear projections) with completion-only
+loss, merges, converts to GGUF Q8_0, and writes a Modelfile whose `TEMPLATE`
+is the exact Go template captured from `ollama show gemma3:270m --modelfile`.
+A parity cell asserts that HF's rendered chat prompt (with BOS) equals the
+Ollama template's output, so training and serving see the same bytes. The
+notebook is task-selectable (`TASKS = ("tune",)` etc.) for one adapter per
+layer, and ends with the local `ollama create` and
+`node scripts/tiny-eval.mjs --model <tag> --strict` commands.
+
+`scripts/tiny-eval.mjs` now accepts any Ollama tag via `--model`/`--models`
+(the imported GGUF included) and writes a separate results file per tag and
+mode.
+
 ## On-device only: Ollama + Gemma (user order: "only opensource models", "use ollama")
 - Provider choice is a hard rule, not a preference: every AI call runs an
   open-weight model served on-device by Ollama (the local Gemma model,
@@ -867,3 +1009,115 @@ unit test (valid pieces survive, the invalid one is dropped, junk yields nothing
 
 Together these remove the cycle without weakening the gate: errors still refine,
 and a region that paints nothing still gets its retry.
+
+## Template-guided generation: scope, semantic roles, composition-aware L3
+
+The pipeline already had six stages on paper; the audit found four of them
+(layout selection, per-region content, rendering, validation) genuinely built,
+and two missing in substance: L1 could not say what KIND of design it was, and
+a palette was still three loose hexes that L4 was free to ignore. That is why a
+terse product announcement came out as a headline in a field of containers: the
+layout had slots, but nothing told L4 what each slot was FOR beyond a role name,
+and nothing stopped it painting whatever it liked.
+
+### L1 scope is now explicit
+
+`GOAL_SCHEMA` gains four required fields, snapshotted onto a small closed
+vocabulary in `sanitizeGoal`:
+
+- `designType` — the FORMAT (poster, product-launch, social-post, menu, …);
+- `industry` — the field, used by L2 (layout vocabulary does not carry it);
+- `keywords` — 3-8 retrieval terms;
+- `composition` — hero-left / hero-right / centered / split / stacked / grid /
+  banner / type-only.
+
+Terse briefs are the point: "Ship faster with Acme" now resolves to
+`product-launch / technology / hero-right` before L3 sees it. A missing field
+is inferred (`inferDesignType`) so a hand-written goal or an old model answer
+degrades instead of breaking.
+
+### A palette is a role system, not three colours
+
+`src/layout/paletteRoles.js` derives ten roles from the existing three base
+colours: background, surface, textPrimary, textSecondary, accent, onAccent,
+ctaSurface, ctaText, border, muted. Derived, not hand-authored: 15 palettes ×
+10 roles is 150 values nobody maintains, and a derived role is guaranteed to be
+readable against its own backdrop. Tests assert the floors on every library
+palette (primary and secondary text ≥ 4.5:1, CTA label on CTA surface ≥ 4.5:1)
+and the derivation is idempotent, so re-deriving a plan palette is free.
+
+The role set travels with the plan (`planPaletteObject`), is named in the L4
+prompt, and is what L5 and the gate read. `applyRoleFills` repaints a region's
+text that invented a hue with the role its element (or slot) asks for; text
+already on a role is untouched, so a two-tone headline using accent + primary
+survives. `correctColors()` remains the safety net — it sees artwork and local
+backdrops — but it is no longer the mechanism that makes a design on-palette.
+The old three-colour discipline check in `evaluateDesign` flagged legitimate
+`surface`/`ctaSurface` fills as rogue; it now accepts every role.
+
+### L3 biases, never filters, on scope
+
+`retrieveTemplates` adds a bounded scope bias on top of BM25 coverage:
++0.22 design type (best fit; decreasing for a secondary fit), +0.30 requested
+composition, +0.12 industry, capped at 0.40 total. Crucially this multiplies
+EFFECTIVE coverage while the abstain guarantee still reads base coverage and a
+non-zero BM25 score, so:
+
+- a matching design type can lift a close candidate over the 0.12 threshold;
+- a brief with no shared vocabulary still abstains (`base === 0`);
+- a wrong scope guess can reorder candidates but cannot invent a layout.
+
+Composition maps to existing variants, not new templates: the tuning prompt is
+told the desired arrangement and the variant list, and alignment tuning can
+mirror a header/logo or move a footer. The sparse fixture retrieves hero-split
+and instantiates it as a complete announcement.
+
+Fixed while testing variants: `hero-split` had its two variant labels inverted
+(`hero-left` built artwork on the right). Both variants now mean what they say;
+a test asserts the artwork actually moves side.
+
+### L4 fills assigned slots, it does not place them
+
+`Plan.components` comes from `instantiateTemplate` and is authoritative. The
+prompt now states the reserved box is authoritative (do not move or resize the
+region), names the region's colour role, and includes alignment even when the
+free-form path has no fixed type size. Layout slots are generated one call per
+region, serially — unchanged.
+
+`fitElementsToBox` had a gap: a region SMALLER than its box but drawn off it
+kept `scale = 1` and was returned unchanged, so a model that ignored x/y could
+paint outside its slot and only trip `empty-section` later. It now translates
+such a region into the box. Scale still never enlarges, so an under-fill is
+still reported rather than hidden.
+
+### Quality gate: composition, not just geometry
+
+New deterministic checks, all measured on rendered extents:
+
+- `empty-hero` (error) — a hero region that rendered nothing is a failed focal
+  point, not a cosmetic warning. Added to `REFINE_CODES`; other empty regions
+  stay warnings so a sparse brief does not trigger regeneration.
+- `support` (warn) — a headline with no tagline/facts/sections/CTA behind it:
+  the "headline in a field of containers" shape.
+- `role-content` (warn) — a `sections` region holding fewer than two lines.
+- `copy-length` (warn) — copy past 1.4× the slot's limit.
+- palette discipline now accepts the full role set (and is therefore stricter
+  about genuinely rogue hues than the old neutral loophole).
+
+Warnings still do not trigger refinement; only errors plus
+`empty-section`/`missing`/`empty-hero` do.
+
+### Verification
+
+42 tests pass (`npm test`) and the build is clean. New coverage:
+
+- `tests/pipeline.test.mjs` drives scope → palette roles → retrieval →
+  instantiation → worst-case content (`materializePlan`) → the real gate for the
+  sparse product announcement, and asserts no empty regions, supporting copy,
+  role-only fills, and that L5 has nothing to re-ink.
+- `tests/palettes.test.mjs` asserts every palette's role system and the
+  industry/keyword lookup.
+- `tests/templates.test.mjs` asserts scope biases reorder without filtering,
+  abstention survives a wrong scope, and an off-slot region is translated in.
+- `scripts/quality-check.mjs` grows the same sparse product-announcement
+  regression, no model calls.

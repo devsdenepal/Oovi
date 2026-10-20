@@ -15,6 +15,7 @@
 
 import { DESIGN_CORE, formatGoal } from "./layerPrompt";
 import { templateExample } from "../layout/templates";
+import { formatPaletteRoles, textRoleFor } from "../layout/paletteRoles";
 
 export function buildPlanPrompt(userPrompt, canvas) {
   const w = canvas.width;
@@ -89,6 +90,20 @@ export function buildComponentPrompt(component, canvas, plan, goal = null) {
         : component.role === "header"
           ? " Header is a kicker: single line, small (at most 4% of canvas height)."
           : "";
+  // Colour is a ROLE decision, not a hex decision. The prompt names the role
+  // this region paints with, so L5 corrects mistakes instead of inventing a
+  // scheme after the fact.
+  const colourRole =
+    component.role === "decoration"
+      ? "accent (shapes, rules and small marks only — never text)"
+      : component.role === "cta"
+        ? "ctaText on a ctaSurface block"
+        : textRoleFor(component.role) === "textSecondary"
+          ? "textSecondary for supporting copy, textPrimary for any heading inside it"
+          : "textPrimary";
+  const rolesLine = palette?.roles
+    ? `Palette roles — ${formatPaletteRoles(palette.roles)}.`
+    : `Palette: background ${palette.background}, ink ${palette.ink}, accent ${palette.accent}.`;
   // One worked example of THIS slot, chosen lexically from the template's own
   // copy (see src/layout/templates.js). A few dozen prompt tokens against a
   // prefill that already costs ~90s, and it pins the register of the copy.
@@ -124,21 +139,26 @@ export function buildComponentPrompt(component, canvas, plan, goal = null) {
     "Your task now: output the elements for exactly ONE region of the design. Another pass already decided the regions and this region's box; you only fill it.",
     "Region rules:",
     "- Fill the box deliberately; an empty-looking box is a failure. Every element stays fully inside this box AND inside the canvas.",
+    "- The reserved box is authoritative: do not move or resize the region, and do not invent a different position for it.",
     "- Match the box: a tall box wants larger type and more grouped rows; a thin bar wants a single line.",
     "- Give every element an id prefixed with the region id.",
+    "- Paint with the named palette roles only. Never invent a hue; the palette is a system, not a suggestion.",
     'Return ONLY valid JSON: {"elements":[...]}.',
     "",
     "[User]",
-    `Canvas: ${canvas.width}x${canvas.height}. Palette: background ${palette.background}, ink ${palette.ink}, accent ${palette.accent}. Theme: ${plan.style || "clean modern"}.`,
+    `Canvas: ${canvas.width}x${canvas.height}. ${rolesLine} Theme: ${plan.style || "clean modern"}.`,
     goal ? `The design brief:\n${formatGoal(goal)}` : "",
     `Region "${component.id}" (role ${component.role || "body"}): ${component.describe}.${roleRule}`,
-    `Reserved box: x=${b.x} y=${b.y} width=${b.width} height=${b.height}.`,
+    `Reserved box: x=${b.x} y=${b.y} width=${b.width} height=${b.height} — this is the whole region; keep every element inside it.`,
     component.fontSize
       ? `Type: this region's main text is ${component.fontSize}px${component.align ? `, aligned ${component.align}` : ""} (the template fixed the box, so keep the type at this size).`
-      : "",
+      : component.align
+        ? `Alignment: ${component.align}.`
+        : "",
     component.maxChars > 0
       ? `Copy limit: at most ${component.maxChars} characters of text in this whole region.`
       : "",
+    `Colour for this region: ${colourRole}.`,
     example
       ? `Copy example for this region (follow its register and length, write your own words): "${example}"`
       : "",

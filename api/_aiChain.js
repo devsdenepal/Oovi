@@ -48,6 +48,27 @@ const OLLAMA_NUM_CTX_DEFAULT = 8192;
 // threads beat 3 on both prefill (10.1 vs 9.6 tok/s) and generation
 // (2.73 vs 2.62 tok/s).
 const OLLAMA_NUM_THREAD_DEFAULT = 2;
+const OLLAMA_MODEL_DEFAULT = "gemma4:e2b";
+// Per-layer model override (all blank = today's behaviour: one model everywhere).
+// The browser names every call (`oovi_*`), so the route is keyed by that name:
+// the narrow layers may run a tiny model while the heavy ones keep the big one.
+// Measured on this box (i5-2520M, CPU-only): gemma3:270m prefill 103 tok/s,
+// generation 27.8 tok/s; gemma3:1b 19.9 / 9.6; gemma4:e2b 10.9 / 3.3. A model
+// swap also costs ~19-22s reload AND drops the prompt cache, so only split the
+// layers when the narrow call's prompt is small enough to win that back.
+const LAYER_MODEL_ENV = {
+  oovi_template: "OLLAMA_MODEL_TUNE", // L3a template choice
+  oovi_tuning: "OLLAMA_MODEL_TUNE", // L3b tuning patch
+  oovi_component: "OLLAMA_MODEL_COPY", // L4 slot copy
+  oovi_plan: "OLLAMA_MODEL_FALLBACK", // free-form L3 (plan pass)
+  oovi_skeleton: "OLLAMA_MODEL_FALLBACK", // free-form L3 (skeleton pass)
+};
+
+/** The model for this call: its layer's override when set, else OLLAMA_MODEL. */
+function modelForRequest(name) {
+  const override = LAYER_MODEL_ENV[name] ? process.env[LAYER_MODEL_ENV[name]] : "";
+  return (override && override.trim()) || process.env.OLLAMA_MODEL || OLLAMA_MODEL_DEFAULT;
+}
 // Truncation guard ONLY — caps are measured never to bind (a ~30-token answer
 // cost 425 generated tokens while e2b was thinking silently; with think:false
 // it costs 9). One constant, so the options object below is byte-identical on
@@ -253,7 +274,10 @@ async function drain(stream) {
  */
 async function callOllama(req, deadline, onProgress, onDelta) {
   const base = (process.env.OLLAMA_URL || OLLAMA_URL_DEFAULT).replace(/\/+$/, "");
-  const model = process.env.OLLAMA_MODEL || "gemma4:e2b";
+  // Per-layer model override: which env var serves this call. Every override
+  // is optional and blank falls back to OLLAMA_MODEL, so the default stays a
+  // single model for the whole chain.
+  const model = modelForRequest(req.name);
   try {
     const health = await fetch(`${base}/api/tags`, { signal: AbortSignal.timeout(1500) });
     if (!health.ok) throw new Error(`health ${health.status}`);

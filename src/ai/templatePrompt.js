@@ -36,9 +36,10 @@ export const TEMPLATE_RULES = [
   "- Answer with one of the candidates offered below.",
   "Tuning rules:",
   "- You may ONLY pick a variant, hide optional regions, scale a region's type by up to a quarter, set a region's text alignment, and choose the overall density.",
+  "- Pick the variant whose composition matches the brief's desired arrangement: artwork left vs right, centered vs split, stacked vs grid, the footer's side.",
   '- "hide" may contain ONLY region ids marked optional, and only when the brief has no content for that region.',
   '- "scale" takes one entry per region you want to re-size, factor between three quarters and one and a quarter.',
-  '- "align" is left, center or right — use it to resolve a deliberate symmetry, not to scatter.',
+  '- "align" is left, center or right — use it to resolve a deliberate symmetry, not to scatter. Moving the header/logo to the opposite edge from the hero is a valid deliberate mirror.',
   '- "density" is tight, normal or airy: how much breathing room between regions.',
   "- Change nothing else. An untouched template is a valid answer.",
   "Return ONLY valid JSON — no prose and no markdown.",
@@ -102,7 +103,8 @@ function candidateBlock(retrieved) {
     .map((entry) => {
       const template = getTemplate(typeof entry === "string" ? entry : entry.id);
       if (!template) return "";
-      return `- ${template.id} (${template.type}, ${template.density} density): ${template.blurb}. ${template.description}`;
+      const variants = (template.variants || []).map((v) => v.id).join(", ");
+      return `- ${template.id} (${template.type}, ${template.density} density; variants: ${variants}): ${template.blurb}. ${template.description}`;
     })
     .filter(Boolean);
   return lines.length ? ["Candidates, best match first:", ...lines].join("\n") : "";

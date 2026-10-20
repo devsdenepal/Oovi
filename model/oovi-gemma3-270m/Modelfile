@@ -1,0 +1,24 @@
+FROM ./oovi-gemma3-270m-q8_0.gguf
+
+TEMPLATE """{{- $systemPromptAdded := false }}
+{{- range $i, $_ := .Messages }}
+{{- $last := eq (len (slice $.Messages $i)) 1 }}
+{{- if eq .Role "user" }}<start_of_turn>user
+{{- if (and (not $systemPromptAdded) $.System) }}
+{{- $systemPromptAdded = true }}
+{{ $.System }}
+{{ end }}
+{{ .Content }}<end_of_turn>
+{{ if $last }}<start_of_turn>model
+{{ end }}
+{{- else if eq .Role "assistant" }}<start_of_turn>model
+{{ .Content }}{{ if not $last }}<end_of_turn>
+{{ end }}
+{{- end }}
+{{- end }}"""
+
+PARAMETER temperature 0.2
+PARAMETER top_p 0.95
+PARAMETER top_k 64
+PARAMETER num_ctx 8192
+PARAMETER stop <end_of_turn>

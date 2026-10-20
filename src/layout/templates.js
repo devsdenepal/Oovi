@@ -706,7 +706,7 @@ const TABLE = [
       { id: "hero-right", label: "artwork on the right" },
       { id: "hero-left", label: "artwork on the left" },
     ],
-    build: (variant, gap) => heroSplit(variant === "hero-left" ? "left" : "right", gap),
+    build: (variant, gap) => heroSplit(variant === "hero-left" ? "right" : "left", gap),
   },
   {
     id: "hero-top",

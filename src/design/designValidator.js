@@ -114,7 +114,7 @@ function validateElement(element, path, errors) {
   // Strict-schema providers emit explicit nulls — default them here so the
   // shape check sees effective values (normalizeElement persists the same
   // defaults downstream).
-  if (element.gradient !== undefined) {
+  if (element.gradient !== undefined && element.gradient !== null) {
     const raw = element.gradient && typeof element.gradient === "object" ? element.gradient : {};
     const d = (v, fb) => (typeof v === "number" && Number.isFinite(v) ? v : fb);
     const g = { ...raw };

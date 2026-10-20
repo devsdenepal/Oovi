@@ -64,6 +64,64 @@ const COVERAGE_IDF_CAP = 2.5;
 /** How many retained templates the choice prompt may see. */
 export const RETRIEVAL_LIMIT = 3;
 
+/**
+ * How much an L1 scope field can move a template up or down the ranking.
+ *
+ * These are BIASES, never filters. A hard filter on `designType` would empty
+ * the pool: template types (`poster`, `notice`, `menu`, `cover`) and design
+ * types (`product-launch`, `social-post`, `schedule`) are different
+ * vocabularies, and a brief can legitimately want a `notice` layout for a
+ * `product-launch` request. A bias can only reorder templates that already
+ * share vocabulary with the brief, so a wrong guess costs one rank, not a
+ * wrong layout.
+ */
+const SCOPE_BOOST = { type: 0.22, composition: 0.3, industry: 0.12 };
+
+/**
+ * Template `type` values that a design type can reasonably use. This is a
+ * preference list, not a taxonomy: the first entry is the best fit.
+ */
+const DESIGN_TYPE_HINTS = {
+  poster: ["poster", "notice", "banner", "statement"],
+  banner: ["banner", "poster", "cover"],
+  "social-post": ["social", "poster", "statement", "product"],
+  story: ["social", "poster", "cover"],
+  cover: ["cover", "poster", "statement"],
+  newsletter: ["newsletter", "poster", "listing"],
+  notice: ["notice", "poster", "statement"],
+  invitation: ["notice", "poster", "ticket", "quote"],
+  certificate: ["certificate", "notice", "statement"],
+  menu: ["menu", "listing", "product"],
+  schedule: ["schedule", "listing", "timeline"],
+  listing: ["listing", "schedule", "timeline", "menu"],
+  "product-launch": ["product", "poster", "cover", "social"],
+  gallery: ["gallery", "social", "cover"],
+  quote: ["quote", "statement", "notice"],
+  comparison: ["comparison", "listing", "menu"],
+  team: ["roster", "gallery", "listing"],
+  ticket: ["ticket", "notice", "poster"],
+  map: ["map", "listing", "poster"],
+  metrics: ["metrics", "listing", "poster"],
+  statement: ["statement", "quote", "notice"],
+};
+
+/**
+ * Template ids whose DEFAULT variant expresses a requested composition.
+ * Kept as an explicit map rather than derived from geometry: "which layout is
+ * centered" is a design judgement, and reading it from slot coordinates would
+ * call a left-aligned rail centered whenever its box happens to be.
+ */
+const COMPOSITION_HINTS = {
+  "hero-left": ["hero-split", "feature-cta", "sidebar-rail", "statement-split", "map-card", "three-band"],
+  "hero-right": ["hero-split", "feature-cta", "sidebar-rail", "statement-split", "map-card", "three-band"],
+  centered: ["centered-poster", "poster-rail", "statement-quote", "quote-card", "certificate", "banner-strip"],
+  split: ["hero-split", "editorial-columns", "comparison", "event-listing", "sidebar-rail", "newsletter"],
+  stacked: ["hero-top", "story-stack", "poster-rail", "social-post", "magazine-cover", "product-shelf"],
+  grid: ["card-grid", "photo-grid", "team-roster", "product-shelf", "class-schedule", "editorial-columns"],
+  banner: ["banner-strip", "three-band", "metrics-panel", "hero-top"],
+  "type-only": ["centered-poster", "statement-quote", "poster-rail", "quote-card", "timeline", "agenda"],
+};
+
 /** Suffixes stripped by stem(), longest first. */
 const SUFFIXES = ["ations", "ation", "ments", "ment", "ings", "ing", "ions", "ion", "ers", "er", "ed", "es", "s", "e", "r"];
 
@@ -276,11 +334,17 @@ export function selectFromScored(scored, options = {}) {
 }
 
 /**
- * Rank the templates that could fit this canvas against this brief with BM25.
+ * Rank the templates that could fit this canvas against this brief with BM25,
+ * then apply the L1 scope biases (design type, composition, industry).
  *
- * @param {object} goal refined brief (summary/subject/tone/style/mustInclude…)
+ * The bias is multiplicative on the BM25 score and capped, so it can only
+ * reorder templates that already match the brief's vocabulary — it can never
+ * lift a template the brief has nothing to do with. `scope` is reported per
+ * candidate so a live run shows WHY a layout moved.
+ *
+ * @param {object} goal refined brief (summary/subject/tone/style/designType/industry/composition/keywords…)
  * @param {{width:number,height:number}} canvas
- * @param {{limit?:number, threshold?:number, type?:string, ranker?:object}} [options]
+ * @param {{limit?:number, threshold?:number, type?:string, ranker?:object, extra?:Array}} [options]
  * @returns {{candidates:string[], scored:Array, coverage:number, source:"retrieval"|"none", decisive:object|null, size:string}}
  */
 export function retrieveTemplates(goal, canvas, options = {}) {
@@ -291,18 +355,83 @@ export function retrieveTemplates(goal, canvas, options = {}) {
   const query = tokenize(retrievalText(goal));
   const ranker = options.ranker || createRanker(documents);
   const ranked = ranker.rank(query, documents);
+  const hints = scopeHints(goal);
   const scored = ranked
     .filter((r) => r && r.index >= 0 && r.index < pool.length)
-    .map((r) => ({
-      id: pool[r.index].id,
-      score: Number(r.score) || 0,
-      coverage:
+    .map((r) => {
+      const template = pool[r.index];
+      const scope = scopeScore(template, hints);
+      const base = Number(r.score) || 0;
+      const rawCoverage =
         typeof r.coverage === "number"
           ? r.coverage
           : typeof ranker.coverage === "function"
             ? ranker.coverage(query, documents[r.index])
-            : 0,
-    }));
+            : 0;
+      // Scope raises the EFFECTIVE coverage, because coverage is what the
+      // threshold and the ordering read. A brief with no vocabulary overlap
+      // still has base === 0 at every threshold, so the abstain guarantee is
+      // untouched — this only helps a template that already matched at least
+      // one term.
+      return {
+        id: template.id,
+        score: base * (1 + scope.total),
+        baseScore: base,
+        scope,
+        coverage: Math.min(1, rawCoverage * (1 + scope.total)),
+        baseCoverage: rawCoverage,
+      };
+    });
 
   return { ...selectFromScored(scored, options), size };
+}
+
+/**
+ * Normalises the goal's scope fields into the shape the bias functions want.
+ * Everything is optional: a hand-written brief or an old goal simply gets no
+ * bias, which is exactly the pre-change behaviour.
+ */
+export function scopeHints(goal) {
+  const industry = String(goal?.industry || "").toLowerCase().trim();
+  return {
+    designType: String(goal?.designType || "").toLowerCase().trim(),
+    composition: String(goal?.composition || "").toLowerCase().trim(),
+    industry: industry && industry !== "general" ? industry : "",
+    keywords: (Array.isArray(goal?.keywords) ? goal.keywords : [])
+      .map((k) => String(k || "").toLowerCase().trim())
+      .filter(Boolean),
+  };
+}
+
+/**
+ * The bounded scope bias for one template.
+ *
+ * Each component is worth at most the weight in SCOPE_BOOST, and the total is
+ * capped at 0.4 so scope can reorder a close race but never overturn a clear
+ * vocabulary win. A template that already appears in the design type's
+ * preference list gets the full type weight; one that merely shares the
+ * industry gets a small nudge.
+ */
+export function scopeScore(template, hints) {
+  let type = 0;
+  let composition = 0;
+  let industry = 0;
+  if (hints.designType) {
+    const preferred = DESIGN_TYPE_HINTS[hints.designType] || [];
+    const at = preferred.indexOf(template.type);
+    if (at === 0) type = SCOPE_BOOST.type;
+    else if (at > 0) type = SCOPE_BOOST.type * (1 - at / (preferred.length + 1));
+  }
+  if (hints.composition) {
+    const ids = COMPOSITION_HINTS[hints.composition] || [];
+    if (ids.includes(template.id)) composition = SCOPE_BOOST.composition;
+  }
+  if (hints.industry) {
+    // The template's own metadata names the industries it suits; `keywords`
+    // carries the same signal for templates authored before this field.
+    const words = [template.type, ...(template.keywords || []), ...(template.tags || [])].join(" ").toLowerCase();
+    if (words.includes(hints.industry)) industry = SCOPE_BOOST.industry;
+  }
+  const total = Math.min(0.4, type + composition + industry);
+  return { type, composition, industry, total };
 }

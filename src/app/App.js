@@ -670,7 +670,7 @@ export class App {
         // four times per build), plus `contrast` (L5 re-inks faded text
         // deterministically and for free), `alignment`, `spacing`,
         // `typography`, `tiny-text` and `palette`, which are advisory.
-        const REFINE_CODES = new Set(["empty-section", "missing"]);
+        const REFINE_CODES = new Set(["empty-section", "missing", "empty-hero"]);
         const idsIn = (msg) => [...String(msg).matchAll(/"([^"]+)"/g)].map((m) => m[1]);
         for (const issue of rep.issues) {
           if (issue.severity !== "error" && !REFINE_CODES.has(issue.code)) continue;

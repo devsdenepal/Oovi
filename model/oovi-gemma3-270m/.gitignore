@@ -1,0 +1,5 @@
+# Derived build outputs; see README.md for the Colab pipeline that produces them.
+*.gguf
+merged/
+tokenizer.json
+tokenizer.model

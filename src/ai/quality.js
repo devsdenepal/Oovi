@@ -140,6 +140,17 @@ export function evaluateDesign(design, opts = {}) {
   }
   const boxes = elementBoxes(design.elements);
   const texts = boxes.filter((b) => b.kind === "text");
+  // Copy by element id. elementBoxes flattens groups, but the words live on the
+  // leaf element, so walk the tree once for role/limit checks.
+  const copy = new Map();
+  const collectCopy = (els) => {
+    for (const el of els || []) {
+      if (!el || typeof el !== "object") continue;
+      if (el.type === "text" && typeof el.content === "string") copy.set(el.id, el.content);
+      if (el.type === "group" && Array.isArray(el.children)) collectCopy(el.children);
+    }
+  };
+  collectCopy(design.elements);
 
   // 1. Bounds — text escaping the canvas is an error; decorations may bleed.
   for (const b of boxes) {
@@ -291,7 +302,16 @@ export function evaluateDesign(design, opts = {}) {
       if (short) v = `#${short[1].split("").map((ch) => ch + ch).join("")}`;
       return v;
     };
-    const planColors = new Set([palette.background, palette.ink, palette.accent].map(norm));
+    // Canvas roles are the vocabulary. A card painted `surface` or a CTA
+    // painted `ctaSurface` is ON palette; the three-colour test called those
+    // rogue and pushed L5 to snap them back to ink. Roles also make the check
+    // stricter where it matters: a derived border can no longer pass as a
+    // "neutral".
+    const roleColors =
+      palette.roles && typeof palette.roles === "object"
+        ? Object.values(palette.roles)
+        : [palette.background, palette.ink, palette.accent];
+    const planColors = new Set(roleColors.map(norm).filter(Boolean));
     const isNeutral = (c) => {
       const v = norm(c);
       if (v === "" || v === "transparent" || v === "white" || v === "black" || v === "gray" || v === "grey") return true;
@@ -371,7 +391,7 @@ export function evaluateDesign(design, opts = {}) {
     if (!rendered.has(id)) err("missing", `Planned component "${id}" never rendered.`);
   }
 
-  // 8b. Planned boxes: under-filled sections and small heroes.
+  // 8b. Planned boxes: under-filled sections, small heroes, role-fit.
   const comps = Array.isArray(opts.components) ? opts.components : [];
   for (const c of comps) {
     if (!c || !c.box) continue;
@@ -386,12 +406,42 @@ export function evaluateDesign(design, opts = {}) {
       return cx >= b.x && cx <= b.x + b.width && cy >= b.y && cy <= b.y + b.height;
     });
     if (!inside.length) {
-      warn("empty-section", `Planned section "${c.id}" rendered nothing inside its box.`);
-    } else {
-      const area = inside.reduce((s, f) => s + f.box.w * f.box.h, 0);
-      if (b.width > 0 && b.height > 0 && area / (b.width * b.height) < 0.15) {
-        warn("thin-section", `Planned section "${c.id}" looks nearly empty inside its box.`);
+      // A hero is the focal point: an empty one is a failed composition, not a
+      // cosmetic warning. Every other empty region stays a warning so a sparse
+      // brief does not trigger regeneration.
+      if (c.role === "hero") {
+        err("empty-hero", `Hero region "${c.id}" rendered nothing inside its box — a hero must carry visual content.`);
+      } else {
+        warn("empty-section", `Planned section "${c.id}" rendered nothing inside its box.`);
       }
+      continue;
+    }
+    const area = inside.reduce((s, f) => s + f.box.w * f.box.h, 0);
+    if (b.width > 0 && b.height > 0 && area / (b.width * b.height) < 0.15) {
+      warn("thin-section", `Planned section "${c.id}" looks nearly empty inside its box.`);
+    }
+    // Role fit: the region must hold the KIND of content its role promises.
+    if (c.role === "sections") {
+      const lines = inside.filter((f) => f.kind === "text" && (copy.get(f.id) || "").trim()).length;
+      if (lines < 2) {
+        warn("role-content", `Section region "${c.id}" holds ${lines} line(s) — a section needs grouped entries, not one label.`);
+      }
+    }
+    if (c.maxChars > 0) {
+      const chars = inside.reduce((s, f) => s + (copy.get(f.id) || "").length, 0);
+      if (chars > Math.round(c.maxChars * 1.4)) {
+        warn("copy-length", `Region "${c.id}" holds ${chars} characters against a ${c.maxChars} limit — the copy is not fitting its slot.`);
+      }
+    }
+  }
+
+  // 8c. Supporting copy. A headline alone in a field of containers is the
+  // "template with no design" failure the product must not ship.
+  {
+    const roles = new Set(texts.map((t) => t.role).filter(Boolean));
+    const support = ["tagline", "details", "sections", "audience", "footer", "cta", "body"];
+    if (roles.has("headline") && !support.some((r) => roles.has(r))) {
+      warn("support", "The design is a headline with no supporting copy — add the facts, a tagline or a call to action.");
     }
   }
 

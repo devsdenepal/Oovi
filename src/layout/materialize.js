@@ -15,10 +15,13 @@
 /**
  * @param {Array} components instantiated plan components
  * @param {{width:number,height:number}} canvas
- * @param {{background:string,ink:string,accent:string}} palette
+ * @param {{background:string,ink:string,accent:string,roles?:object}} palette
  * @returns {{canvas:object, elements:Array}}
  */
 export function materializePlan(components, canvas, palette) {
+  const roles = palette?.roles || {};
+  const ink = roles.textPrimary || palette.ink;
+  const accent = roles.accent || palette.accent;
   const elements = [];
   for (const c of components || []) {
     const box = c.box;
@@ -48,7 +51,7 @@ export function materializePlan(components, canvas, palette) {
           x: Math.round(cx - radius),
           y: Math.round(box.y + box.height / 2 - radius),
           radius,
-          fill: palette.accent,
+          fill: accent,
         });
       }
       continue;
@@ -69,7 +72,7 @@ export function materializePlan(components, canvas, palette) {
       fontSize,
       fontWeight: 600,
       lineHeight: 1.2,
-      fill: palette.ink,
+      fill: ink,
     });
   }
   return { canvas: { ...canvas, background: palette.background }, elements };

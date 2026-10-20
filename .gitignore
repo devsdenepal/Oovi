@@ -10,3 +10,5 @@ dist
 generations.db
 *.sqlite
 *.sqlite3
+# Generated dataset (scripts/make-dataset.mjs; reproducible from the seed)
+data/

@@ -101,7 +101,38 @@ export function fitElementsToBox(elements, box, opts = {}) {
   if (!overflows) return elements;
 
   const scale = Math.min(1, (bw - slack * 2) / extent.w, (bh - slack * 2) / extent.h);
-  if (!(scale > 0) || scale >= 1) return elements;
+  if (!(scale > 0)) return elements;
+  if (scale >= 1) {
+    // The region is no bigger than its reservation but is drawn OFF it (a
+    // model that ignores x/y and paints at the canvas origin, or at the wrong
+    // edge). Scaling cannot fix an offset, and returning it unchanged left the
+    // region outside its slot. Translate it in, which preserves the composition
+    // the model drew and makes the template box authoritative.
+    const dx =
+      extent.x1 < bx + slack
+        ? bx + slack - extent.x1
+        : extent.x2 > bx + bw - slack
+          ? bx + bw - slack - extent.x2
+          : 0;
+    const dy =
+      extent.y1 < by + slack
+        ? by + slack - extent.y1
+        : extent.y2 > by + bh - slack
+          ? by + bh - slack - extent.y2
+          : 0;
+    if (!dx && !dy) return elements;
+    const tx = (v) => Math.round(v + dx);
+    const ty = (v) => Math.round(v + dy);
+    return elements.map((el) => {
+      if (!el || typeof el !== "object") return el;
+      const next = { ...el };
+      if (num(next.x) !== null) next.x = tx(next.x);
+      if (num(next.y) !== null) next.y = ty(next.y);
+      if (num(next.x2) !== null) next.x2 = tx(next.x2);
+      if (num(next.y2) !== null) next.y2 = ty(next.y2);
+      return next;
+    });
+  }
 
   // Fold the scale and the translation into one map: the region's own top-left
   // lands at the box's top-left (plus slack), so the fit is exact.

@@ -24,7 +24,7 @@ import { retrieveTemplates, templatePool, DEFAULT_COVERAGE_THRESHOLD } from "../
 import { templateFromDesign, templateFromRecord, templateToRecord, validateTemplate } from "../src/layout/saveAsTemplate";
 import { elementBoxes, evaluateDesign } from "../src/ai/quality";
 import { salvageElements } from "../src/ai/aiClient";
-import { fitRegion } from "../src/layout/regionFit";
+import { fitElementsToBox, fitRegion } from "../src/layout/regionFit";
 import { DESIGN_PRESETS } from "../src/design/presets";
 
 const SAMPLE_PALETTES = [
@@ -453,4 +453,43 @@ test("a region with one bad element is salvaged, not thrown away", () => {
   assert.deepEqual(salvageElements({ elements: [] }, canvas), [], "nothing to salvage");
   assert.deepEqual(salvageElements(null, canvas), [], "a missing parse salvages nothing");
   assert.deepEqual(salvageElements({ elements: [null, "x", 7] }, canvas), [], "junk salvages nothing");
+});
+
+test("scope fields bias layout choice without filtering the pool", () => {
+  const canvas = { width: 1200, height: 630 };
+  const base = {
+    summary: "a new analytics app",
+    subject: "analytics app",
+    purpose: "announce the launch",
+    keywords: ["product", "launch", "analytics"],
+  };
+  const plain = retrieveTemplates(base, canvas);
+  const scoped = retrieveTemplates({ ...base, designType: "product-launch", composition: "hero-right" }, canvas);
+  assert.equal(plain.source, "retrieval");
+  assert.equal(scoped.source, "retrieval", "scope never empties a retrievable pool");
+  const top = scoped.scored[0];
+  assert.ok(top.scope.type > 0, "the design type contributed a bias");
+  assert.ok(top.scope.composition > 0, "the requested composition contributed a bias");
+  assert.ok(top.coverage >= top.baseCoverage, "a bias can only raise effective coverage");
+  assert.ok(top.scope.total <= 0.4, "the bias is bounded, not a hard filter");
+
+  // A wrong scope can reorder templates, never rescue an unrelated brief.
+  const nonsense = retrieveTemplates(
+    { summary: "xyzzy plugh frobnicate quux", designType: "menu", composition: "grid" },
+    canvas,
+  );
+  assert.equal(nonsense.source, "none", "scope does not manufacture a match");
+});
+
+test("a region that fits its slot but is drawn off it is translated into the slot", () => {
+  const box = { x: 64, y: 64, width: 400, height: 100 };
+  const elements = [
+    { id: "t", type: "text", content: "A single line", x: 900, y: 400, width: 200, fontSize: 20, fill: "#111111" },
+  ];
+  const fitted = fitElementsToBox(elements, box);
+  const b = elementBoxes(fitted)[0].box;
+  assert.ok(b.x >= box.x - 1, `x ${b.x} >= ${box.x}`);
+  assert.ok(b.y >= box.y - 1, `y ${b.y} >= ${box.y}`);
+  assert.ok(b.x + b.w <= box.x + box.width + 1, `right edge ${b.x + b.w} <= ${box.x + box.width}`);
+  assert.ok(b.y + b.h <= box.y + box.height + 1, `bottom edge ${b.y + b.h} <= ${box.y + box.height}`);
 });
