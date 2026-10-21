@@ -1354,7 +1354,7 @@ function tuningEntries(value, valueKeys) {
  * read from the model — only the bounded vocabulary below survives.
  */
 export function sanitizeTuning(raw, template) {
-  const out = { variant: template?.variants?.[0]?.id || "", density: "normal", hide: [], scale: {}, align: {}, images: {} };
+  const out = { variant: template?.variants?.[0]?.id || "", density: "dense", hide: [], scale: {}, align: {}, images: {} };
   if (!raw || typeof raw !== "object") return out;
   if (template) {
     const wanted = String(raw.variant ?? raw.variantId ?? "");

@@ -161,9 +161,9 @@ export function buildComponentPrompt(component, canvas, plan, goal = null, rawPr
       : component.role === "sections"
         ? /card|caption|item/i.test(component.id)
           ? "2-3 elements: one short label and one line of detail — this is a single card, not a section."
-          : "4-6 elements: a heading plus 3-4 grouped cards (icon + title + one-liner)."
+          : "5-8 elements: a heading plus 3-4 grouped cards (icon + title + one-liner)."
         : component.role === "details"
-          ? "2-4 elements: one grouped row per fact."
+          ? "3-5 elements: one grouped row per fact, plus a supporting label."
           : component.role === "header"
             ? "2-3 elements: a bar or badge plus one kicker line."
             : component.role === "headline"
@@ -174,7 +174,7 @@ export function buildComponentPrompt(component, canvas, plan, goal = null, rawPr
                   ? "2-4 elements: a label plus grouped entries."
                   : component.role === "footer"
                     ? "2-4 elements: grouped organizer/registration lines."
-                    : "2-5 elements.";
+                    : "3-6 elements.";
   // L4 shares the byte-identical DESIGN_CORE prefix with L1-L3. Everything
   // that varies lives in the [User] turn, ordered constant-within-design
   // first (canvas, palette, theme, brief) and region-specific last, so a
@@ -188,6 +188,7 @@ export function buildComponentPrompt(component, canvas, plan, goal = null, rawPr
     isDecoration
       ? "- Fill the reserved box with a deliberate decoration layer; it sits behind the content."
       : "- Fill the box deliberately; an empty-looking box is a failure. Every element stays fully inside this box AND inside the canvas.",
+    "- Visual coverage: aim to fill at least 60% of the reserved box. Layer shapes behind the text, add a side panel, small label or badge beside it, and use supporting details (thin rules, dots, chips) so no large area stays empty.",
     "- The reserved box is authoritative: do not move or resize the region, and do not invent a different position for it.",
     isDecoration
       ? "- Match the box shape: thin strips want a few small marks; large boxes can carry a fuller pattern."

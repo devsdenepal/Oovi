@@ -1188,3 +1188,8 @@ decorations still use the same rectangle/circle/line primitives.
 wide, square, tall and thin boxes, asserts the DSL validates and stays inside
 the reservation, checks palette-only paint, the 24-piece bound, schema/prompt
 coverage, theme recommendations and template-sample integration.
+### Visual coverage (density default)
+- Default tuning density changed from `"normal"` to `"dense"`, so layouts start filled rather than sparse.
+- Component prompt asks for layered shapes, badges, side details and 60% box coverage.
+- Decoration vocabulary remains the same; more primitives per region now fill larger boxes naturally.
+
