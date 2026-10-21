@@ -232,6 +232,8 @@ export function textRoleFor(role) {
     case "tagline":
     case "audience":
     case "caption":
+    case "attribution":
+    case "source":
       return "textSecondary";
     case "details":
     case "header":

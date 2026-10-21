@@ -4,31 +4,33 @@ import { createElementScanner } from "./streamJson";
 import {
   buildGoalPrompt,
   buildPalettePrompt,
-  buildSkeletonPrompt,
   GOAL_SCHEMA,
   PALETTE_SCHEMA,
-  SKELETON_SCHEMA,
 } from "./layerPrompt";
 import {
   buildTemplateChoicePrompt,
   buildTuningPrompt,
   templateChoiceSchema,
-  TUNING_SCHEMA,
+  tuningSchema,
 } from "./templatePrompt";
 import {
   getTemplate,
   instantiateTemplate,
   sanitizeTuning,
   sizeClassOf,
+  TEMPLATES,
 } from "../layout/templates";
 import { retrieveTemplates, RETRIEVAL_LIMIT, DEFAULT_COVERAGE_THRESHOLD } from "../layout/retrieve";
 import { listSavedTemplates } from "../layout/templateStore";
 import { lookupPalette, paletteIsUsable } from "../layout/palettes";
-import { ensurePaletteRoles, applyRoleFills } from "../layout/paletteRoles";
+import { ensurePaletteRoles, applyRoleFills, textRoleFor, normRoleColor } from "../layout/paletteRoles";
 import { buildPatchPrompt } from "./patchPrompt";
 import { validatePatch } from "./patch";
 import { contrastRatio } from "./quality";
 import { fitRegion } from "../layout/regionFit";
+import { sanitizeRegionCopy, copyProblem, normalizeCopyLines } from "./copySanitize";
+import { buildCopyPrompt, buildCopyRepairPrompt, copyDeckSchema, copyLineLimit, isCopyRegion } from "./copyPrompt";
+import { normalizeElementRoles } from "./elementRoles";
 import {
   isMockEnabled,
   mockDesign,
@@ -918,104 +920,10 @@ export async function planPalette(goal, canvas, onProgress = null) {
 }
 
 /**
- * L3 — Skeleton: ordered regions (boxes, roles, content requirements), no
- * final copy. Returns the SAME shape as planDesign so the build loop, the
- * quality gate and the collision tidy all work unchanged. `correction` lets
- * the caller re-run the skeleton with quality feedback without replanning
- * the goal or palette.
+ * L3 is template-only. The free-form skeleton path has been removed: every
+ * generation must choose a template, show its regions, and then fill those
+ * regions one by one. `planTemplate` below is the single L3 implementation.
  */
-export async function planSkeleton(goal, palette, canvas, correction = "", onProgress = null) {
-  if (isMockEnabled()) {
-    const clean = sanitizePlan(mockPlan(goal?.summary || "design", canvas), canvas);
-    return {
-      ...clean,
-      palette: planPaletteObject(palette),
-      style: palette.style,
-      source: "mock",
-    };
-  }
-  const tStart = Date.now();
-  console.log(`[ai] skeleton start canvas=${canvas.width}x${canvas.height}`);
-  let errors = [];
-  let fallback = null;
-  let fallbackScore = Infinity;
-  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-    const base = buildSkeletonPrompt(goal, palette, canvas);
-    const requestPrompt =
-      attempt === 1 && !correction
-        ? base
-        : `${base}\n\n[Correction]\n${correction ? `${correction} ` : ""}Your previous skeleton was not usable (${errors.join("; ")}). Return ONLY the JSON skeleton.`;
-    let text;
-    try {
-      text = await fetchAiChat(requestPrompt, {
-        schema: SKELETON_SCHEMA,
-        name: "oovi_skeleton",
-        maxTokens: 1200,
-        effort: "medium",
-        onProgress,
-      });
-    } catch (error) {
-      throw new Error(`Could not lay out the skeleton: ${error.message}`);
-    }
-    const parsed = regexRepairJson(text);
-    if (parsed === null) {
-      errors = ["unrecoverable JSON"];
-      continue;
-    }
-    const clean = sanitizePlan(parsed, canvas);
-    if (clean.components.length === 0) {
-      errors = ["no usable regions"];
-      continue;
-    }
-    // A plan can be valid JSON and still be unusable: a 26px-wide tagline
-    // forces L4 down to 5px type, and overlapping boxes collide by
-    // construction. Those are retryable planning errors, not styling choices.
-    const tiny = clean.components.filter(
-      (c) => c.kind === "dsl" && c.role !== "decoration" && (c.box.width < 80 || c.box.height < 24),
-    );
-    const overlaps = clean.warnings.some((w) => w.includes("boxes overlap"));
-    if (tiny.length || overlaps) {
-      const score = tiny.length + (overlaps ? 1 : 0);
-      if (score < fallbackScore) {
-        fallback = clean;
-        fallbackScore = score;
-      }
-      errors = [
-        tiny.length
-          ? `boxes too small: ${tiny.map((c) => `${c.id} ${Math.round(c.box.width)}x${Math.round(c.box.height)}`).join(", ")}`
-          : "",
-        overlaps ? "overlapping boxes" : "",
-      ].filter(Boolean);
-      console.warn(`[ai] skeleton retry ${errors.join("; ")}`);
-      continue;
-    }
-    const warnings = clean.warnings;
-    console.log(
-      `[ai] skeleton ok ${Date.now() - tStart}ms attempts=${attempt} ` +
-        `components=${clean.components.map((c) => `${c.id}(${c.kind}/${c.role})`).join(",")}`,
-    );
-    return {
-      palette: planPaletteObject(palette),
-      style: palette.style || clean.style,
-      components: clean.components,
-      warnings,
-      source: "ai",
-    };
-  }
-  // All attempts were poor. Keep the least-bad plan rather than dropping to
-  // the one-shot generator, which is slower and loses the layered structure.
-  if (fallback) {
-    console.warn(`[ai] skeleton using best of ${MAX_ATTEMPTS} after: ${errors.join("; ")}`);
-    return {
-      palette: planPaletteObject(palette),
-      style: palette.style || fallback.style,
-      components: fallback.components,
-      warnings: [...fallback.warnings, `plan: ${errors.join("; ")}`],
-      source: "ai",
-    };
-  }
-  throw new Error(`Could not lay out the skeleton: ${errors.slice(0, 3).join("; ")}`);
-}
 
 /**
  * A template by id, whether it shipped with the app or the user saved it.
@@ -1047,39 +955,36 @@ function requestedTemplate(rawPrompt) {
 }
 
 /**
- * L3a — choose ONE template.
+ * L3a — choose ONE template. The pipeline is template-only, so this function
+ * always returns a usable id: retrieval decides when it can, and a forced
+ * canvas-sized fallback covers briefs the corpus has never seen.
  *
- * Retrieval does the work: src/layout/retrieve.js filters by canvas shape and
- * ranks the survivors with BM25 over each template's own document. Three
- * outcomes:
- *
- *   - nothing clears the coverage threshold  -> { id: null }, the caller falls
- *     back to the free-form L3 rather than forcing a wrong layout;
- *   - the top candidate is clearly ahead of the runner-up -> taken for free
- *     (0 tokens, 0 ms);
- *   - the shortlist is genuinely close -> ONE small call that sees only the
- *     retrieved shortlist (and is grammar-constrained to it).
- *
- * @returns {Promise<{id: string|null, candidates: string[], source: string, coverage: number}>}
+ * @returns {Promise<{id: string, candidates: string[], source: string, coverage: number}>}
  */
+function fallbackTemplateFor(canvas) {
+  const size = sizeClassOf(canvas);
+  const fits = TEMPLATES.filter((t) => Array.isArray(t.sizes) && t.sizes.includes(size));
+  return (fits[0] || TEMPLATES[0])?.id || "";
+}
+
 export async function chooseTemplate(goal, palette, canvas, onProgress = null, rawPrompt = "") {
   const requested = requestedTemplate(rawPrompt);
   if (requested) {
     const template = findAnyTemplate(requested);
-    if (template && template.sizes.includes(sizeClassOf(canvas))) {
+    if (template) {
       console.log(`[ai] template ok 0ms (request) -> ${requested}`);
       return { id: requested, candidates: [requested], source: "request", coverage: 1 };
     }
-    console.warn(`[ai] requested template ${requested} does not suit a ${sizeClassOf(canvas)} canvas — using retrieval`);
+    console.warn(`[ai] requested template ${requested} not in library — using retrieval`);
   }
   const found = retrieveTemplates(goal, canvas, { limit: RETRIEVAL_LIMIT, extra: listSavedTemplates() });
   const candidates = found.candidates;
   if (!candidates.length) {
+    const forced = fallbackTemplateFor(canvas);
     console.log(
-      `[ai] template none — no template clears the similarity threshold ` +
-        `(best coverage ${(found.coverage || 0).toFixed(2)} < ${DEFAULT_COVERAGE_THRESHOLD})`,
+      `[ai] template forced -> ${forced} (best coverage ${(found.coverage || 0).toFixed(2)} < ${DEFAULT_COVERAGE_THRESHOLD}; template-only pipeline)`,
     );
-    return { id: null, candidates, source: "none", coverage: found.coverage };
+    return { id: forced, candidates: [forced], source: "forced", coverage: found.coverage };
   }
   // Retrieval matches vocabulary, not intent: a workshop brief can share
   // "workshop"/"members" with a team roster even when there are no people,
@@ -1101,8 +1006,9 @@ export async function chooseTemplate(goal, palette, canvas, onProgress = null, r
     return true;
   });
   if (!shortlist.length) {
-    console.log("[ai] template none — every retrieved candidate is a poor content match");
-    return { id: null, candidates, source: "none", coverage: found.coverage };
+    const forced = fallbackTemplateFor(canvas);
+    console.log(`[ai] template forced -> ${forced} (every retrieved candidate is a poor content match)`);
+    return { id: forced, candidates: [forced], source: "forced", coverage: found.coverage };
   }
   // `decisive` is retrieval's own judgement that the top hit is not a tie; the
   // selection policy lives in src/layout/retrieve.js so the benchmark and the
@@ -1149,15 +1055,16 @@ export async function chooseTemplate(goal, palette, canvas, onProgress = null, r
  * L3b — bounded tuning patch for a chosen template. Always returns a usable
  * tuning object: the default (untouched template) is a valid answer.
  */
-export async function planTemplateTuning(template, goal, palette, canvas, onProgress = null) {
+export async function planTemplateTuning(template, goal, palette, canvas, onProgress = null, opts = {}) {
   const t = typeof template === "string" ? getTemplate(template) : template;
   const defaults = sanitizeTuning(null, t);
   if (!t || isMockEnabled()) return { ...defaults, source: "default" };
   const tStart = Date.now();
-  console.log(`[ai] template-tuning start ${t.id}`);
+  const correction = typeof opts.correction === "string" ? opts.correction.trim() : "";
+  console.log(`[ai] template-tuning start ${t.id}${correction ? " (refine)" : ""}`);
   try {
-    const text = await fetchAiChat(buildTuningPrompt(t, goal, palette, canvas), {
-      schema: TUNING_SCHEMA,
+    const text = await fetchAiChat(buildTuningPrompt(t, goal, palette, canvas, correction), {
+      schema: tuningSchema(t),
       name: "oovi_tuning",
       maxTokens: 320,
       effort: "low",
@@ -1180,6 +1087,134 @@ export async function planTemplateTuning(template, goal, palette, canvas, onProg
 }
 
 /**
+ * L3c — one copy deck for every text region of the chosen template.
+ *
+ * The per-region L4 call is deliberately good at geometry, colour and fit; it
+ * is not a reliable copywriter at 270m. This pass writes all the words while
+ * the template sample is already on screen, then L4 receives exact lines.
+ * Validation is deterministic and shared with the final region guard; one
+ * focused repair call handles rejected lines. If the call fails entirely the
+ * pipeline continues (regions write their own copy) and the final sanitizer
+ * still has the last word.
+ */
+export async function planCopyDeck(components, goal, canvas, rawPrompt = "", onProgress = null) {
+  const regions = (components || []).filter(isCopyRegion);
+  const emptyStats = { regions: regions.length, lines: 0, rejected: 0, unresolved: 0 };
+  if (!regions.length) return { copies: {}, source: "none", stats: emptyStats, rejected: [] };
+  if (isMockEnabled()) return { copies: {}, source: "mock", stats: emptyStats, rejected: [] };
+
+  const tStart = Date.now();
+  console.log(`[ai] copy-deck start regions=${regions.map((component) => component.id).join(",")}`);
+  try {
+    const text = await fetchAiChat(buildCopyPrompt(regions, goal, rawPrompt, canvas), {
+      schema: copyDeckSchema(regions),
+      name: "oovi_copydeck",
+      maxTokens: 500,
+      effort: "low",
+      onProgress,
+    });
+    const parsed = regexRepairJson(text);
+    if (!parsed) throw new Error("unrecoverable JSON");
+    let copies = normalizeCopyDeck(parsed, regions);
+    let rejected = validateCopyDeck(copies, regions, goal, rawPrompt);
+    const initialRejected = rejected.length;
+    let source = rejected.length ? "rewrite" : "ai";
+    if (rejected.length) {
+      console.warn(
+        `[ai] copy-deck rejected ${rejected
+          .map((entry) => `${entry.component.id}: ${entry.reason} — ${JSON.stringify(entry.lines)}`)
+          .join("; ")}`,
+      );
+      try {
+        const repairText = await fetchAiChat(
+          buildCopyRepairPrompt(
+            rejected.map((entry) => entry.component),
+            goal,
+            rawPrompt,
+            rejected,
+            canvas,
+          ),
+          {
+            schema: copyDeckSchema(rejected.map((entry) => entry.component)),
+            name: "oovi_copydeck",
+            maxTokens: 420,
+            effort: "low",
+            onProgress,
+          },
+        );
+        const repairParsed = regexRepairJson(repairText);
+        if (repairParsed) {
+          const repaired = normalizeCopyDeck(repairParsed, rejected.map((entry) => entry.component));
+          console.log(`[ai] copy-deck repair ${JSON.stringify(repaired)}`);
+          for (const entry of rejected) {
+            if (repaired[entry.component.id]?.length) copies[entry.component.id] = repaired[entry.component.id];
+          }
+        }
+      } catch (error) {
+        console.warn(`[ai] copy-deck repair failed (${error.message})`);
+      }
+      rejected = validateCopyDeck(copies, regions, goal, rawPrompt);
+      if (rejected.length) {
+        console.warn(
+          `[ai] copy-deck unresolved ${rejected
+            .map((entry) => `${entry.component.id}: ${entry.reason} — ${JSON.stringify(entry.lines)}`)
+            .join("; ")}`,
+        );
+      }
+      source = rejected.length ? "mixed" : "rewrite";
+    }
+    // Never pass a rejected line to L4 as "approved copy"; the final region
+    // guard would only have to replace it again.
+    for (const entry of rejected) delete copies[entry.component.id];
+    const stats = {
+      regions: regions.length,
+      lines: Object.values(copies).reduce((sum, lines) => sum + lines.length, 0),
+      rejected: initialRejected,
+      unresolved: rejected.length,
+    };
+    console.log(
+      `[ai] copy-deck ok ${Date.now() - tStart}ms source=${source} regions=${stats.regions} ` +
+        `lines=${stats.lines} unresolved=${stats.unresolved}`,
+    );
+    return { copies, source, stats, rejected };
+  } catch (error) {
+    console.warn(`[ai] copy-deck failed (${error.message}) — regions will write their own copy`);
+    return { copies: {}, source: "fallback", stats: emptyStats, rejected: [] };
+  }
+}
+
+function normalizeCopyDeck(parsed, components) {
+  const source = parsed?.copies && typeof parsed.copies === "object" ? parsed.copies : parsed;
+  const copies = {};
+  for (const component of components) {
+    const value = source && typeof source === "object" ? source[component.id] : null;
+    const lines = normalizeCopyLines(value).slice(0, copyLineLimit(component));
+    if (lines.length) copies[component.id] = lines;
+  }
+  return copies;
+}
+
+function validateCopyDeck(copies, components, goal, rawPrompt) {
+  const rejected = [];
+  const seen = new Map();
+  for (const component of components) {
+    const lines = copies[component.id] || [];
+    let reason = copyProblem(lines, component, goal, rawPrompt);
+    if (!reason && lines.length) {
+      const normalized = normalizeCopyLines(lines).map((line) => line.toLowerCase());
+      const duplicate = normalized.find((line) => seen.has(line));
+      if (duplicate) {
+        reason = `duplicates copy used by ${seen.get(duplicate)}`;
+      } else {
+        normalized.forEach((line) => seen.set(line, component.id));
+      }
+    }
+    if (reason) rejected.push({ component, lines, reason });
+  }
+  return rejected;
+}
+
+/**
  * The palette a PLAN carries. Roles are attached here, once, so every
  * downstream consumer (L4 prompt, L5 correction, the quality gate) reads the
  * same role set instead of each re-deriving it — and so a plan is
@@ -1197,42 +1232,78 @@ function planPaletteObject(palette) {
 }
 
 /**
- * L3 via templates: pre-filter -> choose -> tune -> instantiate. Returns the
- * SAME plan shape as planSkeleton, or `null` when no template fits this canvas
- * or the instantiated plan fails its own collision/coverage check — the caller
- * then falls back to the free-form skeleton (requirement: keep full L3 as the
- * safety net).
+ * L3 via templates: choose -> tune -> instantiate. Template-only by design:
+ * there is no free-form fallback. If the first candidate cannot instantiate
+ * (e.g. its coverage check fails on an extreme aspect ratio), the next
+ * canvas-sized template is tried until one builds.
  */
 export async function planTemplate(goal, palette, canvas, onProgress = null, opts = {}) {
   const tStart = Date.now();
   const rawPrompt = typeof opts.rawPrompt === "string" ? opts.rawPrompt : "";
-  const choice = await chooseTemplate(goal, palette, canvas, onProgress, rawPrompt);
-  if (!choice.id) return null;
-  const template = findAnyTemplate(choice.id);
-  if (!template) return null;
-  if (!template.sizes.includes(sizeClassOf(canvas))) {
-    console.warn(`[ai] template ${template.id} does not suit a ${sizeClassOf(canvas)} canvas — falling back to free-form skeleton`);
-    return null;
+  const exclude = typeof opts.exclude === "string" ? opts.exclude : "";
+  const forcedTemplate = typeof opts.template === "string" ? opts.template : "";
+  const correction = typeof opts.correction === "string" ? opts.correction : "";
+  const choice = forcedTemplate
+    ? { id: forcedTemplate, candidates: [forcedTemplate], source: "refine" }
+    : await chooseTemplate(goal, palette, canvas, onProgress, rawPrompt);
+  const ordered = [...new Set([choice.id, ...(choice.candidates || [])].filter(Boolean))];
+  const size = sizeClassOf(canvas);
+  const sizeFits = TEMPLATES.filter((t) => Array.isArray(t.sizes) && t.sizes.includes(size)).map((t) => t.id);
+  let pool = forcedTemplate
+    ? [forcedTemplate]
+    : [...new Set([...ordered, ...sizeFits, ...TEMPLATES.map((t) => t.id)])];
+  if (exclude && !forcedTemplate) {
+    const without = pool.filter((id) => id !== exclude);
+    if (without.length) pool = without;
   }
-  const tuning = await planTemplateTuning(template, goal, palette, canvas, onProgress);
-  const built = instantiateTemplate(template, tuning, canvas);
-  if (!built.ok) {
-    console.warn(`[ai] template ${template.id} unusable (${built.reason}) — falling back to free-form skeleton`);
-    return null;
+  for (const id of pool) {
+    const template = findAnyTemplate(id);
+    if (!template) continue;
+    const tuning = await planTemplateTuning(template, goal, palette, canvas, onProgress, { correction });
+    const built = instantiateTemplate(template, tuning, canvas);
+    if (!built.ok) {
+      console.warn(`[ai] template ${template.id} unusable (${built.reason}) — trying next template`);
+      continue;
+    }
+    // Each image region gets a prompt-grounded Unsplash query: the tuning
+    // model may supply one, otherwise the brief's subject anchors it. Tiny
+    // models sometimes echo the prompt's placeholder ("2-5 word Unsplash
+    // subject"), so only accept something that looks like a real query.
+    const usableImageQuery = (value) => {
+      const q = String(value || "").replace(/\s+/g, " ").trim();
+      if (q.length < 3 || q.length > 64) return "";
+      if (/\bunsplash\b|\bsearch terms?\b|\bword\b|<|>/i.test(q)) return "";
+      const words = q.split(" ").filter(Boolean);
+      if (!words.length || words.length > 8) return "";
+      return q;
+    };
+    const subject = asText(goal?.subject);
+    const extraKeyword = (Array.isArray(goal?.keywords) ? goal.keywords : []).find(
+      (keyword) => keyword && !subject.toLowerCase().includes(String(keyword).toLowerCase()),
+    );
+    const briefSubject = [subject, extraKeyword].filter(Boolean).join(" ").trim();
+    const components = built.components.map((c) => {
+      if (c.kind !== "image") return c;
+      const query = usableImageQuery(built.tuning.images?.[c.id]) || briefSubject || c.describe;
+      console.log(`[ai] template image ${template.id}/${c.id} query="${query}"`);
+      return { ...c, imageQuery: query };
+    });
+    console.log(
+      `[ai] template plan ok ${Date.now() - tStart}ms template=${template.id} variant=${built.tuning.variant} ` +
+        `regions=${components.map((c) => c.id).join(",")}`,
+    );
+    return {
+      palette: planPaletteObject(palette),
+      style: palette.style || template.label,
+      template: template.id,
+      templateRef: template,
+      tuning: built.tuning,
+      components,
+      warnings: [],
+      source: "template",
+    };
   }
-  console.log(
-    `[ai] template plan ok ${Date.now() - tStart}ms template=${template.id} variant=${built.tuning.variant} ` +
-      `regions=${built.components.map((c) => c.id).join(",")}`,
-  );
-  return {
-    palette: planPaletteObject(palette),
-    style: palette.style || template.label,
-    template: template.id,
-    tuning: built.tuning,
-    components: built.components,
-    warnings: [],
-    source: "template",
-  };
+  throw new Error("No template could be instantiated for this canvas.");
 }
 
 /**
@@ -1301,9 +1372,88 @@ function fitRegionChecked(elements, component) {
  * at the source; L5 correctColors() still runs over the finished design as a
  * safety net (it can see artwork and local backdrops this cannot).
  */
-function finishRegion(elements, component, plan) {
-  const painted = applyRoleFills(elements, component?.role, plan?.palette);
-  return fitRegionChecked(painted, component);
+function finishRegion(elements, component, plan, goal = null, rawPrompt = "") {
+  const roleFixed = normalizeElementRoles(elements, component?.role || "body");
+  const painted = applyRoleFills(roleFixed, component?.role, plan?.palette);
+  const copied = sanitizeRegionCopy(painted, component, goal, rawPrompt);
+  return fitRegionChecked(copied, component);
+}
+
+/**
+ * q8 frequently writes a palette ROLE ("textPrimary"), a bare hex
+ * ("E8F0FF"), an empty string, or a fragment of the prompt into `fill`.
+ * validateDesign rightly rejects those, but rejecting the whole region wastes
+ * a multi-minute call. Repair colors to the palette before validation: text
+ * is painted by role anyway, and shapes get a safe palette fallback.
+ */
+const COLOR_ROLE_ALIASES = [
+  ["textprimary", "textPrimary"],
+  ["secondary text", "textSecondary"],
+  ["textsecondary", "textSecondary"],
+  ["secondary", "textSecondary"],
+  ["muted", "muted"],
+  ["ctasurface", "ctaSurface"],
+  ["ctatext", "ctaText"],
+  ["onaccent", "onAccent"],
+  ["background", "background"],
+  ["canvas", "background"],
+  ["surface", "surface"],
+  ["border", "border"],
+  ["accent", "accent"],
+  ["ink", "textPrimary"],
+  ["text", "textPrimary"],
+];
+
+function coerceColor(value, roles, fallback) {
+  const raw = typeof value === "string" ? value.trim() : "";
+  const direct = normRoleColor(raw);
+  if (direct) return direct;
+  const lower = raw.toLowerCase();
+  for (const [needle, role] of COLOR_ROLE_ALIASES) {
+    if (lower.includes(needle)) return roles[role] || fallback;
+  }
+  const embedded = raw.match(/#([0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})\b/i);
+  if (embedded) return normRoleColor(`#${embedded[1]}`) || fallback;
+  const bare = raw.match(/^([0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$/i);
+  if (bare) return normRoleColor(`#${bare[1]}`) || fallback;
+  return fallback;
+}
+
+function repairElementColors(elements, componentRole, palette) {
+  const roles = ensurePaletteRoles(palette);
+  const walk = (list) =>
+    list.map((element) => {
+      if (!element || typeof element !== "object") return element;
+      if (element.type === "group" && Array.isArray(element.children)) {
+        return { ...element, children: walk(element.children) };
+      }
+      const out = { ...element };
+      if (out.type === "text" || out.type === "rectangle" || out.type === "circle") {
+        const fallback =
+          out.type === "text"
+            ? roles[textRoleFor(out.role || componentRole)] || roles.textPrimary
+            : componentRole === "cta"
+              ? roles.ctaSurface
+              : componentRole === "decoration"
+                ? roles.accent
+                : roles.accent;
+        out.fill = coerceColor(out.fill, roles, fallback);
+      }
+      if (out.type === "line" || typeof out.stroke === "string") {
+        out.stroke = coerceColor(out.stroke, roles, roles.border || roles.textPrimary);
+      }
+      if (out.gradient && Array.isArray(out.gradient.stops)) {
+        out.gradient = {
+          ...out.gradient,
+          stops: out.gradient.stops.map((stop) => ({
+            ...(stop && typeof stop === "object" ? stop : {}),
+            color: coerceColor(stop?.color, roles, roles.accent),
+          })),
+        };
+      }
+      return out;
+    });
+  return walk(elements);
 }
 
 export async function componentDesign(component, canvas, plan, goal = null, opts = {}) {
@@ -1317,7 +1467,7 @@ export async function componentDesign(component, canvas, plan, goal = null, opts
     const elements = mockComponent(component, canvas);
     const check = validateDesign({ canvas, elements });
     if (!check.ok) throw new Error(`Mock component invalid: ${check.errors.slice(0, 2).join("; ")}`);
-    return { elements: finishRegion(check.design.elements, component, plan), source: "mock" };
+    return { elements: finishRegion(check.design.elements, component, plan, goal, rawPrompt), source: "mock" };
   }
   const tStart = Date.now();
   console.log(
@@ -1343,7 +1493,7 @@ export async function componentDesign(component, canvas, plan, goal = null, opts
       text = await fetchAiChat(requestPrompt, {
         schema: COMPONENTS_SCHEMA,
         // Template plans carry a slot-specific example that anchors q8 copy.
-        // A free-form skeleton has no such anchor; the tiny model tends to
+        // Without a template there is no anchor; the tiny model tends to
         // echo the prompt rules there, so that path stays on the fallback.
         name: plan?.template ? "oovi_component" : "oovi_component_free",
         maxTokens: 800,
@@ -1366,8 +1516,16 @@ export async function componentDesign(component, canvas, plan, goal = null, opts
       errors = ["unrecoverable JSON"];
       continue;
     }
-    lastParsed = parsed;
-    const check = validateDesign({ canvas, elements: parsed.elements });
+    // The model sometimes invents an element role ("hidden") or writes a
+    // palette role into that field. Normalise before colour repair so the
+    // owning region's role remains authoritative.
+    const roleFixed = normalizeElementRoles(parsed.elements, component.role);
+    // Colors are the #1 q8 failure: it writes role names ("textPrimary"),
+    // bare hex ("E8F0FF"), empty strings, or prose into `fill`. Repair to the
+    // palette before validation so a color typo cannot discard a good region.
+    const prepared = repairElementColors(roleFixed, component.role, palette);
+    lastParsed = { ...parsed, elements: prepared };
+    const check = validateDesign({ canvas, elements: prepared });
     if (check.ok) {
       // The model sometimes draws a sibling region (usually the CTA) inside
       // this one. Those elements are valid on their own, so validation passes;
@@ -1398,7 +1556,7 @@ export async function componentDesign(component, canvas, plan, goal = null, opts
               },
             ];
       }
-      const finished = finishRegion(usable, component, plan);
+      const finished = finishRegion(usable, component, plan, goal, rawPrompt);
       console.log(
         `[ai] component ok ${component.id} ${Date.now() - tStart}ms attempts=${attempt} elements=${check.design.elements.length}`,
       );
@@ -1421,7 +1579,7 @@ export async function componentDesign(component, canvas, plan, goal = null, opts
     console.warn(
       `[ai] component salvage ${component.id} ${Date.now() - tStart}ms kept=${salvaged.length}/${lastParsed.elements.length} errors=${errors.slice(0, 2).join("; ")}`,
     );
-    return { elements: finishRegion(salvaged, component, plan), source: "salvage" };
+    return { elements: finishRegion(salvaged, component, plan, goal, rawPrompt), source: "salvage" };
   }
   throw new Error(`Component "${component.id}" failed: ${errors.slice(0, 3).join("; ")}`);
 }

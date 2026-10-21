@@ -12,7 +12,7 @@ Oovi turns natural-language prompts into **fully editable graphic designs**. Not
 - **Home dashboard**: prompt-first hero, size presets, recent designs with thumbnails, rename, duplicate, trash with restore, and one-click open in a new tab.
 - **Full editor**: select, drag, resize, rotate, inline text editing, multi-select, layers panel, context toolbar, and AI-assisted edits.
 - **Reliable undo/redo**: post-state history where the current canvas is always on top; empty floors are no-ops and new edits clear the redo stack.
-- **Imagery, server-side**: AI illustrations via Pollinations and photo search via Unsplash, both proxied through the backend so API keys never reach the browser.
+- **Imagery, query-driven**: AI-filled designs search Unsplash by a query grounded in the brief, and manual template previews use Unsplash placeholders — the generated image always follows the prompt, never a random asset.
 - **Background removal**: one-click subject isolation for local images.
 - **Export**: PNG, JPG, SVG, and PDF.
 - **Autosave + Postgres persistence**: designs save to a local Postgres database with debounced autosave and soft-delete trash.
@@ -48,8 +48,9 @@ Then open `http://localhost:5173`, describe a design on the home page, and it op
 User prompt (as terse as you like)
   > L1 refine goal   (raw request -> explicit brief)      src/ai/layerPrompt.js
   > L2 palette       (one non-fading palette)             src/ai/aiClient.js
-  > L3 skeleton      (header/hero/sections/footer boxes)  src/ai/architectPrompt.js
-  > L4 add text      (per-region DSL  ·  Pollinations images)
+  > L3 template      (choose + tune a library template)   src/ai/aiClient.js
+  > L3c copy deck    (one coherent deck for all regions) src/ai/copyPrompt.js
+  > L4 add content   (per-region DSL · Unsplash search)   src/ai/architectPrompt.js
   > L5 color correct (palette + contrast repair)          src/ai/colorCorrect.js
   > validateDesign() (structural)                         src/design/designValidator.js
   > evaluateDesign() (quality report, non-mutating)       src/ai/quality.js
@@ -69,19 +70,29 @@ A few properties make it survivable on a slow local model:
   the button shows a live token counter.
 - **Refinement is per region.** When the quality gate complains, only the
   regions that own the offending elements are regenerated, each in its own
-  call; a whole replan is reserved for skeleton-level mass overlap.
-- **The skeleton is visible while it fills in.** As soon as L3 lands, the
-  planned regions are drawn on the canvas as a dashed wireframe (role label +
-  box), and each box is retired the moment its real elements arrive. The
-  guides carry no `designId` and are `excludeFromExport`, so they never enter
-  the design, exports, patches, history or the quality gate — they exist only
-  so the canvas is not blank for the minutes L4 takes.
-- **Regions develop element by element.** A component's reply is streamed as
-  token deltas, and each element is parsed out and painted the moment its
-  closing brace arrives — so a region fills in progressively instead of
-  popping in whole after minutes. When the call finishes, the provisional
-  pieces are retracted and the validated set is applied as ONE undo step, so
-  the final design is identical to the non-streamed result.
+  call; a template-level problem re-tunes the SAME template instead of
+  swapping in a different one.
+- **The chosen template is visible while it fills in.** As soon as L3 lands,
+  the template is rendered on the canvas with its sample copy and image
+  placeholders, and each region is replaced by prompt-specific content the
+  moment it is validated. A region that fails keeps the template sample, so
+  the layout never develops holes. Sample ids are prefixed so they cannot
+  collide with a model element that happens to use the same id.
+- **Regions land as validated units.** A component's reply is parsed,
+  color-repaired, validated, and swapped in as one undo step. With a template
+  preview the sample stays visible until that swap, so the canvas never shows
+  duplicate partial text; a failed region simply keeps its sample.
+- **Copy is written once, before the regions are laid out.** L3c receives the
+  refined brief and the tuned template's text regions and returns one copy
+  deck. L4 then receives the approved lines verbatim and concentrates on
+  geometry, colour and fit. If a line is rejected (instruction leakage,
+  meta-copy such as "A festive greeting card…", a keyword-join tagline, an
+  ungrounded "Available now", or the wrong attribution), one focused repair
+  call rewrites only the failing regions. A final deterministic guard uses
+  the approved line, then a greeting/occasion-aware line, so a bad region
+  still cannot leak instruction text into the design. Template type is
+  planned no smaller than 12px, the quality gate's readability floor, so
+  utility labels stay legible at export.
 
 The **Design DSL** is the contract between AI and canvas: a plain-JSON document of canvas + elements:
 
@@ -109,6 +120,7 @@ Copy `.env.example` to `.env`. Keys are **server-only** unless prefixed `VITE_`:
 | Variable | Where | Purpose |
 |---|---|---|
 | `OLLAMA_URL` / `OLLAMA_MODEL` | Server only | On-device provider (Ollama serving the local Gemma model) |
+| `OLLAMA_MODEL_TUNE` / `OLLAMA_MODEL_COPY_DECK` / `OLLAMA_MODEL_COPY` / `OLLAMA_MODEL_FALLBACK` | Server only | Optional per-layer model overrides; blank falls back to `OLLAMA_MODEL` |
 | `POLLINATIONS_KEY` | Server only | AI image generation (`api/asset.js`) |
 | `UNSPLASH_ACCESS_KEY` | Server only | Photo search (`api/photos.js`) |
 | `PGHOST / PGPORT / PGUSER / PGPASSWORD / PGDATABASE` | Server only | Postgres connection (`server/index.js`) |
@@ -138,6 +150,12 @@ Install ([Ollama](https://ollama.com)) and pull the model:
 ollama pull gemma4:e2b
 ```
 
+On CPU-only machines, the narrow layers can run a smaller quantized model
+(for example `OLLAMA_MODEL=oovi-gemma3-270m:q8`) while
+`OLLAMA_MODEL_FALLBACK=gemma4:e2b` handles L1/L2. The copy deck defaults to
+`OLLAMA_MODEL`; set `OLLAMA_MODEL_COPY_DECK` only when testing a stronger
+local model for that one call.
+
 > The route is the only way out of the app: there is no client-side provider
 > switch, so no call can bypass the on-device open-weight model. Changing the
 > model means editing `api/_aiChain.js` (or `OLLAMA_MODEL`).
@@ -146,7 +164,7 @@ ollama pull gemma4:e2b
 
 ```text
 src/
-  ai/            layered pipeline (goal/palette/skeleton/text/color), client, prompts, mocks, quality gate
+  ai/            layered pipeline (goal/palette/template/content/color), client, prompts, mocks, quality gate
   app/           App.js: orchestration (generation, persistence, history, panels)
   components/    Dashboard, TopBar, InsertPanel, AssistantPanel, DebugTabs, …
   design/        DSL schema, validator, canvas presets, design types
@@ -176,4 +194,4 @@ Supporting docs: `AGENT.md` (agent working agreement), `DESIGN.md` (visual ident
 
 ## Tech stack
 
-Vanilla JavaScript, [Fabric.js](https://fabricjs.com/) canvas, Vite build, Node.js stdlib HTTP API, PostgreSQL (`pg`), Pollinations + Unsplash for imagery, `@imgly/background-removal` and jsPDF loaded lazily. No frontend framework, no hidden dependencies.
+Vanilla JavaScript, [Fabric.js](https://fabricjs.com/) canvas, Vite build, Node.js stdlib HTTP API, PostgreSQL (`pg`), Unsplash for imagery, `@imgly/background-removal` and jsPDF loaded lazily. No frontend framework, no hidden dependencies.

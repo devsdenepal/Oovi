@@ -194,14 +194,24 @@ function fontWeight(role) {
  * @param {object} template library or saved template
  * @param {{width:number,height:number}} canvas
  * @param {object} [palette] optional palette, defaults to the template's
+ * @param {object|null} [tuning] optional plan tuning so the sample matches the
+ *   exact variant, density, hidden regions and scale the AI chose
+ * @param {Record<string,string>} [imageQueries] optional prompt-grounded
+ *   Unsplash query per image region, used for the preview placeholder
  * @returns {{ok:true,design:object,palette:object}|{ok:false,reason:string}}
  */
-export function sampleDesignForTemplate(template, canvas, palette = paletteForTemplate(template)) {
+export function sampleDesignForTemplate(
+  template,
+  canvas,
+  palette = paletteForTemplate(template),
+  tuning = null,
+  imageQueries = {},
+) {
   const width = Number(canvas?.width) || 0;
   const height = Number(canvas?.height) || 0;
   if (!template || !(width > 0) || !(height > 0)) return { ok: false, reason: "no template or canvas" };
   const roles = palette?.roles || ensurePaletteRoles(palette);
-  const built = instantiateTemplate(template, null, { width, height });
+  const built = instantiateTemplate(template, tuning, { width, height });
   if (!built.ok) return { ok: false, reason: built.reason || "template could not be instantiated" };
 
   const elements = [];
@@ -209,6 +219,8 @@ export function sampleDesignForTemplate(template, canvas, palette = paletteForTe
     const box = component.box;
     if (!box) continue;
     if (component.kind === "image") {
+      const sampleSrc = template?.sampleImages?.[component.id];
+      const usableSample = typeof sampleSrc === "string" && /^(https?:|data:|\/)/i.test(sampleSrc);
       elements.push({
         id: `${component.id}-img`,
         type: "image",
@@ -217,7 +229,14 @@ export function sampleDesignForTemplate(template, canvas, palette = paletteForTe
         y: box.y,
         width: box.width,
         height: box.height,
-        src: template?.sampleImages?.[component.id] || photoPlaceholder(box.width, box.height, palette, component.describe),
+        src: usableSample
+          ? sampleSrc
+          : photoPlaceholder(
+              box.width,
+              box.height,
+              palette,
+              imageQueries[component.id] || component.describe,
+            ),
       });
       continue;
     }

@@ -1354,7 +1354,7 @@ function tuningEntries(value, valueKeys) {
  * read from the model — only the bounded vocabulary below survives.
  */
 export function sanitizeTuning(raw, template) {
-  const out = { variant: template?.variants?.[0]?.id || "", density: "normal", hide: [], scale: {}, align: {} };
+  const out = { variant: template?.variants?.[0]?.id || "", density: "normal", hide: [], scale: {}, align: {}, images: {} };
   if (!raw || typeof raw !== "object") return out;
   if (template) {
     const wanted = String(raw.variant ?? raw.variantId ?? "");
@@ -1385,6 +1385,15 @@ export function sanitizeTuning(raw, template) {
   for (const [id, value] of tuningEntries(raw.align, ["value", "align"])) {
     if (!byId.has(id)) continue;
     if (["left", "center", "right"].includes(value)) out.align[id] = value;
+  }
+
+  for (const item of Array.isArray(raw.images) ? raw.images : []) {
+    if (!item || typeof item !== "object") continue;
+    const id = String(item.id ?? "");
+    const query = String(item.query ?? "").replace(/\s+/g, " ").trim().slice(0, 80);
+    if (!query) continue;
+    if (byId.get(id)?.kind !== "image") continue;
+    out.images[id] = query;
   }
   return out;
 }
@@ -1432,7 +1441,10 @@ export function instantiateTemplate(templateOrId, rawTuning, canvas) {
     // back onto the scale would make a +12% headline a no-op).
     const baseFont = snapFontSize(sizeToPx(slot.size, height), height);
     const factor = tuning.scale[slot.id] || 1;
-    const fontSize = isText ? Math.max(8, Math.round(baseFont * factor)) : 0;
+    // The quality gate treats <12px as unreadable at export. Do not plan type
+    // below that floor: on a wide 630px canvas the `small` token resolves to
+    // 8px, which makes brand, eyebrow and footer labels disappear in print.
+    const fontSize = isText ? Math.max(12, Math.round(baseFont * factor)) : 0;
     // Text slots keep their box (the template's partition is authoritative)
     // and move their TYPE instead; artwork boxes may grow or shrink.
     let box = {
@@ -1450,6 +1462,7 @@ export function instantiateTemplate(templateOrId, rawTuning, canvas) {
       role: slot.role,
       asset: slot.asset,
       describe: slot.describe,
+      sample: slot.sample || "",
       box,
       fontSize,
       maxChars,

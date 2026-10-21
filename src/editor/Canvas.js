@@ -1144,7 +1144,14 @@ export class CanvasEditor {
         if (isText) obj.set("charSpacing", num(value, obj.charSpacing || 0));
         break;
       case "fill":
-        if (!isLine) obj.set("fill", value);
+        if (!isLine) {
+          obj.set("fill", value);
+          // toDesign() and history read `designFill` (the DSL original), not
+          // the live Fabric paint. Keep them in sync or a contrast fix / user
+          // colour change renders now and silently reverts on reload.
+          obj.designFill = typeof value === "string" ? value : null;
+          obj.designGradient = null;
+        }
         break;
       case "stroke":
         obj.set("stroke", value);

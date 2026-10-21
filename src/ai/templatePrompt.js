@@ -69,6 +69,15 @@ export const TUNING_SCHEMA = {
         additionalProperties: false,
       },
     },
+    images: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: { id: { type: "string" }, query: { type: "string" } },
+        required: ["id", "query"],
+        additionalProperties: false,
+      },
+    },
   },
   required: ["variant", "density", "hide", "scale", "align"],
   additionalProperties: false,
@@ -133,26 +142,73 @@ export function buildTemplateChoicePrompt(goal, palette, canvas, retrieved) {
 }
 
 /**
+ * Per-template tuning schema. Image regions make the `images` array required
+ * (with ids constrained to real image slots) so the tiny model cannot skip the
+ * only prompt-specific part of the answer. Templates without image regions
+ * keep the static schema (which leaves `images` optional).
+ */
+export function tuningSchema(template) {
+  const imageIds = templateSlots(template)
+    .filter((slot) => slot.kind === "image")
+    .map((slot) => slot.id);
+  if (!imageIds.length) return TUNING_SCHEMA;
+  return {
+    ...TUNING_SCHEMA,
+    properties: {
+      ...TUNING_SCHEMA.properties,
+      images: {
+        type: "array",
+        maxItems: imageIds.length,
+        items: {
+          type: "object",
+          properties: {
+            id: { type: "string", enum: imageIds },
+            query: { type: "string" },
+          },
+          required: ["id", "query"],
+          additionalProperties: false,
+        },
+      },
+    },
+    required: [...TUNING_SCHEMA.required, "images"],
+  };
+}
+
+/**
  * Step (b): the bounded knobs for the chosen template. The region list is
  * deliberately short — id, role, and what the region holds.
  */
-export function buildTuningPrompt(template, goal, palette, canvas) {
+export function buildTuningPrompt(template, goal, palette, canvas, correction = "") {
   const variantList = template.variants.map((v) => `- ${v.id}: ${v.label}`).join("\n");
-  const slotList = templateSlots(template)
+  const slots = templateSlots(template);
+  const slotList = slots
     .map((s) => `- ${s.id} (${s.role}${s.optional ? ", optional" : ""}): ${s.describe}`)
     .join("\n");
+  const imageSlots = slots.filter((s) => s.kind === "image");
+  const imageLine = imageSlots.length
+    ? [
+        "Image regions — write one short Unsplash search query per image region, grounded in the brief (the SUBJECT of the picture, not the design style, not the template example):",
+        imageSlots.map((s) => `- ${s.id}: currently "${s.describe}"`).join("\n"),
+        'The "images" array is REQUIRED and must contain one object for every image region above, using that region id.',
+      ].join("\n")
+    : "";
   return [
     TEMPLATE_RULES,
     "",
     `Your task now: tune the chosen template "${template.id}" (${template.blurb}) for this design.`,
     `Variants:\n${variantList}`,
     `Regions:\n${slotList}`,
+    imageLine,
+    correction ? `[Refinement]\nThe first pass had these problems: ${correction}\nKeep this same template — adjust only its variant, density, hide, scale and align knobs.` : "",
     "",
     "[User]",
     `Canvas: ${canvas.width}x${canvas.height} pixels.`,
     paletteLine(palette),
     "The brief:",
     formatGoal(goal),
-    'Return ONLY valid JSON: {"variant":"<id>","density":"normal","hide":[],"scale":[{"id":"<region>","factor":1}],"align":[{"id":"<region>","value":"left"}]}.',
-  ].join("\n");
+    imageSlots.length
+      ? 'Return ONLY valid JSON: {"variant":"<id>","density":"normal","hide":[],"scale":[{"id":"<region>","factor":1}],"align":[{"id":"<region>","value":"left"}],"images":[{"id":"<image region>","query":"2-5 word Unsplash subject"}]}.'
+      : 'Return ONLY valid JSON: {"variant":"<id>","density":"normal","hide":[],"scale":[{"id":"<region>","factor":1}],"align":[{"id":"<region>","value":"left"}]}.',
+  ]
+    .join("\n");
 }

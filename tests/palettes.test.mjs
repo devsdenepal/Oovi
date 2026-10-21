@@ -86,6 +86,8 @@ test("region text is painted onto its semantic role", () => {
   assert.equal(out[2].fill, roles.textPrimary, "an on-palette fill is untouched");
   assert.equal(textRoleFor("cta"), "ctaText");
   assert.equal(textRoleFor("footer"), "textSecondary");
+  assert.equal(textRoleFor("attribution"), "textSecondary");
+  assert.equal(textRoleFor("source"), "textSecondary");
 });
 
 test("every library palette is readable by construction", () => {

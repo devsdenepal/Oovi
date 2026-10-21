@@ -9,12 +9,12 @@
  * role, the theme, and sibling boxes (alignment, no accidental overlap).
  *
  * In the layered pipeline (layerPrompt.js) pass 1 is split into goal,
- * palette and skeleton layers; pass 2 is unchanged except that it also
+ * palette and template layers; pass 2 is unchanged except that it also
  * receives the refined goal as a brief.
  */
 
 import { DESIGN_CORE, formatGoal } from "./layerPrompt";
-import { formatPaletteRoles, textRoleFor } from "../layout/paletteRoles";
+import { formatPaletteRoles, textRoleFor, ensurePaletteRoles } from "../layout/paletteRoles";
 
 export function buildPlanPrompt(userPrompt, canvas) {
   const w = canvas.width;
@@ -81,29 +81,46 @@ export function buildComponentPrompt(component, canvas, plan, goal = null, rawPr
     .filter((c) => c.id !== component.id && c.box)
     .map((c) => `${c.id}(${c.role || "?"}) [${c.box.x},${c.box.y} ${c.box.width}x${c.box.height}]`)
     .join("; ");
+  const regionName = `${component.id || ""} ${component.describe || ""}`.toLowerCase();
+  const isAttribution = /\b(attribution|who said|credit)\b/.test(regionName);
+  const isQuote = /\b(quote|quotation)\b/.test(regionName);
   const roleRule =
     component.role === "headline"
-      ? ` Headline floor: fontSize at least ${Math.max(24, Math.round(canvas.height * 0.06))}px and larger than any other text. Keep it short (at most 6 words) so it fits on one line at the planned size.`
+      ? ` Headline floor: fontSize at least ${Math.max(24, Math.round(canvas.height * 0.06))}px and larger than any other text. Use the approved copy or the message itself; never describe the design. Keep it short (at most 6 words) so it fits on one line at the planned size.`
       : component.role === "details"
-        ? " Details floor: every text at least 16px. Use the exact date, time and venue from the original request — never a template example."
+        ? " Details floor: every text at least 16px. Use the approved copy or the exact date, time, venue and link from the original request — never a template example or a description of the design."
         : component.role === "footer"
-          ? " Footer: use the booking/registration link, price and organiser from the request. Do not repeat the venue already shown in details."
+          ? " Footer: use the approved copy or a real link, date, organiser or greeting. Do not claim availability unless the brief says so; do not repeat the venue already shown in details."
           : component.role === "tagline"
-            ? " Tagline: one short supporting line (audience, price or what is included), not a repeat of the headline."
+            ? isAttribution
+              ? " Attribution: name the person or organisation this is from. Never an audience, language, date or keyword label."
+              : isQuote
+                ? " Quote line: the message itself, never a description of the design."
+                : " Tagline: one short supporting line from the approved copy; never a keyword list."
             : component.role === "header"
-              ? " Header is a kicker: single line, small (at most 4% of canvas height)."
+              ? " Header is a kicker: brand, organiser or event label, single line, small (at most 4% of canvas height)."
               : "";
+  const approvedCopy = (Array.isArray(component.copy) ? component.copy : [])
+    .map((line) => String(line ?? "").replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+  const approvedBlock = approvedCopy.length
+    ? [
+        "Approved copy — use these exact lines, in order; do not rewrite, shorten, merge or add copy:",
+        ...approvedCopy.map((line, index) => `${index + 1}. ${line}`),
+      ].join("\n")
+    : "";
   // Colour is a ROLE decision, not a hex decision. The prompt names the role
-  // this region paints with, so L5 corrects mistakes instead of inventing a
-  // scheme after the fact.
+  // this region paints with AND its literal hex: q8 otherwise writes the role
+  // name into `fill` ("textPrimary") or drops the leading "#".
+  const roles = ensurePaletteRoles(palette);
   const colourRole =
     component.role === "decoration"
-      ? "accent (shapes, rules and small marks only — never text)"
+      ? `accent (${roles.accent}) — shapes, rules and small marks only, never text`
       : component.role === "cta"
-        ? "ctaText on a ctaSurface block"
+        ? `ctaText (${roles.ctaText}) on a ctaSurface block (${roles.ctaSurface})`
         : textRoleFor(component.role) === "textSecondary"
-          ? "textSecondary for supporting copy, textPrimary for any heading inside it"
-          : "textPrimary";
+          ? `textSecondary (${roles.textSecondary}) for supporting copy, textPrimary (${roles.textPrimary}) for any heading inside it`
+          : `textPrimary (${roles.textPrimary})`;
   const rolesLine = palette?.roles
     ? `Palette roles — ${formatPaletteRoles(palette.roles)}.`
     : `Palette: background ${palette.background}, ink ${palette.ink}, accent ${palette.accent}.`;
@@ -149,6 +166,7 @@ export function buildComponentPrompt(component, canvas, plan, goal = null, rawPr
     "- Match the box: a tall box wants larger type and more grouped rows; a thin bar wants a single line.",
     "- Give every element an id prefixed with the region id.",
     "- Paint with the named palette roles only. Never invent a hue; the palette is a system, not a suggestion.",
+    `- "fill" and "stroke" MUST be literal hex strings from the palette (for example "${roles.textPrimary}"), never a role name, a bare hex without "#", or prose.`,
     'Return ONLY valid JSON: {"elements":[...]}.',
     "",
     "[User]",
@@ -159,6 +177,7 @@ export function buildComponentPrompt(component, canvas, plan, goal = null, rawPr
       : "",
     "Treat every brief line as a requirement, never as copy. Do not print requirement labels, design rules, or template examples. Use only facts stated in the brief or original request; do not invent dates, prices, names or venues.",
     `Region "${component.id}" (role ${component.role || "body"}): ${component.describe}.${roleRule}`,
+    approvedBlock,
     `Reserved box: x=${b.x} y=${b.y} width=${b.width} height=${b.height} — this is the whole region; keep every element inside it.`,
     component.fontSize
       ? `Type: this region's main text is ${component.fontSize}px${component.align ? `, aligned ${component.align}` : ""} (the template fixed the box, so keep the type at this size).`

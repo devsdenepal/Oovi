@@ -7,8 +7,8 @@
  *
  *   L1 goal      raw prompt            -> a precise, expanded design goal
  *   L2 palette   goal                  -> {background, ink, accent, style}
- *   L3 skeleton  goal + palette        -> header/hero/sections/footer boxes
- *   L4 text      one skeleton region   -> DSL elements (architectPrompt.js)
+ *   L3 template  goal + palette        -> chosen template's regions (templatePrompt.js)
+ *   L4 text      one template region   -> DSL elements (architectPrompt.js)
  *   L5 color     rendered design       -> palette + contrast corrections
  *
  * Each layer receives only what it needs, so no single call has to be clever
@@ -52,50 +52,16 @@ export const PALETTE_SCHEMA = {
   additionalProperties: false,
 };
 
-export const SKELETON_SCHEMA = {
-  type: "object",
-  properties: {
-    components: {
-      type: "array",
-      items: {
-        type: "object",
-        properties: {
-          id: { type: "string" },
-          kind: { type: "string", enum: ["dsl", "image"] },
-          role: {
-            type: "string",
-            enum: ["header", "headline", "hero", "tagline", "details", "sections", "audience", "footer", "decoration"],
-          },
-          describe: { type: "string" },
-          asset: { type: "string", enum: ["icon", "logo", "illustration", "photo", "none"] },
-          box: {
-            type: "object",
-            properties: {
-              x: { type: "number" }, y: { type: "number" },
-              width: { type: "number" }, height: { type: "number" },
-            },
-            required: ["x", "y", "width", "height"],
-            additionalProperties: false,
-          },
-        },
-        required: ["id", "kind", "role", "describe", "asset", "box"],
-        additionalProperties: false,
-      },
-    },
-  },
-  required: ["components"],
-  additionalProperties: false,
-};
-
 /**
  * The SHARED STATIC PREFIX.
  *
  * Prefill is the bottleneck on this machine (~10 tok/s measured), so a
  * 3.8k-token prompt costs ~6 minutes before a single token is generated.
  * Ollama reuses the KV cache for the longest common prefix across calls, so
- * every layer — L1 goal, L2 palette, L3 skeleton, L4 region — starts with
+ * every layer that uses DESIGN_CORE — L1 goal and L4 region — starts with
  * these exact bytes: the first call pays for them, every later call gets them
- * from cache. Two rules keep that true:
+ * from cache. (L2 palette and L3 template prompts deliberately use their own
+ * short prefixes.) Two rules keep that true:
  *   1. Nothing variable lives here. No canvas size, palette, theme, ids or
  *      counters — those all go in the layer's [User] turn, which comes last.
  *   2. Every layer's system message must BEGIN with this string verbatim.
@@ -121,8 +87,7 @@ export const DESIGN_CORE = [
   "Optional properties (only when the theme calls for them):",
   '- gradient {type:"linear"|"radial", stops:[{offset, color}]}; stroke, strokeWidth (contrasting outline); angle (-8 to 8, stickers only); fontFamily, textAlign, lineHeight, charSpacing, cornerRadius, opacity.',
   "",
-  "One compact finished example (a headline block):",
-  '{"elements":[{"id":"headline-title","type":"text","content":"HACKTOBERFEST 2026","x":48,"y":120,"width":640,"fontSize":72,"fontWeight":700,"fill":"#FFFFFF"},{"id":"headline-rule","type":"rectangle","x":48,"y":216,"width":220,"height":8,"fill":"#FFC400"}]}',
+  "Every content string must come from the brief or the original request. There is no worked copy example on purpose: this model copies examples verbatim instead of using them as shape guidance.",
   "",
   "Answer with ONE JSON object and nothing else: no Markdown, no fences, no commentary.",
 ].join("\n");
@@ -207,35 +172,7 @@ export function buildPalettePrompt(goal, canvas) {
 }
 
 /**
- * L3 — Raw layout skeleton. Boxes, roles and what each region will HOLD —
- * no final copy (that is L4). This is the structural spine of the design.
- * The prose checklist that used to live here is folded into one roles line
- * plus the example, so the layer-specific part stays a few hundred tokens and
- * the shared prefix above it stays cacheable.
+ * L3 is template-only (see templatePrompt.js). The free-form skeleton prompt
+ * was removed so the model can never invent its own boxes: it must pick a
+ * template and fill that template's regions.
  */
-export function buildSkeletonPrompt(goal, palette, canvas) {
-  const w = canvas.width;
-  const h = canvas.height;
-  return [
-    DESIGN_CORE,
-    "",
-    "Your task now: produce the SKELETON of ONE design — its ordered regions, each with a reserved box. Do NOT write the final copy; say what each region will hold and let the next pass fill it.",
-    "Skeleton rules:",
-    "- 6 to 12 regions. Together their boxes must cover most of the canvas — a half-empty canvas is a failed skeleton.",
-    "- Order: header at the top, footer at the bottom, headline above the tagline, sections in the middle. Align to shared left/right edges.",
-    "- Boxes must NOT overlap (decoration excepted, and it sits behind).",
-    "- Headline is the largest region and at least 6% of canvas height. Header stays a small kicker.",
-    "- ONE hero region only, at least 35% of canvas width, focal mass near the third-lines, never a thumbnail.",
-    "- Roles: header (identity/kicker), headline (dominant title), hero (one focal image), tagline (supporting line), details (date/time/venue), sections (activities/benefits, grouped), audience, footer (organizer/partners/registration), decoration (theme shapes, behind, may bleed). Include only the regions the brief has content for — never pad.",
-    '- "describe" is the content requirement for that region, NOT the finished string, e.g. "event title and year, huge, two lines".',
-    '- kind "dsl" for text, rectangles, circles and lines; kind "image" ONLY for icons, logos, illustrations or photos (at most 2). For "dsl" set asset "none"; for "image" set asset icon|logo|illustration|photo.',
-    "Example:",
-    '{"components":[{"id":"headline","kind":"dsl","role":"headline","describe":"event title and year, huge, two lines","asset":"none","box":{"x":48,"y":120,"width":640,"height":180}},{"id":"hero-art","kind":"image","role":"hero","asset":"illustration","describe":"focal artwork for the theme","box":{"x":730,"y":300,"width":400,"height":400}}]}',
-    "",
-    "[User]",
-    `Canvas: ${w}x${h} pixels. All boxes must fit inside it (x>=0, y>=0, x+width<=${w}, y+height<=${h}).`,
-    `Palette: background ${palette.background}, ink ${palette.ink}, accent ${palette.accent}. Theme: ${palette.style || "clean modern"}.`,
-    "The brief:",
-    formatGoal(goal),
-  ].join("\n");
-}

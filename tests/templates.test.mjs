@@ -22,6 +22,7 @@ import {
 } from "../src/layout/templates";
 import { retrieveTemplates, templatePool, DEFAULT_COVERAGE_THRESHOLD } from "../src/layout/retrieve";
 import { templateFromDesign, templateFromRecord, templateToRecord, validateTemplate } from "../src/layout/saveAsTemplate";
+import { sampleDesignForTemplate } from "../src/layout/templateSample";
 import { elementBoxes, evaluateDesign } from "../src/ai/quality";
 import { salvageElements } from "../src/ai/aiClient";
 import { fitElementsToBox, fitRegion } from "../src/layout/regionFit";
@@ -227,6 +228,42 @@ test("every template/variant/preset passes the real quality gate", () => {
   }
 });
 
+test("template text is planned at a readable size", () => {
+  for (const preset of DESIGN_PRESETS) {
+    const canvas = { width: preset.width, height: preset.height };
+    const size = sizeClassOf(canvas);
+    for (const { template, variant } of allTemplateVariants()) {
+      if (!template.sizes.includes(size)) continue;
+      const built = instantiateTemplate(template, { variant: variant.id }, canvas);
+      assert.equal(built.ok, true);
+      for (const component of built.components) {
+        if (component.kind === "image" || component.role === "decoration") continue;
+        assert.ok(
+          component.fontSize >= 12,
+          `${template.id}/${variant.id} @${preset.id}: ${component.id} is ${component.fontSize}px`,
+        );
+      }
+    }
+  }
+});
+
+test("template samples follow the plan tuning and keep image queries", () => {
+  const template = TEMPLATES.find((t) => t.id === "dark-cinematic");
+  const sample = sampleDesignForTemplate(
+    template,
+    { width: 1200, height: 630 },
+    { background: "#0A1020", ink: "#E8F0FF", accent: "#3D7BFF" },
+    { variant: "cinematic-center", density: "normal", hide: [], scale: {}, align: {} },
+    { "hero-artwork": "AI assistant automation" },
+  );
+  assert.ok(sample.ok, sample.reason);
+  const ids = sample.design.elements.map((element) => element.id);
+  assert.ok(ids.includes("hero-artwork-img"));
+  assert.ok(ids.includes("headline-text"));
+  const image = sample.design.elements.find((element) => element.id === "hero-artwork-img");
+  assert.match(image.src, /AI%20assistant%20automation/);
+});
+
 test("tuning stays inside the bounded vocabulary", () => {
   const template = TEMPLATES.find((t) => t.id === "hero-split");
   const sanitized = sanitizeTuning(
@@ -236,6 +273,10 @@ test("tuning stays inside the bounded vocabulary", () => {
       hide: ["header-branding", "headline-main", "not-a-slot"],
       scale: [{ id: "headline-main", factor: 9 }, { id: "ghost", factor: 1.2 }],
       align: [{ id: "headline-main", value: "bogus" }, { id: "tagline-line", value: "right" }],
+      images: [
+        { id: "hero-visual", query: "  team   workshop  " },
+        { id: "headline-main", query: "not-an-image-slot" },
+      ],
       box: { x: 0, y: 0, width: 1, height: 1 },
     },
     template,
@@ -250,6 +291,9 @@ test("tuning stays inside the bounded vocabulary", () => {
   // invalid alignment dropped, valid one kept.
   assert.equal(sanitized.align["headline-main"], undefined);
   assert.equal(sanitized.align["tagline-line"], "right");
+  // image queries are normalized and only accepted for image slots.
+  assert.equal(sanitized.images["hero-visual"], "team workshop");
+  assert.equal(sanitized.images["headline-main"], undefined);
   // boxes are never read from the model.
   assert.equal(sanitized.box, undefined);
 });

@@ -113,7 +113,7 @@ const DESIGN_TYPE_HINTS = {
  */
 const COMPOSITION_HINTS = {
   "hero-left": ["hero-split", "feature-cta", "sidebar-rail", "statement-split", "map-card", "three-band"],
-  "hero-right": ["hero-split", "feature-cta", "sidebar-rail", "statement-split", "map-card", "three-band"],
+  "hero-right": ["hero-split", "feature-cta", "sidebar-rail", "statement-split", "map-card", "three-band", "neo-futurist-launch"],
   centered: ["centered-poster", "poster-rail", "statement-quote", "quote-card", "certificate", "banner-strip"],
   split: ["hero-split", "editorial-columns", "comparison", "event-listing", "sidebar-rail", "newsletter"],
   stacked: ["hero-top", "story-stack", "poster-rail", "social-post", "magazine-cover", "product-shelf"],

@@ -1,14 +1,15 @@
 import {
   generateDesign,
   generatePatch,
-  planSkeleton,
   planTemplate,
   planPalette,
+  planCopyDeck,
   refineGoal,
   componentDesign,
 } from "../ai/aiClient";
 import { evaluateDesign } from "../ai/quality";
 import { correctColors } from "../ai/colorCorrect";
+import { fallbackCopy } from "../ai/copySanitize";
 import { searchPhotos, triggerDownload } from "../ai/unsplash";
 import { isMockEnabled, mockAssetDataUrl } from "../ai/mockProvider";
 import { validateDesign } from "../design/designValidator";
@@ -62,6 +63,23 @@ function probeImage(src, timeoutMs = 30000) {
       reject(new Error("image probe failed"));
     };
     img.src = src;
+  });
+}
+
+/**
+ * Fetch a remote image as a data URL. Data URLs never taint the Fabric
+ * canvas, so PNG export keeps working after an Unsplash image lands.
+ */
+async function fetchImageAsDataUrl(url, timeoutMs = 60000) {
+  const res = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) });
+  if (!res.ok) throw new Error(`image ${res.status}`);
+  const blob = await res.blob();
+  if (!blob.type.startsWith("image/")) throw new Error("response is not an image");
+  return await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(new Error("image read failed"));
+    reader.readAsDataURL(blob);
   });
 }
 
@@ -372,9 +390,10 @@ export class App {
   }
 
   /**
-   * Architected path: plan once, then stream components one by one —
-   * DSL text/shapes through the existing pipeline, icons/logos/photos
-   * through Pollinations. Each component is its own undo entry.
+   * Architected path: choose a template, show its regions immediately, then
+   * fill them one by one — DSL text/shapes through the existing pipeline,
+   * photos through a prompt-grounded Unsplash search. Each component is its
+   * own undo entry.
    */
   async onGenerateArchitected(prompt) {
     const canvas = { width: this.designPreset.width, height: this.designPreset.height };
@@ -389,10 +408,10 @@ export class App {
       if (chunks) status(`${label}: ${chunks} tok · ${secs}s…`);
     };
     try {
-      // Layered cascade (raw -> best), so a terse request still lands a
-      // complete design: L1 redefine the goal, L2 choose the palette,
-      // L3 lay out the skeleton. L4 (add text) is the component build below;
-      // L5 (color correction) runs after the build.
+      // Template-only cascade: L1 refines the goal, L2 chooses the palette,
+      // L3 chooses a template (retrieval + small tuning call) and exposes its
+      // regions immediately, L4 fills those regions one by one, L5 corrects
+      // colour. There is no free-form skeleton fallback.
       status("1/5 Refining the goal…");
       let goal;
       let plan;
@@ -405,33 +424,90 @@ export class App {
           `Palette: ${palette.background} / ${palette.ink} / ${palette.accent} — ${palette.style}` +
             `${palette.source === "library" ? " (library)" : ""}.`,
         );
-        status("3/5 Choosing the layout…");
-        // Phase 2D: a template's boxes cannot collide, so L3 is normally a
-        // keyword pre-filter plus a small tuning call instead of a five-minute
-        // free-form skeleton. The full L3 stays as the fallback whenever no
-        // template fits this canvas or the instantiated plan fails its check.
-        plan = await planTemplate(goal, palette, canvas, live("3/5 layout"), { rawPrompt: prompt });
-        if (plan) {
-          this.assistant.pushAssistant(
-            `Layout: template "${plan.template}" (${plan.tuning.variant}, ${plan.tuning.density}).`,
-          );
-        } else {
-          status("3/5 Laying out the skeleton…");
-          plan = await planSkeleton(goal, palette, canvas, "", live("3/5 skeleton"));
-        }
+        status("3/5 Choosing a template…");
+        plan = await planTemplate(goal, palette, canvas, live("3/5 template"), { rawPrompt: prompt });
+        this.assistant.pushAssistant(
+          `Template: "${plan.template}" (${plan.tuning.variant}, ${plan.tuning.density}) — ${plan.components.length} regions.`,
+        );
       } catch (error) {
-        console.warn("[architect] planning failed, falling back to direct:", error.message);
-        this.assistant.pushAssistant(`Planning failed (${error.message}) — falling back to one-shot generation.`);
+        console.error("[architect] template planning failed:", error);
+        this.assistant.pushAssistant(`Generation failed (${error.message}).`, "error");
+        this.generateButton.setError(`Generation failed: ${error.message}`);
         this.state.generating = false;
-        return await this.onGenerateDirect(prompt);
+        this.editor.clearSkeletonGuides?.();
+        return;
       }
 
-      this.editor.loadDesign({ canvas: { ...canvas, background: plan.palette.background }, elements: [] });
-      // Show the planned regions as a dashed wireframe right away, so the
-      // canvas reflects the skeleton during the long per-region generation
-      // instead of sitting blank. Each box is replaced by real content as its
-      // component lands.
-      this.editor.showSkeletonGuides?.(plan.components);
+      // Show the chosen template immediately, with its sample content, so the
+      // user sees the layout before the slow per-region AI pass starts. Each
+      // region is replaced by prompt-specific content as it lands; a region
+      // that fails keeps the template sample instead of leaving a hole.
+      const placeholders = new Map();
+      const showTemplateSample = (activePlan) => {
+        placeholders.clear();
+        const imageQueries = Object.fromEntries(
+          activePlan.components
+            .filter((component) => component.kind === "image" && component.imageQuery)
+            .map((component) => [component.id, component.imageQuery]),
+        );
+        const sample = activePlan.templateRef
+          ? sampleDesignForTemplate(
+              activePlan.templateRef,
+              canvas,
+              activePlan.palette,
+              activePlan.tuning,
+              imageQueries,
+            )
+          : { ok: false };
+        if (!sample.ok) {
+          this.editor.loadDesign({ canvas: { ...canvas, background: activePlan.palette.background }, elements: [] });
+          return false;
+        }
+        // Template samples are temporary stand-ins, not AI output. Prefix
+        // their ids so a model element that happens to use the same id
+        // ("subtitle-text", "headline-bar") cannot collide with the sample:
+        // Fabric allows duplicate ids, and dropping one would leave the
+        // other (previously the sample survived while the AI content was
+        // removed). The prefix also makes leftovers obvious in the layers.
+        const SAMPLE_PREFIX = "tpl-";
+        for (const element of sample.design.elements) {
+          if (element && typeof element.id === "string") element.id = `${SAMPLE_PREFIX}${element.id}`;
+        }
+        this.editor.loadDesign(sample.design);
+        for (const component of activePlan.components) {
+          const own = new Set([
+            `${SAMPLE_PREFIX}${component.id}-text`,
+            `${SAMPLE_PREFIX}${component.id}-img`,
+            `${SAMPLE_PREFIX}${component.id}-bar`,
+          ]);
+          placeholders.set(
+            component.id,
+            sample.design.elements.filter((element) => own.has(String(element.id))).map((element) => element.id),
+          );
+        }
+        return true;
+      };
+      // Retire a region's template samples. Shared by the build pass and the
+      // per-region refinement, so a failed region that succeeds on refine
+      // cannot end up with both the sample and the AI content.
+      const dropPlaceholders = (id) => {
+        const ids = placeholders.get(id) || [];
+        if (!ids.length) return;
+        placeholders.set(id, []);
+        try {
+          this.editor.applyPatchOps(ids.map((x) => ({ op: "remove", id: x })), {
+            history: false,
+            quiet: true,
+          });
+        } catch {
+          // already gone
+        }
+      };
+      if (showTemplateSample(plan)) {
+        this.assistant.pushAssistant(
+          `Showing template "${plan.template}" — ${plan.components.length} regions. Replacing each region with content from your prompt…`,
+        );
+      }
       this._updateCanvasMeta(canvas);
       this._renderJsonPreview();
       this.scheduleSave();
@@ -440,6 +516,44 @@ export class App {
         this.assistant.pushAssistant(`Plan notes: ${plan.warnings.join("; ")}`);
       }
       this.assistant.pushAssistant(`Plan: ${plan.components.length} components (${plan.source}).`);
+
+      // L3c: write the whole copy deck while the template sample is already
+      // visible. L4 then lays out approved lines instead of inventing copy per
+      // region. The preview and the template choice are untouched by this call.
+      status("3/5 Writing the copy…");
+      const copyDeck = await planCopyDeck(plan.components, goal, canvas, prompt, live("3/5 copy"));
+      plan = {
+        ...plan,
+        components: plan.components.map((component) => {
+          const isText = component.kind !== "image" && component.role !== "decoration";
+          const copy = Array.isArray(copyDeck.copies?.[component.id]) ? copyDeck.copies[component.id] : [];
+          if (copy.length) return { ...component, copy, copySource: "deck" };
+          if (!isText) return component;
+          // Last resort: a grounded line from the brief so L4 still receives
+          // copy to lay out instead of inventing (and duplicating) its own.
+          return {
+            ...component,
+            copy: [fallbackCopy(component, goal, prompt)],
+            copySource: "fallback",
+          };
+        }),
+        copySource: copyDeck.source,
+        copyStats: copyDeck.stats,
+      };
+      const textRegions = plan.components.filter(
+        (component) => component.kind !== "image" && component.role !== "decoration",
+      );
+      const copiedRegions = textRegions.filter((component) => component.copySource === "deck");
+      console.log(
+        `[build] copy deck ${copyDeck.source} ${copiedRegions.length}/${textRegions.length} text regions`,
+      );
+      if (copyDeck.source !== "mock" && copyDeck.source !== "none") {
+        this.assistant.pushAssistant(
+          copyDeck.source === "fallback"
+            ? "Copy deck unavailable — regions will use grounded fallback copy."
+            : `Copy deck: ${copiedRegions.length}/${textRegions.length} text regions (${copyDeck.source}).`,
+        );
+      }
 
       let done = 0;
       let failed = 0;
@@ -546,6 +660,9 @@ export class App {
             // a malformed partial must never break the build
           }
         };
+        // Template sample elements for one region stay on the canvas until
+        // the region's validated content is ready; if generation fails, they
+        // are the fallback so the template never loses a region.
         status(`4/5 Adding text — ${n} regions (serially, on-device model)…`);
         const applyOne = async (q, settled) => {
           const { component, i } = queue[q];
@@ -560,8 +677,10 @@ export class App {
             note(component.id, 0);
             retractStreamed(component.id);
             console.warn(`[build] place ${component.id} FAILED: ${settled && settled.error ? settled.error.message : "unknown error"}`);
+            const kept = (placeholders.get(component.id) || []).length > 0;
             this.assistant.pushAssistant(
-              `${component.id} skipped: ${settled && settled.error ? settled.error.message : "unknown error"}`,
+              `${component.id} skipped: ${settled && settled.error ? settled.error.message : "unknown error"}` +
+                `${kept ? " — kept the template sample." : ""}`,
               "error",
             );
           } else if (settled.value.kind === "image") {
@@ -572,6 +691,7 @@ export class App {
             } else {
               try {
                 this.editor.addImageElement(fetched.src, fetched.w, fetched.h, component.box, at);
+                dropPlaceholders(component.id);
                 out.appliedTotal += 1;
                 out.renderedIds.push(component.id);
                 placed.push({ i, count: 1 });
@@ -600,6 +720,7 @@ export class App {
               const res = this.editor.applyPatchOps(
                 settled.value.elements.map((element, k) => ({ op: "add", element, at: at + k })),
               );
+              dropPlaceholders(component.id);
               out.appliedTotal += res.applied.length;
               out.renderedIds.push(component.id);
               placed.push({ i, count: res.applied.length });
@@ -626,6 +747,10 @@ export class App {
                 console.log(`[build] fetched ${component.id} ${Date.now() - t}ms ${fetched ? fetched.note || "ok" : "FAILED"}`);
                 return { kind: "image", fetched };
               }
+              // Keep the template sample in place while the model works: a
+              // partial token stream would paint on top of it and look like a
+              // duplicate region. The validated set swaps in atomically.
+              const hasSample = (placeholders.get(component.id) || []).length > 0;
               const { elements } = await componentDesign(component, canvas, activePlan, goal, {
                 rawPrompt: prompt,
                 onProgress: (chunks, secs) => {
@@ -633,8 +758,8 @@ export class App {
                   live(`4/5 ${component.id}`)(chunks, secs);
                   if (painted) status(`4/5 ${component.id}: ${painted} element(s) placed · ${chunks} tok · ${secs}s…`);
                 },
-                onStreamStart: () => retractStreamed(component.id),
-                onElement: (element) => streamElement(i, component.id, element),
+                onStreamStart: hasSample ? undefined : () => retractStreamed(component.id),
+                onElement: hasSample ? undefined : (element) => streamElement(i, component.id, element),
               });
               console.log(`[build] ready ${component.id} ${Date.now() - t}ms elements=${elements.length}`);
               return { kind: "dsl", elements };
@@ -706,17 +831,18 @@ export class App {
       let report = evaluateDesign(this.editor.toDesign(), evalOpts(plan, result.renderedIds));
       console.log(`[build] pass complete: ${result.done - result.failed}/${result.done} components, ${result.appliedTotal} pieces, quality=${report.score}`);
 
-      // Refinement is PER REGION, not a whole replan: complaints map back to
+      // Refinement is PER REGION, not a whole rebuild: complaints map back to
       // the regions that own the offending elements, and only those are
-      // regenerated — each in its own call. A region fix cannot repair a
-      // skeleton that stacks sections on top of each other (mass overlap), so
-      // that — and complaints with no owning region at all — still replan once.
+      // regenerated — each in its own call, atomically. A region fix cannot
+      // repair a template whose regions stack on top of each other (mass
+      // overlap), so that — and complaints with no owning region at all —
+      // re-tunes the SAME template instead of swapping in a different one.
       const overlapErrors = report.issues.filter((i) => i.severity === "error" && i.code === "overlap").length;
       const crowded = overlapErrors >= 5;
       const failing = crowded ? new Map() : flagRegions(report, plan);
       const hasErrors = report.issues.some((i) => i.severity === "error");
 
-      // A small headline is a copy/fit problem, not a skeleton problem.
+      // A small headline is a copy/fit problem, not a layout problem.
       // Replanning the whole canvas for it sends a template build down the
       // slow free-form path (and usually produces a worse layout). Route the
       // complaint to the headline region and regenerate just that box.
@@ -733,28 +859,55 @@ export class App {
       }
 
       const replanOnce = async (why) => {
-        console.warn(`[build] replanning once: ${why}`);
-        this.assistant.pushAssistant(`${why} Retrying the plan once…`);
-        status("3/5 Re-laying out with corrections…");
+        console.warn(`[build] refining template in place: ${why}`);
+        this.assistant.pushAssistant(`${why} Refining the same template instead of choosing a new one…`);
+        status("3/5 Refining the template…");
         try {
-          const plan2 = await planSkeleton(
-            goal,
-            plan.palette,
-            canvas,
-            `Your previous skeleton failed quality checks: ${topDefects(report)}. Fix every defect above; keep the rest of the brief.`,
-            live("3/5 re-skeleton"),
+          const copies = Object.fromEntries(
+            plan.components
+              .filter((component) => Array.isArray(component.copy) && component.copy.length)
+              .map((component) => [component.id, component.copy]),
           );
-          this.editor.loadDesign({ canvas: { ...canvas, background: plan2.palette.background }, elements: [] });
-          this.editor.showSkeletonGuides?.(plan2.components);
-          if (plan2.warnings.length) {
-            this.assistant.pushAssistant(`Replan notes: ${plan2.warnings.join("; ")}`);
+          const plan2 = await planTemplate(goal, plan.palette, canvas, live("3/5 refine template"), {
+            rawPrompt: prompt,
+            template: plan.template,
+            correction: why,
+          });
+          plan2.components = plan2.components.map((component) => {
+            if (copies[component.id]) {
+              return { ...component, copy: copies[component.id], copySource: "reuse" };
+            }
+            const isText = component.kind !== "image" && component.role !== "decoration";
+            if (!isText) return component;
+            return {
+              ...component,
+              copy: [fallbackCopy(component, goal, prompt)],
+              copySource: "fallback",
+            };
+          });
+          plan2.copySource = "reuse";
+          const knobs = (tuning) =>
+            JSON.stringify({
+              variant: tuning?.variant,
+              density: tuning?.density,
+              hide: tuning?.hide || [],
+              scale: tuning?.scale || {},
+              align: tuning?.align || {},
+            });
+          if (knobs(plan2.tuning) === knobs(plan.tuning)) {
+            this.assistant.pushAssistant("The template tuning did not change — keeping the first pass.");
+            return;
           }
-          this.assistant.pushAssistant(`Replan: ${plan2.components.length} components (${plan2.source}).`);
+          if (showTemplateSample(plan2)) {
+            this.assistant.pushAssistant(
+              `Refined template: "${plan2.template}" (${plan2.tuning.variant}, ${plan2.tuning.density}) — ${plan2.components.length} regions.`,
+            );
+          }
           plan = plan2;
           result = await buildAll(plan2);
           report = reEval(plan2);
         } catch (error) {
-          this.assistant.pushAssistant(`Replan failed (${error.message}) — keeping the first pass.`, "error");
+          this.assistant.pushAssistant(`Template refinement failed (${error.message}) — keeping the first pass.`, "error");
         }
       };
 
@@ -763,64 +916,60 @@ export class App {
           `Sections overlap (${overlapErrors} collisions) — stagger boxes vertically with breathing room, keep bars behind their own text.`,
         );
       } else if (failing.size) {
-        const ids = [...failing.keys()].slice(0, 4);
+        const ids = [...failing.keys()].slice(0, 2);
         console.warn(`[build] per-region refinement: ${ids.join(", ")}`);
-        this.assistant.pushAssistant(`Refining ${ids.length} region(s) individually: ${ids.join(", ")}.`);
-        for (const cid of ids) {
+        this.assistant.pushAssistant(
+          `Refining ${ids.length} template region(s) in place: ${ids.join(", ")} — the layout stays the same.`,
+        );
+        for (const [index, cid] of ids.entries()) {
           const component = plan.components.find((c) => c.id === cid);
           if (!component || component.kind !== "dsl") continue;
-          status(`Refining ${cid}…`);
+          status(`Refining template region ${index + 1}/${ids.length}: ${cid}…`);
+          // Generate first, swap second. The previous version removed the
+          // region before asking the model, so a failed refine left a hole in
+          // the template. Keep the old elements until the replacement is valid.
           const owned = result.regions.get(cid)?.ids || [];
-          if (owned.length) {
-            try {
-              this.editor.applyPatchOps(owned.map((id) => ({ op: "remove", id })));
-            } catch {
-              // element already gone; regenerate regardless
-            }
-          }
-          // Elements painted from this refinement's own token stream, retracted
-          // before the validated set lands (same policy as the build loop).
-          const liveIds = [];
-          const retractLive = () => {
-            if (!liveIds.length) return;
-            const ids = liveIds.splice(0);
-            try {
-              this.editor.applyPatchOps(ids.map((id) => ({ op: "remove", id })), { history: false, quiet: true });
-            } catch {
-              // already gone
-            }
-          };
+          const before = owned.length
+            ? this.editor.toDesign().elements.filter((element) => owned.includes(element.id))
+            : [];
           try {
             const { elements } = await componentDesign(component, canvas, plan, goal, {
               rawPrompt: prompt,
               onProgress: live(`Refining ${cid}`),
               correction: `This region was flagged by the quality gate: ${failing.get(cid).join(" ")} Rewrite ONLY this region's elements to fix it. Keep every element inside the reserved box.`,
-              onStreamStart: retractLive,
-              onElement: (element) => {
-                if (!element || typeof element.id !== "string" || liveIds.includes(element.id)) return;
-                liveIds.push(element.id);
-                try {
-                  this.editor.applyPatchOps([{ op: "add", element }], { history: false, quiet: true });
-                } catch {
-                  // a malformed partial must never break the build
-                }
-              },
             });
-            retractLive();
             const at = component.role === "decoration" ? 0 : undefined;
-            const res = this.editor.applyPatchOps(
-              elements.map((element, k) => ({
-                op: "add",
-                element,
-                ...(typeof at === "number" ? { at: at + k } : {}),
-              })),
-            );
+            let res;
+            try {
+              res = this.editor.applyPatchOps([
+                ...owned.map((id) => ({ op: "remove", id })),
+                ...elements.map((element, k) => ({
+                  op: "add",
+                  element,
+                  ...(typeof at === "number" ? { at: at + k } : {}),
+                })),
+              ]);
+            } catch (error) {
+              // The swap failed: put the previous region back so the template
+              // never loses a component to a failed refinement.
+              if (before.length) {
+                try {
+                  this.editor.applyPatchOps(
+                    before.map((element) => ({ op: "add", element })),
+                    { history: false, quiet: true },
+                  );
+                } catch {
+                  // best effort
+                }
+              }
+              throw error;
+            }
             result.regions.set(cid, { count: res.applied.length, ids: res.changedIds || [] });
+            dropPlaceholders(cid);
             console.log(`[build] refined ${cid} ${res.applied.length} pieces`);
-            this.assistant.pushAssistant(`+ refined ${cid} (${res.applied.length} pieces)`);
+            this.assistant.pushAssistant(`+ refined template region ${cid} (${res.applied.length} pieces)`);
           } catch (error) {
-            retractLive();
-            this.assistant.pushAssistant(`Refine ${cid} failed: ${error.message}`, "error");
+            this.assistant.pushAssistant(`Refine ${cid} failed: ${error.message} — kept the previous content.`, "error");
           }
         }
         report = reEval(plan);
@@ -901,12 +1050,17 @@ export class App {
           ],
         });
       }
+      const keptSample = plan.components.filter((c) => (placeholders.get(c.id) || []).length > 0).length;
       if (appliedTotal === 0) {
-        const message = `All ${done} components failed — see the assistant log for reasons.`;
+        const message = keptSample
+          ? `Kept the template sample for all ${done} regions — the model could not fill them (see the assistant log).`
+          : `All ${done} components failed — see the assistant log for reasons.`;
         this.generateButton.setError(message);
         notify(message, "error");
       } else {
-        const message = `Built ${done - failed}/${done} components (${appliedTotal} pieces) — every element is editable.`;
+        const message =
+          `Built ${done - failed}/${done} regions (${appliedTotal} pieces)` +
+          `${keptSample ? `; ${keptSample} kept the template sample` : ""} — every element is editable.`;
         this.generateButton.setSuccess(message);
         notify(message, failed > 0 ? "info" : "success");
       }
@@ -918,16 +1072,17 @@ export class App {
       console.error(error);
     } finally {
       // Safety net: however the run ends (error, latency, fallback), no
-      // skeleton wireframe may outlive it.
+      // stale template guide may outlive it.
       this.editor.clearSkeletonGuides?.();
       this.state.generating = false;
     }
   }
 
   /**
-   * Fetch phase of an image component: pure network, no canvas mutation,
-   * so the build loop can run these concurrently. Returns the asset spec
-   * (or null on failure); the caller adds it in plan order.
+   * Fetch phase of an image component. The query comes from the tuning model
+   * (grounded in the brief), falling back to the template slot description.
+   * Pure network, no canvas mutation. Returns the asset spec (or a query
+   * placeholder on failure); the caller adds it in plan order.
    */
   async _fetchImageComponent(component) {
     const box = component.box;
@@ -935,29 +1090,36 @@ export class App {
     if (isMockEnabled()) {
       return { src: mockAssetDataUrl(component.describe, box), w: box.width, h: box.height, note: "mock" };
     }
-    const assetOpts = { width: box.width, height: box.height, asset: component.asset };
-    // 1. Backend first — the secret key never leaves the server.
+    const query = String(component.imageQuery || component.describe || "abstract design").trim();
+    // 1. Unsplash search: the brief/slot description is the query.
     try {
-      const src = await fetchAssetViaBackend(component.describe, assetOpts);
-      const dims = await probeImage(src).catch(() => ({ w: box.width, h: box.height }));
-      console.log(`[build] image ${component.id} via backend ${Date.now() - tStart}ms`);
-      return { src, w: dims.w, h: dims.h, note: "" };
+      const photos = await searchPhotos(query);
+      const photo = photos[0];
+      if (photo) {
+        triggerDownload(photo); // best-effort credit, never blocks
+        try {
+          const src = await fetchImageAsDataUrl(photo.full);
+          const dims = await probeImage(src).catch(() => ({ w: box.width, h: box.height }));
+          console.log(`[build] image ${component.id} unsplash ${Date.now() - tStart}ms by ${photo.photographer}`);
+          return { src, w: dims.w, h: dims.h, note: `unsplash: ${photo.photographer}` };
+        } catch (error) {
+          console.warn(`[build] image ${component.id} unsplash fetch failed (${error.message}) — hotlinking`);
+          return { src: photo.full, w: box.width, h: box.height, note: "hotlinked" };
+        }
+      }
+      console.warn(`[build] image ${component.id} no Unsplash result for "${query}" — using query placeholder`);
     } catch (error) {
-      console.warn(`[build] image ${component.id} backend failed: ${error.message}`);
-      console.warn("[architect] backend unavailable, trying direct:", error.message);
+      console.warn(`[build] image ${component.id} Unsplash search failed (${error.message}) — using query placeholder`);
     }
-    // 2. Keyless direct fetch (dataURL: export-safe).
-    try {
-      const url = assetUrl(component.describe, assetOpts);
-      const src = await fetchAssetDataUrl(url);
-      const dims = await probeImage(src).catch(() => ({ w: box.width, h: box.height }));
-      console.log(`[build] image ${component.id} direct ${Date.now() - tStart}ms`);
-      return { src, w: dims.w, h: dims.h, note: "" };
-    } catch (error) {
-      console.warn(`[build] image ${component.id} direct failed: ${error.message}`);
-      console.warn("[architect] asset fetch failed, hotlinking:", error.message);
-      return { src: assetUrl(component.describe, { width: box.width, height: box.height, asset: component.asset }), w: box.width, h: box.height, note: "hotlinked" };
-    }
+    // 2. Keyless Unsplash query image (still query-driven, never random).
+    const w = Math.max(1, Math.round(box.width));
+    const h = Math.max(1, Math.round(box.height));
+    return {
+      src: `https://unsplash.it/${w}/${h}?text=${encodeURIComponent(query)}`,
+      w: box.width,
+      h: box.height,
+      note: "unsplash query",
+    };
   }
 
   onReferenceAnalysis(analysis) {

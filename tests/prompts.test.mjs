@@ -17,7 +17,6 @@ import {
   GOAL_SCHEMA,
   buildGoalPrompt,
   buildPalettePrompt,
-  buildSkeletonPrompt,
 } from "../src/ai/layerPrompt";
 import {
   TEMPLATE_RULES,
@@ -41,10 +40,9 @@ const GOAL = {
 };
 const PALETTE = { background: "#0A1020", ink: "#E8F0FF", accent: "#3D7BFF", style: "modern tech, crisp blue" };
 
-test("L1-L4 share the byte-identical static prefix", () => {
+test("L1 and L4 share the byte-identical static prefix", () => {
   const prompts = [
     buildGoalPrompt("a poster", CANVAS),
-    buildSkeletonPrompt(GOAL, PALETTE, CANVAS),
     buildComponentPrompt(
       { id: "headline-main", role: "headline", describe: "the title", box: { x: 0, y: 0, width: 500, height: 200 } },
       CANVAS,
@@ -82,7 +80,7 @@ test("variable data stays out of the static prefix", () => {
 });
 
 test("the choice prompt shows only the retrieved shortlist, and shows it last", () => {
-  const retrieved = ["menu-sheet", "card-grid", "product-shelf"];
+  const retrieved = ["menu-sheet", "card-grid", "neo-futurist-launch"];
   const prompt = buildTemplateChoicePrompt(GOAL, PALETTE, CANVAS, retrieved);
   for (const id of retrieved) assert.ok(prompt.includes(id), `${id} is offered`);
   for (const id of TEMPLATE_IDS) {
@@ -115,6 +113,50 @@ test("L4 receives the template's fixed box, type size and copy limit", () => {
   assert.match(prompt, /Colour for this region: textPrimary/, "the region is told its colour role");
 });
 
+test("L4 carries approved copy verbatim and tailors attribution regions", () => {
+  const component = {
+    id: "tagline-attribution",
+    role: "tagline",
+    kind: "dsl",
+    describe: "who said it",
+    box: { x: 64, y: 300, width: 600, height: 60 },
+    fontSize: 22,
+    maxChars: 40,
+    copy: ["— Graphilla Technology"],
+  };
+  const prompt = buildComponentPrompt(
+    component,
+    CANVAS,
+    { palette: PALETTE, style: PALETTE.style, components: [component] },
+    GOAL,
+  );
+  assert.match(prompt, /Approved copy — use these exact lines/);
+  assert.match(prompt, /1\. — Graphilla Technology/);
+  assert.match(prompt, /Attribution: name the person or organisation/);
+  assert.match(prompt, /Never an audience, language, date or keyword label/);
+});
+
+test("L4 forbids availability claims in a footer unless the brief says so", () => {
+  const component = {
+    id: "footer-registration",
+    role: "footer",
+    kind: "dsl",
+    describe: "registration link, organizer or partner line",
+    box: { x: 64, y: 520, width: 900, height: 60 },
+    fontSize: 16,
+    maxChars: 70,
+    copy: ["Happy Diwali from Graphilla Technology"],
+  };
+  const prompt = buildComponentPrompt(
+    component,
+    CANVAS,
+    { palette: PALETTE, style: PALETTE.style, components: [component] },
+    GOAL,
+  );
+  assert.match(prompt, /Do not claim availability unless the brief says so/);
+  assert.match(prompt, /Happy Diwali from Graphilla Technology/);
+});
+
 test("L4 hands the model the semantic palette roles, not just three hexes", () => {
   const component = {
     id: "cta-row",
@@ -131,7 +173,7 @@ test("L4 hands the model the semantic palette roles, not just three hexes", () =
   for (const role of ["surface", "secondary text", "CTA surface", "CTA text", "border"]) {
     assert.match(prompt, new RegExp(`${role} #`), `${role} reaches L4`);
   }
-  assert.match(prompt, /Colour for this region: ctaText on a ctaSurface block/);
+  assert.match(prompt, /Colour for this region: ctaText \(#0A1020\) on a ctaSurface block/);
   assert.match(prompt, /never invent a hue/i);
 });
 
@@ -168,7 +210,7 @@ test("L4 passes the raw request as the fact source, not a template example", () 
   assert.ok(!/Copy example for this region/.test(prompt));
 });
 
-test("L4 omits the fixed-type lines for a free-form skeleton region", () => {
+test("L4 omits fixed-type lines when a region has no template type", () => {
   const component = {
     id: "headline",
     role: "headline",

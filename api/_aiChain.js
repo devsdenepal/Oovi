@@ -61,6 +61,7 @@ const LAYER_MODEL_ENV = {
   oovi_palette: "OLLAMA_MODEL_FALLBACK", // L2 free-form palette
   oovi_template: "OLLAMA_MODEL_TUNE", // L3a template choice
   oovi_tuning: "OLLAMA_MODEL_TUNE", // L3b tuning patch
+  oovi_copydeck: "OLLAMA_MODEL_COPY_DECK", // L3c whole-design copy deck
   oovi_component: "OLLAMA_MODEL_COPY", // L4 slot copy (template-anchored)
   oovi_component_free: "OLLAMA_MODEL_FALLBACK", // L4 copy on a free-form skeleton
   oovi_plan: "OLLAMA_MODEL_FALLBACK", // free-form L3 (plan pass)
