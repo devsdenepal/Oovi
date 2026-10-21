@@ -23,13 +23,14 @@ if (route.view === "home") {
   // Same-tab back/forward between dashboard and editor reboots cleanly.
   window.addEventListener("hashchange", () => window.location.reload());
   // Interface shell first (chrome only — no pipeline dependency).
-  const leftTabs = initLeftTabs();
+  const leftTabs = initLeftTabs({ initial: "templates" });
   const app = new App(
     {
       topbar: "topbar-mount",
       prompt: "prompt-mount",
       generate: "generate-mount",
       designType: "designtype-mount",
+      templates: "templates-mount",
       insert: "insert-mount",
       reference: "reference-mount",
       influence: "influence-mount",

@@ -24,6 +24,11 @@
 import { sizeToPx } from "./typeScale";
 import { GRID, snapBox, snapFontSize } from "./grid";
 import { EXAMPLES } from "./templateExamples";
+import { templateFromJson } from "./templateJson";
+import raw from "./templateLibrary.json";
+import extraRaw from "./extraTemplates.json";
+const JSON_TABLE = raw.map(templateFromJson);
+const EXTRA_TABLE = extraRaw.map(templateFromJson);
 
 /** Frame margin, as a fraction of each axis. */
 const MARGIN = 0.055;
@@ -1240,7 +1245,17 @@ const TABLE = [
  * stays geometry + metadata and the content lives in one reviewable data
  * module. L4 consumes it as a one-shot via templateExample().
  */
-export const TEMPLATES = Object.freeze(TABLE.map((t) => ({ ...t, examples: EXAMPLES[t.id] || {} })));
+const allTemplates = [
+  ...TABLE,
+  ...JSON_TABLE,
+  ...EXTRA_TABLE
+].filter((t) => t.id !== "event-listing")
+.filter((t) => !['map-card','ticket','product-shelf'].includes(t.id))
+.map((t) => ({
+  ...t,
+  examples: { ...t.examples, ...EXAMPLES[t.id] }
+}));
+export const TEMPLATES = Object.freeze(allTemplates);
 
 /** Every slot of a template across all its variants, first occurrence wins. */
 export function templateSlots(template) {

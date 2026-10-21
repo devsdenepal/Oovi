@@ -19,17 +19,21 @@
       <!-- ══ Main 3-column studio ══ -->
       <div class="container-fluid flex-grow-1 overflow-hidden py-2">
         <div class="row g-2 h-100 overflow-auto overflow-lg-hidden">
-          <!-- Left: ONE tab sidebar (Insert / AI Reference / Layers / Pipeline) -->
-          <div class="col-12 col-lg-3 col-xl-3 col-xxl-2 left-col">
+          <!-- Left: ONE tab sidebar (Templates / Insert / AI Reference / Layers / Pipeline) -->
+          <div class="col-12 col-lg-3 col-xl-3 col-xxl-3 left-col">
             <aside class="sidebar-left">
               <div class="left-tabs" role="tablist" aria-label="Sidebar">
+                <button class="left-tab" type="button" role="tab" data-ltab="templates"><i class="fa-solid fa-table-cells-large"></i><span>Templates</span></button>
                 <button class="left-tab" type="button" role="tab" data-ltab="insert"><i class="fa-solid fa-plus"></i><span>Insert</span></button>
                 <button class="left-tab" type="button" role="tab" data-ltab="reference"><i class="fa-solid fa-wand-magic-sparkles"></i><span>AI</span></button>
                 <button class="left-tab" type="button" role="tab" data-ltab="layers"><i class="fa-solid fa-layer-group"></i><span>Layers</span></button>
                 <button class="left-tab" type="button" role="tab" data-ltab="pipeline"><i class="fa-solid fa-diagram-project"></i><span>Pipeline</span></button>
               </div>
               <div class="left-panels">
-                <section data-lpanel="insert" aria-label="Insert">
+                <section data-lpanel="templates" aria-label="Templates">
+                  <div id="templates-mount"></div>
+                </section>
+                <section data-lpanel="insert" aria-label="Insert" hidden>
                   <p class="text-secondary small">No AI needed — drop text and shapes straight onto the canvas.</p>
                   <div id="insert-mount"></div>
                 </section>
@@ -62,7 +66,7 @@
           </div>
 
           <!-- Center: canvas -->
-          <div class="col-12 col-lg-6 col-xl-6 col-xxl-8 center-col">
+          <div class="col-12 col-lg-6 col-xl-6 col-xxl-7 center-col">
             <main class="canvas-area card shadow-sm overflow-hidden position-relative h-100">
               <div class="card-header canvas-head bg-white d-flex align-items-center gap-3 py-2">
                 <button id="sidebar-toggle" class="btn btn-sm btn-light border flex-shrink-0" title="Collapse sidebar" aria-label="Collapse sidebar" aria-expanded="true"><i class="fa-solid fa-angles-left"></i></button>

@@ -1,0 +1,743 @@
+[
+  {
+    "id": "editorial-grid",
+    "label": "Editorial grid",
+    "type": "poster",
+    "blurb": "Asymmetric editorial layout with oversized typography",
+    "description": "A premium editorial composition combining a dramatic headline, structured information and a large supporting visual.",
+    "mood": ["editorial", "premium", "bold"],
+    "density": "normal",
+    "tags": ["conference", "editorial", "launch"],
+    "keywords": ["summit", "conference", "campaign", "announcement"],
+    "sizes": ["wide", "landscape", "square", "portrait"],
+    "palette": {
+      "background": "#F5F0E8",
+      "ink": "#171717",
+      "accent": "#E64B2F"
+    },
+    "variants": [
+      {
+        "id": "visual-right",
+        "label": "Editorial visual right",
+        "slots": [
+          {
+            "id": "brand-label",
+            "role": "header",
+            "kind": "dsl",
+            "box": { "x": 0.06, "y": 0.055, "w": 0.38, "h": 0.06 },
+            "optional": true,
+            "asset": "none",
+            "size": "small",
+            "align": "left",
+            "maxChars": 35,
+            "describe": "Small uppercase publication or event label",
+            "sample": "THE NEXT CHAPTER · 2026"
+          },
+          {
+            "id": "edition-number",
+            "role": "decoration",
+            "kind": "dsl",
+            "box": { "x": 0.84, "y": 0.055, "w": 0.1, "h": 0.06 },
+            "optional": true,
+            "asset": "none",
+            "size": "small",
+            "align": "right",
+            "maxChars": 12,
+            "describe": "Compact edition or issue marker",
+            "sample": "VOL. 04"
+          },
+          {
+            "id": "headline-main",
+            "role": "headline",
+            "kind": "dsl",
+            "box": { "x": 0.06, "y": 0.19, "w": 0.48, "h": 0.3 },
+            "asset": "none",
+            "size": "display",
+            "align": "left",
+            "maxChars": 35,
+            "describe": "Oversized headline with deliberate line breaks",
+            "sample": "Ideas that change everything"
+          },
+          {
+            "id": "headline-accent",
+            "role": "tagline",
+            "kind": "dsl",
+            "box": { "x": 0.06, "y": 0.51, "w": 0.42, "h": 0.1 },
+            "optional": true,
+            "asset": "none",
+            "size": "subtitle",
+            "align": "left",
+            "maxChars": 55,
+            "describe": "Supporting statement in contrasting type treatment",
+            "sample": "A new perspective starts here."
+          },
+          {
+            "id": "hero-visual",
+            "role": "hero",
+            "kind": "image",
+            "box": { "x": 0.59, "y": 0.16, "w": 0.35, "h": 0.61 },
+            "asset": "photo",
+            "size": "body",
+            "align": "left",
+            "maxChars": 0,
+            "describe": "Large cropped architectural, portrait or conceptual photograph"
+          },
+          {
+            "id": "event-details",
+            "role": "details",
+            "kind": "dsl",
+            "box": { "x": 0.06, "y": 0.7, "w": 0.43, "h": 0.12 },
+            "asset": "none",
+            "size": "body",
+            "align": "left",
+            "maxChars": 75,
+            "describe": "Event date, venue or short contextual information",
+            "sample": "14 NOVEMBER 2026\nKathmandu, Nepal"
+          },
+          {
+            "id": "footer-link",
+            "role": "footer",
+            "kind": "dsl",
+            "box": { "x": 0.06, "y": 0.88, "w": 0.88, "h": 0.055 },
+            "asset": "none",
+            "size": "small",
+            "align": "left",
+            "maxChars": 70,
+            "describe": "Website, registration link or organizer",
+            "sample": "REGISTER NOW  ↗  example.com"
+          },
+          {
+            "id": "bottom-rule",
+            "role": "decoration",
+            "kind": "dsl",
+            "box": { "x": 0, "y": 0.975, "w": 1, "h": 0.025 },
+            "optional": true,
+            "asset": "none",
+            "size": "small",
+            "align": "left",
+            "maxChars": 0,
+            "describe": "Thin solid accent strip along the bottom edge"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "dark-cinematic",
+    "label": "Dark cinematic",
+    "type": "cover",
+    "blurb": "Atmospheric full-bleed artwork with cinematic typography",
+    "description": "A dramatic, immersive composition for technology launches, product reveals and flagship events.",
+    "mood": ["cinematic", "immersive", "futuristic"],
+    "density": "sparse",
+    "tags": ["technology", "launch", "premium"],
+    "keywords": ["AI", "developer", "product launch", "innovation"],
+    "sizes": ["wide", "landscape", "square", "portrait"],
+    "palette": {
+      "background": "#080B12",
+      "ink": "#F5F7FF",
+      "accent": "#8B5CF6"
+    },
+    "variants": [
+      {
+        "id": "cinematic-center",
+        "label": "Centered cinematic",
+        "slots": [
+          {
+            "id": "brand",
+            "role": "header",
+            "kind": "dsl",
+            "box": { "x": 0.07, "y": 0.06, "w": 0.48, "h": 0.06 },
+            "optional": true,
+            "asset": "none",
+            "size": "small",
+            "align": "left",
+            "maxChars": 32,
+            "describe": "Minimal brand or production label",
+            "sample": "NEPTECH LABS"
+          },
+          {
+            "id": "hero-artwork",
+            "role": "hero",
+            "kind": "image",
+            "box": { "x": 0.55, "y": 0.12, "w": 0.45, "h": 0.68 },
+            "asset": "illustration",
+            "size": "body",
+            "align": "left",
+            "maxChars": 0,
+            "describe": "Atmospheric 3D object, futuristic environment or conceptual artwork"
+          },
+          {
+            "id": "eyebrow",
+            "role": "tagline",
+            "kind": "dsl",
+            "box": { "x": 0.07, "y": 0.27, "w": 0.4, "h": 0.055 },
+            "optional": true,
+            "asset": "none",
+            "size": "small",
+            "align": "left",
+            "maxChars": 35,
+            "describe": "Short uppercase category label",
+            "sample": "A NEW ERA BEGINS"
+          },
+          {
+            "id": "headline",
+            "role": "headline",
+            "kind": "dsl",
+            "box": { "x": 0.065, "y": 0.35, "w": 0.25, "h": 0.27 },
+            "asset": "none",
+            "size": "display",
+            "align": "left",
+            "maxChars": 34,
+            "describe": "Large cinematic title, broken into two or three lines",
+            "sample": "Beyond the ordinary"
+          },
+          {
+            "id": "subtitle",
+            "role": "details",
+            "kind": "dsl",
+            "box": { "x": 0.07, "y": 0.65, "w": 0.43, "h": 0.1 },
+            "optional": true,
+            "asset": "none",
+            "size": "body",
+            "align": "left",
+            "maxChars": 70,
+            "describe": "Concise explanation of the launch or experience",
+            "sample": "Introducing the next generation of intelligent tools."
+          },
+          {
+            "id": "cta",
+            "role": "cta",
+            "kind": "dsl",
+            "box": { "x": 0.07, "y": 0.81, "w": 0.37, "h": 0.07 },
+            "optional": true,
+            "asset": "none",
+            "size": "body",
+            "align": "left",
+            "maxChars": 35,
+            "describe": "Short call to action",
+            "sample": "DISCOVER WHAT'S NEXT  ↗"
+          },
+          {
+            "id": "footer",
+            "role": "footer",
+            "kind": "dsl",
+            "box": { "x": 0.07, "y": 0.92, "w": 0.86, "h": 0.035 },
+            "optional": true,
+            "asset": "none",
+            "size": "small",
+            "align": "left",
+            "maxChars": 65,
+            "describe": "Website or launch date",
+            "sample": "neptech.example · COMING SOON"
+          },
+          {
+            "id": "accent-line",
+            "role": "decoration",
+            "kind": "dsl",
+            "box": { "x": 0.07, "y": 0.19, "w": 0.13, "h": 0.006 },
+            "optional": true,
+            "asset": "none",
+            "size": "small",
+            "align": "left",
+            "maxChars": 0,
+            "describe": "Small luminous accent line beneath the brand area"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "swiss-brutalist",
+    "label": "Swiss brutalist",
+    "type": "poster",
+    "blurb": "Rigid grid, oversized type and sharp geometric accents",
+    "description": "A confident typographic system with strict alignment, compact metadata and controlled visual contrast.",
+    "mood": ["brutalist", "geometric", "confident"],
+    "density": "dense",
+    "tags": ["design", "creative", "conference"],
+    "keywords": ["design summit", "creative conference", "workshop", "festival"],
+    "sizes": ["wide", "landscape", "square", "portrait"],
+    "palette": {
+      "background": "#FAFAF7",
+      "ink": "#111111",
+      "accent": "#DFFF00"
+    },
+    "variants": [
+      {
+        "id": "grid-stack",
+        "label": "Grid-based stack",
+        "slots": [
+          {
+            "id": "top-label",
+            "role": "header",
+            "kind": "dsl",
+            "box": { "x": 0.055, "y": 0.045, "w": 0.6, "h": 0.05 },
+            "optional": true,
+            "asset": "none",
+            "size": "small",
+            "align": "left",
+            "maxChars": 45,
+            "describe": "Compact event identity",
+            "sample": "INDEPENDENT DESIGN CONFERENCE"
+          },
+          {
+            "id": "index",
+            "role": "decoration",
+            "kind": "dsl",
+            "box": { "x": 0.83, "y": 0.045, "w": 0.11, "h": 0.05 },
+            "optional": true,
+            "asset": "none",
+            "size": "small",
+            "align": "right",
+            "maxChars": 12,
+            "describe": "Edition number or index",
+            "sample": "Nº 026"
+          },
+          {
+            "id": "headline",
+            "role": "headline",
+            "kind": "dsl",
+            "box": { "x": 0.055, "y": 0.16, "w": 0.86, "h": 0.3 },
+            "asset": "none",
+            "size": "display",
+            "align": "left",
+            "maxChars": 32,
+            "describe": "Oversized bold title occupying the main grid",
+            "sample": "MAKE IT MATTER."
+          },
+          {
+            "id": "supporting-statement",
+            "role": "tagline",
+            "kind": "dsl",
+            "box": { "x": 0.06, "y": 0.49, "w": 0.49, "h": 0.1 },
+            "optional": true,
+            "asset": "none",
+            "size": "subtitle",
+            "align": "left",
+            "maxChars": 65,
+            "describe": "Compact statement with strong contrast against the headline",
+            "sample": "Ideas become impact through design and technology."
+          },
+          {
+            "id": "graphic",
+            "role": "hero",
+            "kind": "image",
+            "box": { "x": 0.64, "y": 0.49, "w": 0.3, "h": 0.29 },
+            "asset": "illustration",
+            "size": "body",
+            "align": "left",
+            "maxChars": 0,
+            "describe": "Abstract geometric sculpture, monochrome collage or high-contrast graphic"
+          },
+          {
+            "id": "date-block",
+            "role": "details",
+            "kind": "dsl",
+            "box": { "x": 0.06, "y": 0.68, "w": 0.3, "h": 0.12 },
+            "asset": "none",
+            "size": "body",
+            "align": "left",
+            "maxChars": 65,
+            "describe": "Date and location in a compact information block",
+            "sample": "14 NOV 2026\nKATHMANDU, NEPAL"
+          },
+          {
+            "id": "registration",
+            "role": "cta",
+            "kind": "dsl",
+            "box": { "x": 0.06, "y": 0.84, "w": 0.5, "h": 0.065 },
+            "optional": true,
+            "asset": "none",
+            "size": "body",
+            "align": "left",
+            "maxChars": 55,
+            "describe": "Registration instruction or event URL",
+            "sample": "APPLY NOW  →  example.com"
+          },
+          {
+            "id": "bottom-accent",
+            "role": "decoration",
+            "kind": "dsl",
+            "box": { "x": 0, "y": 0.965, "w": 1, "h": 0.035 },
+            "optional": true,
+            "asset": "none",
+            "size": "small",
+            "align": "left",
+            "maxChars": 0,
+            "describe": "Full-width fluorescent accent strip"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "swiss-international",
+    "label": "Swiss International",
+    "type": "poster",
+    "blurb": "Clean international typography with a disciplined modular grid",
+    "description": "A restrained, information-first layout for professional conferences, exhibitions and institutional announcements.",
+    "mood": ["minimal", "precise", "professional"],
+    "density": "normal",
+    "tags": ["corporate", "conference", "minimal"],
+    "keywords": ["seminar", "conference", "exhibition", "professional event"],
+    "sizes": ["wide", "landscape", "square", "portrait"],
+    "palette": {
+      "background": "#FFFFFF",
+      "ink": "#171717",
+      "accent": "#E53935"
+    },
+    "variants": [
+      {
+        "id": "left-column",
+        "label": "Structured left column",
+        "slots": [
+          {
+            "id": "identity",
+            "role": "header",
+            "kind": "dsl",
+            "box": { "x": 0.07, "y": 0.065, "w": 0.48, "h": 0.055 },
+            "optional": true,
+            "asset": "none",
+            "size": "small",
+            "align": "left",
+            "maxChars": 38,
+            "describe": "Institution, organizer or conference identity",
+            "sample": "GLOBAL TECHNOLOGY FORUM"
+          },
+          {
+            "id": "category",
+            "role": "tagline",
+            "kind": "dsl",
+            "box": { "x": 0.07, "y": 0.19, "w": 0.38, "h": 0.05 },
+            "optional": true,
+            "asset": "none",
+            "size": "small",
+            "align": "left",
+            "maxChars": 30,
+            "describe": "Event category or series identifier",
+            "sample": "ANNUAL CONFERENCE"
+          },
+          {
+            "id": "headline",
+            "role": "headline",
+            "kind": "dsl",
+            "box": { "x": 0.07, "y": 0.27, "w": 0.53, "h": 0.26 },
+            "asset": "none",
+            "size": "display",
+            "align": "left",
+            "maxChars": 40,
+            "describe": "Clear, highly legible conference headline",
+            "sample": "Technology for everyone"
+          },
+          {
+            "id": "summary",
+            "role": "details",
+            "kind": "dsl",
+            "box": { "x": 0.07, "y": 0.57, "w": 0.39, "h": 0.14 },
+            "optional": true,
+            "asset": "none",
+            "size": "body",
+            "align": "left",
+            "maxChars": 90,
+            "describe": "Short event overview with restrained line lengths",
+            "sample": "A gathering of builders, researchers and creative thinkers."
+          },
+          {
+            "id": "visual",
+            "role": "hero",
+            "kind": "image",
+            "box": { "x": 0.65, "y": 0.17, "w": 0.28, "h": 0.48 },
+            "asset": "photo",
+            "size": "body",
+            "align": "left",
+            "maxChars": 0,
+            "describe": "Architectural detail, speaker portrait or carefully cropped photograph"
+          },
+          {
+            "id": "date-location",
+            "role": "sections",
+            "kind": "dsl",
+            "box": { "x": 0.07, "y": 0.76, "w": 0.52, "h": 0.1 },
+            "asset": "none",
+            "size": "body",
+            "align": "left",
+            "maxChars": 75,
+            "describe": "Date, time and venue in a clean information block",
+            "sample": "14 November 2026\nKathmandu, Nepal"
+          },
+          {
+            "id": "footer",
+            "role": "footer",
+            "kind": "dsl",
+            "box": { "x": 0.07, "y": 0.91, "w": 0.86, "h": 0.04 },
+            "asset": "none",
+            "size": "small",
+            "align": "left",
+            "maxChars": 65,
+            "describe": "Registration URL, organizer or contact",
+            "sample": "Registration open · example.com"
+          },
+          {
+            "id": "accent-rule",
+            "role": "decoration",
+            "kind": "dsl",
+            "box": { "x": 0.07, "y": 0.14, "w": 0.075, "h": 0.008 },
+            "optional": true,
+            "asset": "none",
+            "size": "small",
+            "align": "left",
+            "maxChars": 0,
+            "describe": "Short red horizontal rule beneath the identity"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "neo-futurist-launch",
+    "label": "Neo-futurist launch",
+    "type": "product",
+    "blurb": "Glowing product artwork with crisp futuristic typography",
+    "description": "A premium product-launch composition that combines a striking central visual, concise product messaging and a focused call to action.",
+    "mood": ["futuristic", "premium", "energetic"],
+    "density": "normal",
+    "tags": ["product", "technology", "AI"],
+    "keywords": ["AI launch", "software release", "app launch", "new product"],
+    "sizes": ["wide", "landscape", "square", "portrait"],
+    "palette": {
+      "background": "#0B0B14",
+      "ink": "#F7F7FF",
+      "accent": "#00E5FF"
+    },
+    "variants": [
+      {
+        "id": "product-right",
+        "label": "Product visual right",
+        "slots": [
+          {
+            "id": "brand",
+            "role": "header",
+            "kind": "dsl",
+            "box": { "x": 0.06, "y": 0.06, "w": 0.4, "h": 0.055 },
+            "optional": true,
+            "asset": "none",
+            "size": "small",
+            "align": "left",
+            "maxChars": 32,
+            "describe": "Product logo or company name",
+            "sample": "NEPTECH AI"
+          },
+          {
+            "id": "launch-label",
+            "role": "tagline",
+            "kind": "dsl",
+            "box": { "x": 0.06, "y": 0.2, "w": 0.36, "h": 0.055 },
+            "optional": true,
+            "asset": "none",
+            "size": "small",
+            "align": "left",
+            "maxChars": 35,
+            "describe": "Release status or launch category",
+            "sample": "INTRODUCING SOMETHING NEW"
+          },
+          {
+            "id": "headline",
+            "role": "headline",
+            "kind": "dsl",
+            "box": { "x": 0.06, "y": 0.29, "w": 0.44, "h": 0.26 },
+            "asset": "none",
+            "size": "display",
+            "align": "left",
+            "maxChars": 34,
+            "describe": "Product name or concise benefit-driven headline",
+            "sample": "Intelligence, reimagined."
+          },
+          {
+            "id": "description",
+            "role": "details",
+            "kind": "dsl",
+            "box": { "x": 0.06, "y": 0.59, "w": 0.39, "h": 0.12 },
+            "optional": true,
+            "asset": "none",
+            "size": "body",
+            "align": "left",
+            "maxChars": 80,
+            "describe": "One or two lines describing the key product benefit",
+            "sample": "A smarter way to create, explore and build."
+          },
+          {
+            "id": "product-art",
+            "role": "hero",
+            "kind": "image",
+            "box": { "x": 0.52, "y": 0.16, "w": 0.42, "h": 0.64 },
+            "asset": "illustration",
+            "size": "body",
+            "align": "left",
+            "maxChars": 0,
+            "describe": "Floating product render, abstract 3D form or glowing device mockup"
+          },
+          {
+            "id": "cta",
+            "role": "cta",
+            "kind": "dsl",
+            "box": { "x": 0.06, "y": 0.78, "w": 0.38, "h": 0.07 },
+            "asset": "none",
+            "size": "body",
+            "align": "left",
+            "maxChars": 40,
+            "describe": "Primary launch action",
+            "sample": "EXPLORE THE PRODUCT  →"
+          },
+          {
+            "id": "release-info",
+            "role": "footer",
+            "kind": "dsl",
+            "box": { "x": 0.06, "y": 0.91, "w": 0.83, "h": 0.04 },
+            "optional": true,
+            "asset": "none",
+            "size": "small",
+            "align": "left",
+            "maxChars": 60,
+            "describe": "Launch date, website or availability",
+            "sample": "AVAILABLE NOW · example.com"
+          },
+          {
+            "id": "bottom-glow",
+            "role": "decoration",
+            "kind": "dsl",
+            "box": { "x": 0, "y": 0.975, "w": 1, "h": 0.025 },
+            "optional": true,
+            "asset": "none",
+            "size": "small",
+            "align": "left",
+            "maxChars": 0,
+            "describe": "Thin cyan accent strip along the bottom edge"
+          }
+        ]
+      }
+    ]
+  }
+,
+{
+  "id": "corporate-product-showcase",
+  "label": "Corporate product showcase",
+  "type": "product",
+  "blurb": "Professional product promotion with a bold headline and realistic device mockups",
+  "description": "A clean technology advertisement featuring a strong headline, product imagery, benefit highlights and a prominent contact footer.",
+  "mood": ["corporate", "modern", "trustworthy"],
+  "density": "normal",
+  "tags": ["corporate", "technology", "product", "advertising"],
+  "keywords": ["software", "SaaS", "dashboard", "business promotion"],
+  "sizes": ["portrait", "square", "landscape", "wide"],
+  "palette": {
+    "background": "#FAF7F1",
+    "ink": "#292929",
+    "accent": "#F28C18"
+  },
+  "variants": [
+    {
+      "id": "device-right",
+      "label": "Product mockup on right",
+      "slots": [
+        {
+          "id": "brand",
+          "role": "header",
+          "kind": "dsl",
+          "box": { "x": 0.05, "y": 0.035, "w": 0.9, "h": 0.07 },
+          "asset": "none",
+          "size": "body",
+          "align": "center",
+          "maxChars": 45,
+          "describe": "Company logo name and optional partner brand",
+          "sample": "YOUR COMPANY  |  YOUR PRODUCT"
+        },
+        {
+          "id": "headline",
+          "role": "headline",
+          "kind": "dsl",
+          "box": { "x": 0.045, "y": 0.145, "w": 0.9, "h": 0.15 },
+          "asset": "none",
+          "size": "display",
+          "align": "left",
+          "maxChars": 75,
+          "describe": "Large mixed-weight headline with a highlighted keyword",
+          "sample": "Your business deserves a smarter system"
+        },
+        {
+          "id": "subheading",
+          "role": "tagline",
+          "kind": "dsl",
+          "box": { "x": 0.045, "y": 0.31, "w": 0.85, "h": 0.065 },
+          "optional": true,
+          "asset": "none",
+          "size": "subtitle",
+          "align": "left",
+          "maxChars": 75,
+          "describe": "Short problem statement or product benefit",
+          "sample": "Manage everything from one powerful dashboard."
+        },
+        {
+          "id": "service-list",
+          "role": "sections",
+          "kind": "dsl",
+          "box": { "x": 0.045, "y": 0.405, "w": 0.38, "h": 0.3 },
+          "asset": "none",
+          "size": "body",
+          "align": "left",
+          "maxChars": 110,
+          "describe": "Four or five vertically stacked feature labels with icons",
+          "sample": "Dashboard\nInventory Management\nReports & Analytics\nCustomer Management"
+        },
+        {
+          "id": "product-visual",
+          "role": "hero",
+          "kind": "image",
+          "box": { "x": 0.43, "y": 0.39, "w": 0.55, "h": 0.4 },
+          "asset": "photo",
+          "size": "body",
+          "align": "left",
+          "maxChars": 0,
+          "describe": "Realistic laptop, mobile phone or software dashboard mockup with a soft geometric backdrop"
+        },
+        {
+          "id": "cta",
+          "role": "cta",
+          "kind": "dsl",
+          "box": { "x": 0.045, "y": 0.745, "w": 0.43, "h": 0.075 },
+          "asset": "none",
+          "size": "body",
+          "align": "left",
+          "maxChars": 38,
+          "describe": "Bold rounded call-to-action label",
+          "sample": "Get Started Today"
+        },
+        {
+          "id": "contact-footer",
+          "role": "footer",
+          "kind": "dsl",
+          "box": { "x": 0.025, "y": 0.865, "w": 0.95, "h": 0.12 },
+          "asset": "none",
+          "size": "small",
+          "align": "left",
+          "maxChars": 150,
+          "describe": "Structured two-column contact strip with email, phone, website and address",
+          "sample": "hello@example.com | +977 9800000000\nexample.com | Kathmandu, Nepal"
+        },
+        {
+          "id": "footer-divider",
+          "role": "decoration",
+          "kind": "dsl",
+          "box": { "x": 0, "y": 0.85, "w": 1, "h": 0.003 },
+          "optional": true,
+          "asset": "none",
+          "size": "small",
+          "align": "left",
+          "maxChars": 0,
+          "describe": "Thin dark divider above the contact strip"
+        }
+      ]
+    }
+  ]
+}
+]

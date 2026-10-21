@@ -160,6 +160,93 @@ body { background: var(--oovi-bg); }
 .insert-defaults > summary::before { content: "▸ "; }
 .insert-defaults[open] > summary::before { content: "▾ "; }
 
+/* ── Templates: visual, no-AI layout gallery ── */
+.tpl-panel { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.tpl-intro {
+  margin: 2px 0 0; font-size: 12px; line-height: 1.5; color: var(--oovi-ink-2);
+}
+.tpl-search {
+  position: relative; display: block; margin: 0; min-width: 0;
+}
+.tpl-search i {
+  position: absolute; left: 9px; top: 50%; transform: translateY(-50%);
+  font-size: 11px; color: var(--oovi-ink-2); pointer-events: none;
+}
+.tpl-search input {
+  width: 100%; min-width: 0; border: 1px solid var(--oovi-line-strong);
+  border-radius: 9px; background: var(--oovi-surface-2); color: var(--oovi-ink);
+  padding: 8px 10px 8px 29px; font-size: 12px; line-height: 1.4;
+}
+.tpl-search input::-webkit-search-cancel-button { cursor: pointer; }
+.tpl-results { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
+.tpl-group { display: flex; flex-direction: column; gap: 9px; min-width: 0; }
+.tpl-group-title {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  margin: 0; font-size: 10px; font-weight: 700; letter-spacing: 0.07em;
+  text-transform: uppercase; color: var(--oovi-ink-2);
+}
+.tpl-count {
+  flex: 0 0 auto; font-size: 10px; font-weight: 600; letter-spacing: 0;
+  color: var(--oovi-ink-2); background: var(--oovi-surface-2);
+  border: 1px solid var(--oovi-line); border-radius: 999px; padding: 0 6px;
+}
+.tpl-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: 12px 10px; min-width: 0;
+}
+.tpl-card {
+  min-width: 0; display: flex; flex-direction: column; gap: 0;
+  padding: 0; border: 0; background: transparent; color: inherit;
+  text-align: left; cursor: pointer; border-radius: 8px;
+}
+.tpl-card:focus-visible { outline: none; }
+.tpl-thumb {
+  position: relative; display: block; width: 100%; min-width: 0;
+  overflow: hidden; border: 1px solid var(--oovi-line);
+  border-radius: 7px; box-shadow: 0 1px 2px rgba(16, 24, 40, 0.08);
+  transition: border-color var(--oovi-dur-fast) ease, box-shadow var(--oovi-dur-fast) ease,
+    transform var(--oovi-dur-fast) ease;
+}
+.tpl-card:hover .tpl-thumb { border-color: var(--oovi-brand-line); transform: translateY(-1px); }
+.tpl-card.is-selected .tpl-thumb {
+  border-color: var(--oovi-brand); box-shadow: 0 0 0 3px var(--oovi-brand-soft);
+}
+.tpl-card:focus-visible .tpl-thumb {
+  border-color: var(--oovi-brand); box-shadow: 0 0 0 3px var(--oovi-brand-soft);
+}
+.tpl-thumb > * { pointer-events: none; }
+.tpl-thumb-photo,
+.tpl-thumb-text,
+.tpl-thumb-deco { position: absolute; overflow: hidden; border-radius: 1px; }
+.tpl-thumb-photo { display: flex; align-items: center; justify-content: center; }
+.tpl-thumb-photo svg { width: 14px; height: 14px; max-width: 28%; max-height: 28%; opacity: 0.5; }
+.tpl-thumb-text { display: flex; flex-direction: column; justify-content: center; gap: 2px; }
+.tpl-thumb-line { display: block; height: 2px; border-radius: 2px; opacity: 0.9; }
+.tpl-thumb-deco { display: flex; align-items: center; }
+.tpl-thumb-deco > span { display: block; width: 100%; height: 2px; border-radius: 2px; }
+.tpl-badge {
+  position: absolute; top: 3px; right: 3px; z-index: 1;
+  font-size: 8px; font-weight: 700; line-height: 1; letter-spacing: 0.04em;
+  color: var(--oovi-surface); background: var(--oovi-brand);
+  border-radius: 999px; padding: 3px 5px;
+}
+.tpl-meta { display: flex; flex-direction: column; gap: 1px; min-width: 0; padding: 7px 2px 0; }
+.tpl-name {
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 11px; font-weight: 600; line-height: 1.3; color: var(--oovi-ink);
+}
+.tpl-kind {
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 10px; line-height: 1.3; color: var(--oovi-ink-2);
+}
+.tpl-empty {
+  display: flex; flex-direction: column; align-items: center; gap: 7px;
+  padding: 18px 10px; border: 1px dashed var(--oovi-line-strong);
+  border-radius: 9px; text-align: center; color: var(--oovi-ink-2);
+}
+.tpl-empty i { font-size: 18px; opacity: 0.6; }
+.tpl-empty p { margin: 0; font-size: 12px; line-height: 1.45; }
+
 /* ── Sidebar AI tab: compact + tactile ── */
 .side-block { padding: 8px 0; }
 .side-block .reference-upload > label.panel-title,
@@ -328,21 +415,25 @@ body { background: var(--oovi-bg); }
 
 /* ── Left tab sidebar (single scroll column) ── */
 .sidebar-left {
-  display: flex; gap: 8px; height: 100%; min-height: 0;
+  display: flex; gap: 10px; height: 100%; min-height: 0;
   background: var(--oovi-surface); border: 1px solid var(--oovi-line); border-radius: 12px;
   box-shadow: 0 1px 2px rgba(16, 24, 40, 0.06), 0 4px 16px rgba(16, 24, 40, 0.08);
-  padding: 8px; overflow: hidden;
+  padding: 10px; overflow: hidden;
 }
-.left-tabs { display: flex; flex-direction: column; gap: 4px; flex: 0 0 auto; }
+.left-tabs { display: flex; flex-direction: column; gap: 6px; flex: 0 0 auto; }
 .left-tab {
-  display: flex; flex-direction: column; align-items: center; gap: 3px;
-  width: 56px; padding: 8px 2px; border: 1px solid transparent; border-radius: 9px;
-  background: transparent; color: var(--oovi-ink-2); font-size: 12px; font-weight: 550; cursor: pointer;
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  width: 68px; padding: 9px 3px; border: 1px solid transparent; border-radius: 10px;
+  background: transparent; color: var(--oovi-ink-2); font-size: 11px; font-weight: 550; cursor: pointer;
 }
 .left-tab svg { width: 15px; height: 15px; }
+.left-tab span {
+  display: block; width: 100%; min-width: 0; text-align: center;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.2;
+}
 .left-tab:hover { background: var(--oovi-surface-2); color: var(--oovi-ink); }
 .left-tab-active { background: var(--oovi-brand-soft); color: var(--oovi-brand-strong); border-color: var(--oovi-brand-line); }
-.left-panels { flex: 1; min-width: 0; min-height: 0; overflow-y: auto; padding: 2px; }
+.left-panels { flex: 1; min-width: 0; min-height: 0; overflow-y: auto; padding: 5px 4px 8px 6px; }
 .left-panels section.flash { border-radius: 8px; }
 
 /* ── Right inspector (single scroll column) ── */

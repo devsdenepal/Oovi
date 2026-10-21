@@ -9,7 +9,6 @@ import {
 } from "../ai/aiClient";
 import { evaluateDesign } from "../ai/quality";
 import { correctColors } from "../ai/colorCorrect";
-import { assetUrl, fetchAssetDataUrl, fetchAssetViaBackend } from "../ai/pollinations";
 import { searchPhotos, triggerDownload } from "../ai/unsplash";
 import { isMockEnabled, mockAssetDataUrl } from "../ai/mockProvider";
 import { validateDesign } from "../design/designValidator";
@@ -26,7 +25,9 @@ import { TopBar } from "../components/TopBar";
 import { ContextToolbar } from "../components/ContextToolbar";
 import { DesignTypeSelect } from "../components/DesignTypeSelect";
 import { InsertPanel } from "../components/InsertPanel";
+import { TemplatesPanel } from "../components/TemplatesPanel";
 import { AssistantPanel } from "../components/AssistantPanel";
+import { paletteForTemplate, sampleDesignForTemplate } from "../layout/templateSample";
 import { notify } from "../ui/toasts";
 import { projects } from "../storage/projects";
 import { ReferenceUpload } from "../components/ReferenceUpload";
@@ -109,6 +110,13 @@ export class App {
       onBackground: (color) => this.editor.setBackground(color),
       onPhotoSearch: (query) => searchPhotos(query),
       onPhoto: (photo) => this.onPhotoInsert(photo),
+    });
+    this.templatesPanel = new TemplatesPanel(document.getElementById(mounts.templates), {
+      getCanvas: () => ({
+        width: this.editor.canvas?.width || this.designPreset.width,
+        height: this.editor.canvas?.height || this.designPreset.height,
+      }),
+      onSelect: (template) => this.applyTemplate(template),
     });
     this.assistant = new AssistantPanel(document.getElementById(mounts.assistant), {
       onSend: (message) => this.onAssistantSend(message),
@@ -236,6 +244,7 @@ export class App {
       return;
     }
     this._updateCanvasMeta(placeholder.canvas);
+    this.templatesPanel.refresh();
     this.generateButton.setStatus(`Enter a prompt, then press Generate. Canvas: ${preset.label} ${preset.width} × ${preset.height}.`, "");
     this.editor.canvas.on("history:change", () => this._refreshChrome());
     this._refreshChrome();
@@ -971,6 +980,7 @@ export class App {
         this._renderJsonPreview();
         this.debugTabs.set({ design: check.design, analysis: null, svg: "", semantic: null, warnings: [] });
       }
+      this.templatesPanel.refresh();
       this._lastPersisted = this.persistKey();
       this._dirtySincePersist = false;
       this.setSaveState("saved");
@@ -998,6 +1008,7 @@ export class App {
     }
     this.editor.resizeCanvas(width, height);
     this._updateCanvasMeta({ width, height });
+    this.templatesPanel.refresh();
     this._renderJsonPreview();
     this.properties.setSelection(this.editor.canvas?.getActiveObjects() || []);
     this.scheduleSave();
@@ -1117,6 +1128,7 @@ export class App {
       const height = key === "height" ? Math.min(4096, Math.max(64, n)) : c.height;
       this.editor.resizeCanvas(width, height);
       this._updateCanvasMeta({ width, height });
+      this.templatesPanel.refresh();
       this._renderJsonPreview();
       this.properties.setSelection(c.getActiveObjects());
       this.scheduleSave();
@@ -1333,6 +1345,56 @@ export class App {
   }
 
   /**
+   * Apply a template from the manual gallery. This is deliberately the same
+   * instantiation path the planner uses (normalised boxes -> snapped pixels),
+   * but with neutral sample copy instead of a model call. The result is a
+   * normal editable design, so undo, persistence and export all just work.
+   * @param {object} template
+   */
+  applyTemplate(template) {
+    if (!template) return;
+    if (this.state.generating) {
+      notify("Wait for the current generation to finish before applying a template.", "info");
+      return;
+    }
+    const canvas = {
+      width: this.editor.canvas?.width || this.designPreset.width,
+      height: this.editor.canvas?.height || this.designPreset.height,
+    };
+    const palette = paletteForTemplate(template);
+    const result = sampleDesignForTemplate(template, canvas, palette);
+    if (!result.ok) {
+      notify(`Couldn't apply template: ${result.reason}`, "error");
+      return;
+    }
+    const check = validateDesign(result.design);
+    if (!check.ok) {
+      const reason = check.errors.slice(0, 2).join("; ");
+      notify(`Template is not valid: ${reason}`, "error");
+      console.error("[template] invalid design", check.errors, result.design);
+      return;
+    }
+
+    this._clearPreviewUI();
+    this.state.design = check.design;
+    this.editor.loadDesign(check.design);
+    this._updateCanvasMeta(check.design.canvas);
+    this._renderJsonPreview();
+    this.debugTabs.set({
+      design: check.design,
+      analysis: null,
+      svg: "",
+      semantic: null,
+      warnings: [`Template "${template.label}" applied with editable sample copy.`],
+    });
+    this.scheduleSave();
+    this._refreshChrome();
+    const message = `Applied "${template.label}" — edit the sample text, or Undo to go back.`;
+    this.generateButton.setStatus(message, "");
+    notify(message, "success");
+  }
+
+  /**
    * "Save as template": turn the current canvas into a reusable layout.
    * The converter reads the RENDERED design and the result must clear the same
    * quality gate the template tests use — a layout that would overflow, collide
@@ -1360,6 +1422,7 @@ export class App {
       notify(`Not saved: ${saved.reason}`, "error");
       return;
     }
+    this.templatesPanel.refresh();
     const regions = result.template.build("as-saved", 0.025).filter((s) => s.role !== "decoration").length;
     notify(`Saved "${result.template.label}" as a ${regions}-region template (${saved.count} in the library).`, "success");
     console.log(

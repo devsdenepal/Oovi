@@ -1,0 +1,249 @@
+[
+  {
+    "id": "nepali-festival-greeting",
+    "label": "Nepali festival greeting",
+    "type": "social",
+    "blurb": "Cultural greeting with expressive Nepali typography and festive photography",
+    "description": "A warm, celebratory composition combining Nepali headline typography, traditional cultural imagery, subtle decorative motifs and corporate branding.",
+    "mood": ["festive", "warm", "cultural"],
+    "density": "normal",
+    "tags": ["festival", "Nepali", "greeting", "corporate"],
+    "keywords": ["Dashain", "Tihar", "Nepali New Year", "festival wishes"],
+    "sizes": ["portrait", "square", "landscape"],
+    "palette": {
+      "background": "#FFFCF5",
+      "ink": "#30251D",
+      "accent": "#E96A16"
+    },
+    "variants": [
+      {
+        "id": "festive-photo",
+        "label": "Festive photographic greeting",
+        "slots": [
+          {
+            "id": "brand",
+            "role": "header",
+            "kind": "dsl",
+            "box": { "x": 0.08, "y": 0.035, "w": 0.84, "h": 0.075 },
+            "asset": "none",
+            "size": "body",
+            "align": "center",
+            "maxChars": 48,
+            "describe": "Company logo identity or paired organization names",
+            "sample": "YOUR COMPANY"
+          },
+          {
+            "id": "festival-label",
+            "role": "tagline",
+            "kind": "dsl",
+            "box": { "x": 0.08, "y": 0.15, "w": 0.84, "h": 0.05 },
+            "optional": true,
+            "asset": "none",
+            "size": "small",
+            "align": "center",
+            "maxChars": 35,
+            "describe": "Small festival or seasonal label",
+            "sample": "FESTIVE GREETINGS"
+          },
+          {
+            "id": "festival-title",
+            "role": "headline",
+            "kind": "dls",
+            "box": { "x": 0.08, "y": 0.21, "w": 0.84, "h": 0.12 },
+            "asset": "none",
+            "size": "display",
+            "align": "center",
+            "maxChars": 45,
+            "describe": "Large Nepali festival title in a suitable Devanagari font",
+            "sample": "दशैंको हार्दिक मंगलमय शुभकामना"
+          },
+          {
+            "id": "greeting-message",
+            "role": "details",
+            "kind": "dsl",
+            "box": { "x": 0.12, "y": 0.35, "w": 0.76, "h": 0.09 },
+            "optional": true,
+            "asset": "none",
+            "size": "subtitle",
+            "align": "center",
+            "maxChars": 95,
+            "describe": "Secondary greeting or culturally appropriate wishes",
+            "sample": "सुख, शान्ति, समृद्धि र सफलताको हार्दिक शुभकामना।"
+          },
+          {
+            "id": "festival-artwork",
+            "role": "hero",
+            "kind": "image",
+            "box": { "x": 0.04, "y": 0.46, "w": 0.92, "h": 0.36 },
+            "asset": "photo",
+            "size": "body",
+            "align": "center",
+            "maxChars": 0,
+            "describe": "Authentic festival photography, marigold decorations, traditional architecture or culturally relevant celebration scene"
+          },
+          {
+            "id": "organization-message",
+            "role": "sections",
+            "kind": "dsl",
+            "box": { "x": 0.08, "y": 0.835, "w": 0.84, "h": 0.045 },
+            "optional": true,
+            "asset": "none",
+            "size": "small",
+            "align": "center",
+            "maxChars": 75,
+            "describe": "Short message from the organization",
+            "sample": "Warm wishes from our entire team."
+          },
+          {
+            "id": "contact-footer",
+            "role": "footer",
+            "kind": "dsl",
+            "box": { "x": 0.025, "y": 0.91, "w": 0.95, "h": 0.065 },
+            "optional": true,
+            "asset": "none",
+            "size": "small",
+            "align": "center",
+            "maxChars": 100,
+            "describe": "Website or social media handle",
+            "sample": "example.com  ·  @yourcompany"
+          },
+          {
+            "id": "festive-accent",
+            "role": "decoration",
+            "kind": "dsl",
+            "box": { "x": 0, "y": 0.985, "w": 1, "h": 0.015 },
+            "optional": true,
+            "asset": "none",
+            "size": "small",
+            "align": "left",
+            "maxChars": 0,
+            "describe": "Narrow festive accent strip"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "corporate-announcement",
+    "label": "Corporate announcement",
+    "type": "social",
+    "blurb": "A polished company announcement with bold typography and a restrained visual",
+    "description": "A flexible corporate communication layout designed for milestones, new services, hiring campaigns, partnerships and official announcements.",
+    "mood": ["professional", "clear", "confident"],
+    "density": "normal",
+    "tags": ["corporate", "announcement", "business", "social"],
+    "keywords": ["company news", "partnership", "hiring", "milestone", "award"],
+    "sizes": ["square", "portrait", "landscape", "wide"],
+    "palette": {
+      "background": "#F7F8FA",
+      "ink": "#20252D",
+      "accent": "#E66C26"
+    },
+    "variants": [
+      {
+        "id": "announcement-editorial",
+        "label": "Editorial announcement",
+        "slots": [
+          {
+            "id": "brand",
+            "role": "header",
+            "kind": "dsl",
+            "box": { "x": 0.06, "y": 0.05, "w": 0.68, "h": 0.06 },
+            "asset": "none",
+            "size": "body",
+            "align": "left",
+            "maxChars": 45,
+            "describe": "Company or institution identity",
+            "sample": "YOUR COMPANY"
+          },
+          {
+            "id": "announcement-label",
+            "role": "tagline",
+            "kind": "dsl",
+            "box": { "x": 0.06, "y": 0.17, "w": 0.65, "h": 0.055 },
+            "asset": "none",
+            "size": "small",
+            "align": "left",
+            "maxChars": 35,
+            "describe": "Announcement category",
+            "sample": "COMPANY ANNOUNCEMENT"
+          },
+          {
+            "id": "headline",
+            "role": "headline",
+            "kind": "dsl",
+            "box": { "x": 0.06, "y": 0.255, "w": 0.82, "h": 0.19 },
+            "asset": "none",
+            "size": "display",
+            "align": "left",
+            "maxChars": 55,
+            "describe": "Main announcement in bold, readable typography",
+            "sample": "We're building something bigger"
+          },
+          {
+            "id": "supporting-copy",
+            "role": "details",
+            "kind": "dsl",
+            "box": { "x": 0.06, "y": 0.475, "w": 0.58, "h": 0.15 },
+            "optional": true,
+            "asset": "none",
+            "size": "body",
+            "align": "left",
+            "maxChars": 100,
+            "describe": "Short explanatory message or milestone details",
+            "sample": "A new chapter in our journey starts today. Thank you for growing with us."
+          },
+          {
+            "id": "announcement-visual",
+            "role": "hero",
+            "kind": "image",
+            "box": { "x": 0.69, "y": 0.46, "w": 0.25, "h": 0.3 },
+            "asset": "illustration",
+            "size": "body",
+            "align": "left",
+            "maxChars": 0,
+            "describe": "Brand-aligned abstract graphic, award symbol, team photo or relevant illustration"
+          },
+          {
+            "id": "cta",
+            "role": "cta",
+            "kind": "dsl",
+            "box": { "x": 0.06, "y": 0.69, "w": 0.57, "h": 0.065 },
+            "optional": true,
+            "asset": "none",
+            "size": "body",
+            "align": "left",
+            "maxChars": 45,
+            "describe": "Action relevant to the announcement",
+            "sample": "Read the Full Announcement"
+          },
+          {
+            "id": "contact-footer",
+            "role": "footer",
+            "kind": "dsl",
+            "box": { "x": 0.06, "y": 0.87, "w": 0.88, "h": 0.085 },
+            "optional": true,
+            "asset": "none",
+            "size": "small",
+            "align": "left",
+            "maxChars": 100,
+            "describe": "Website and social media details",
+            "sample": "example.com  ·  @yourcompany"
+          },
+          {
+            "id": "footer-rule",
+            "role": "decoration",
+            "kind": "dsl",
+            "box": { "x": 0.06, "y": 0.82, "w": 0.88, "h": 0.003 },
+            "optional": true,
+            "asset": "none",
+            "size": "small",
+            "align": "left",
+            "maxChars": 0,
+            "describe": "Fine divider separating announcement and footer"
+          }
+        ]
+      }
+    ]
+  }
+]

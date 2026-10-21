@@ -5,12 +5,13 @@
  * `[data-ltab]` switch panels `[data-lpanel]`. Pure DOM, no imports —
  * the handle is created in main.js and handed to App for view shortcuts.
  *
+ * @param {{initial?: string}} [options] tab to open first (defaults to Insert)
  * @returns {{set: (id: string) => void, current: () => string}}
  */
-export function initLeftTabs() {
+export function initLeftTabs(options = {}) {
   const buttons = [...document.querySelectorAll("[data-ltab]")];
   const panels = [...document.querySelectorAll("[data-lpanel]")];
-  let active = "insert";
+  let active = options.initial || "insert";
 
   function set(id) {
     if (!panels.some((p) => p.dataset.lpanel === id)) return;
@@ -26,6 +27,6 @@ export function initLeftTabs() {
   }
 
   buttons.forEach((b) => b.addEventListener("click", () => set(b.dataset.ltab)));
-  set("insert");
+  set(active);
   return { set, current: () => active };
 }
