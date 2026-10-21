@@ -16,6 +16,7 @@
 import { instantiateTemplate, templateExample } from "./templates";
 import { ensurePaletteRoles } from "./paletteRoles";
 import { PALETTES } from "./palettes";
+import { buildDecorations, defaultDecorationSpecs, recommendDecorationSpecs } from "./decorations";
 
 /** Palette used when a template's type has no more specific mapping. */
 const FALLBACK_PALETTE = "mono-editorial";
@@ -241,6 +242,26 @@ export function sampleDesignForTemplate(
       continue;
     }
     if (component.role === "decoration") {
+      // Use the same art-direction vocabulary as live generation so a manual
+      // template preview shows the kind of marks the template's mood implies,
+      // not one universal placeholder. Keep the sample to one family so the
+      // strip stays calm; live L4 may choose a second accent.
+      const suggested = recommendDecorationSpecs({
+        component,
+        plan: { style: `${template.description || ""} ${(template.mood || []).join(" ")}` },
+        goal: { summary: template.blurb, keywords: template.keywords || [] },
+        rawPrompt: `${(template.tags || []).join(" ")} ${(template.keywords || []).join(" ")}`,
+      });
+      const specs = suggested.length ? [suggested[0]] : defaultDecorationSpecs(component);
+      const decoration = buildDecorations(specs, box, palette, {
+        prefix: component.id,
+      });
+      if (decoration.length) {
+        elements.push(...decoration);
+        continue;
+      }
+      // A zero-area or malformed saved slot should still show a deliberate
+      // mark rather than disappearing from the preview.
       const bar = Math.max(2, Math.min(8, Math.round(box.height * 0.22)));
       elements.push({
         id: `${component.id}-bar`,

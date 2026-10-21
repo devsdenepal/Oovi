@@ -1150,3 +1150,41 @@ A template build that fails only the global headline check now refines the
 headline region in place instead of replanning the whole canvas through the
 free-form skeleton. That replan cost ~3.5 minutes per attempt and then rebuilt
 every region with the slow fallback copy model.
+
+### Decoration is a reusable vocabulary, not free-form shapes
+
+L4 used to receive a decoration budget of "8-14 tiny shapes", which produced
+either a single slab or arbitrary shape soup. Decoration is now a closed
+vocabulary: circles, arcs, stars, dots, grids, squiggles, underlines, corner
+brackets, ribbons, pills, dividers, small icons and background patterns. The
+model returns one or two specs (`kind`, optional `variant`, `density`,
+`color`), never text or pixel coordinates.
+
+`src/layout/decorations.js` owns the vocabulary and deterministic expansion
+into ordinary DSL rectangles, circles and lines. That adds no renderer types
+and no validator exceptions, bounds each region to 24 primitives, and
+guarantees the same spec renders identically in the live preview, manual
+template sample and saved-template materialization. Every emitted element
+carries `role: "decoration"` and a palette-role colour.
+
+Because the 270m model otherwise anchors on the first example, the prompt
+includes a short, deterministic art-direction recommendation derived from the
+brief and style (festival -> stars + small icon, corporate -> divider, tech ->
+grid + arcs). The recommendation is guidance; the full vocabulary remains in
+the prompt and schema. Decoration regions use a dedicated strict schema, and a
+failed response falls back to the region's inferred family rather than leaving
+a hole or reverting to a generic bar.
+
+The decoration work exposed a renderer bug: Fabric's `Line` positions itself
+around the centre of its two points, and the DSL adapter was overriding
+`left/top/origin` with the start point. Any segment going left or up shifted by
+its own length, so stars rendered as corners and squiggles as broken ticks.
+`createLine` now lets Fabric compute the line's centre, and `objectToDsl`
+recovers both endpoints through the object's transform. This is renderer
+plumbing, not a decoration-specific type: every DSL line benefits, and the
+decorations still use the same rectangle/circle/line primitives.
+
+`tests/decorations.test.mjs` exercises every advertised kind and variant in
+wide, square, tall and thin boxes, asserts the DSL validates and stays inside
+the reservation, checks palette-only paint, the 24-piece bound, schema/prompt
+coverage, theme recommendations and template-sample integration.

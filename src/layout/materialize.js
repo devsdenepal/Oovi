@@ -12,6 +12,8 @@
  * template renders like.
  */
 
+import { buildDecorations, defaultDecorationSpecs } from "./decorations";
+
 /**
  * @param {Array} components instantiated plan components
  * @param {{width:number,height:number}} canvas
@@ -21,7 +23,6 @@
 export function materializePlan(components, canvas, palette) {
   const roles = palette?.roles || {};
   const ink = roles.textPrimary || palette.ink;
-  const accent = roles.accent || palette.accent;
   const elements = [];
   for (const c of components || []) {
     const box = c.box;
@@ -39,21 +40,24 @@ export function materializePlan(components, canvas, palette) {
       continue;
     }
     if (c.role === "decoration") {
-      // L4 scatters small shapes inside a decoration reservation, not a slab.
-      const dots = 8;
-      const radius = Math.max(3, Math.floor(box.height / 4));
-      for (let i = 0; i < dots; i++) {
-        const cx = box.x + ((i + 0.5) / dots) * box.width;
-        elements.push({
-          id: `${c.id}-dot-${i}`,
-          type: "circle",
-          role: "decoration",
-          x: Math.round(cx - radius),
-          y: Math.round(box.y + box.height / 2 - radius),
-          radius,
-          fill: accent,
-        });
+      // Use the same vocabulary and deterministic expansion as the live
+      // preview and the AI region pass. A saved template must not render a
+      // different decoration from the one the user saw.
+      const decoration = buildDecorations(defaultDecorationSpecs(c), box, palette, { prefix: c.id });
+      if (decoration.length) {
+        elements.push(...decoration);
+        continue;
       }
+      elements.push({
+        id: `${c.id}-bar`,
+        type: "rectangle",
+        role: "decoration",
+        x: box.x,
+        y: Math.round(box.y + box.height / 2 - Math.min(4, box.height / 2)),
+        width: box.width,
+        height: Math.max(1, Math.min(8, box.height)),
+        fill: palette.accent,
+      });
       continue;
     }
     const fontSize = c.fontSize || 24;

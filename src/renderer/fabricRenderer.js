@@ -170,8 +170,17 @@ function createCircle(element) {
 }
 
 function createLine(element) {
+  // Fabric's Line positions itself around the centre of its two points. Do not
+  // override left/top/origin with the DSL start point: for a segment that goes
+  // left or up that shifts the line by its own length and the missing arm
+  // collapses onto its neighbour (stars render as corners).
+  const options = { ...commonOptions(element) };
+  delete options.left;
+  delete options.top;
+  delete options.originX;
+  delete options.originY;
   const line = new Line([element.x, element.y, element.x2, element.y2], {
-    ...commonOptions(element),
+    ...options,
     stroke: element.stroke,
     strokeWidth: element.strokeWidth ?? 2,
     strokeLineCap: "round",
@@ -428,12 +437,29 @@ function objectToDsl(obj, origin) {
       base.fill = obj.designFill || obj.fill;
       base.gradient = obj.designGradient || undefined;
       break;
-    case "line":
-      base.x2 = obj.x2;
-      base.y2 = obj.y2;
+    case "line": {
+      if (!obj.group && typeof obj.calcLinePoints === "function") {
+        // The line renders around its centre, so its stored x1/y1/x2/y2 are
+        // not enough after a move. Recover both endpoints in canvas space and
+        // bake the transform into them. The renderer then redraws the same
+        // segment from a clean angle 0 instead of rotating it twice.
+        const points = obj.calcLinePoints();
+        const matrix = obj.calcTransformMatrix();
+        const start = new Point(points.x1, points.y1).transform(matrix);
+        const end = new Point(points.x2, points.y2).transform(matrix);
+        base.x = Math.round(start.x);
+        base.y = Math.round(start.y);
+        base.x2 = Math.round(end.x);
+        base.y2 = Math.round(end.y);
+        delete base.angle;
+      } else {
+        base.x2 = obj.x2;
+        base.y2 = obj.y2;
+      }
       base.stroke = obj.stroke;
       base.strokeWidth = obj.strokeWidth;
       break;
+    }
     case "group":
       base.children = obj.getObjects().map((k) => objectToDsl(k));
       break;

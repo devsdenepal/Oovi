@@ -475,14 +475,23 @@ export class App {
         }
         this.editor.loadDesign(sample.design);
         for (const component of activePlan.components) {
-          const own = new Set([
+          // Text/image samples have one stable id. Decorations expand into
+          // several primitives, so own every decoration id under this region
+          // and retire the whole layer when the AI decoration lands.
+          const fixed = new Set([
             `${SAMPLE_PREFIX}${component.id}-text`,
             `${SAMPLE_PREFIX}${component.id}-img`,
             `${SAMPLE_PREFIX}${component.id}-bar`,
           ]);
+          const decorationPrefix = `${SAMPLE_PREFIX}${component.id}-`;
           placeholders.set(
             component.id,
-            sample.design.elements.filter((element) => own.has(String(element.id))).map((element) => element.id),
+            sample.design.elements
+              .filter((element) => {
+                const id = String(element.id);
+                return fixed.has(id) || (element.role === "decoration" && id.startsWith(decorationPrefix));
+              })
+              .map((element) => element.id),
           );
         }
         return true;
@@ -528,14 +537,13 @@ export class App {
           const isText = component.kind !== "image" && component.role !== "decoration";
           const copy = Array.isArray(copyDeck.copies?.[component.id]) ? copyDeck.copies[component.id] : [];
           if (copy.length) return { ...component, copy, copySource: "deck" };
-          if (!isText) return component;
-          // Last resort: a grounded line from the brief so L4 still receives
-          // copy to lay out instead of inventing (and duplicating) its own.
-          return {
-            ...component,
-            copy: [fallbackCopy(component, goal, prompt)],
-            copySource: "fallback",
-          };
+          // No deterministic fallback copy. A rejected deck line used to be
+          // replaced with one grounded line from the brief and then locked in
+          // as "approved", so every uncovered region printed the same subject
+          // and refinement could only swap it around. The region now regenerates
+          // from the brief instead; if that fails, salvageElements() keeps the
+          // pieces that are valid on their own rather than forcing a line.
+          return component;
         }),
         copySource: copyDeck.source,
         copyStats: copyDeck.stats,
@@ -550,7 +558,7 @@ export class App {
       if (copyDeck.source !== "mock" && copyDeck.source !== "none") {
         this.assistant.pushAssistant(
           copyDeck.source === "fallback"
-            ? "Copy deck unavailable — regions will use grounded fallback copy."
+            ? "Copy deck unavailable — regions will regenerate from the brief."
             : `Copy deck: ${copiedRegions.length}/${textRegions.length} text regions (${copyDeck.source}).`,
         );
       }
@@ -863,8 +871,13 @@ export class App {
         this.assistant.pushAssistant(`${why} Refining the same template instead of choosing a new one…`);
         status("3/5 Refining the template…");
         try {
+          // Only approved deck copy is carried over to the re-tuned template.
+          // The old fallback copy is deliberately not reused: it was the same
+          // generic line for every uncovered region, and re-injecting it
+          // locked the repetition back in after refinement.
           const copies = Object.fromEntries(
             plan.components
+              .filter((component) => component.copySource === "deck")
               .filter((component) => Array.isArray(component.copy) && component.copy.length)
               .map((component) => [component.id, component.copy]),
           );
@@ -877,13 +890,7 @@ export class App {
             if (copies[component.id]) {
               return { ...component, copy: copies[component.id], copySource: "reuse" };
             }
-            const isText = component.kind !== "image" && component.role !== "decoration";
-            if (!isText) return component;
-            return {
-              ...component,
-              copy: [fallbackCopy(component, goal, prompt)],
-              copySource: "fallback",
-            };
+            return component;
           });
           plan2.copySource = "reuse";
           const knobs = (tuning) =>
@@ -984,6 +991,33 @@ export class App {
         failed = plan.components.length - applied.length;
         appliedTotal = applied.reduce((s, [, r]) => s + r.count, 0);
         renderedIds = applied.map(([id]) => id);
+
+        // Duplicate detection: identical text copy across regions repeats the
+        // exact regression the fallback created. Read the RENDERED text (the
+        // deck lines plus whatever L4 wrote), not the plan, so duplicates
+        // created by a failed deck are caught too.
+        const designTexts = new Map();
+        for (const el of this.editor.toDesign().elements || []) {
+          if (el.type === "text" && typeof el.content === "string") {
+            const text = el.content.trim();
+            if (text) designTexts.set(el.id, text);
+          }
+        }
+        const contentMap = new Map();
+        for (const [id, region] of result.regions) {
+          const comp = plan.components.find((c) => c.id === id);
+          if (!comp) continue;
+          const owned = (region.ids || []).map((x) => designTexts.get(x)).filter(Boolean);
+          if (!owned.length) continue;
+          const text = owned.join(" ");
+          if (contentMap.has(text)) {
+            const prevId = contentMap.get(text);
+            const msg = `Duplicate copy of "${text}" in regions ${prevId} and ${id}`;
+            failing.set(prevId, msg);
+            failing.set(id, msg);
+          }
+          if (text) contentMap.set(text, id);
+        }
       }
 
       // The wireframe has served its purpose: the design is settled, so retire

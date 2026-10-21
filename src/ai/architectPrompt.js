@@ -15,6 +15,7 @@
 
 import { DESIGN_CORE, formatGoal } from "./layerPrompt";
 import { formatPaletteRoles, textRoleFor, ensurePaletteRoles } from "../layout/paletteRoles";
+import { DECORATION_VOCABULARY, recommendDecorationSpecs } from "../layout/decorations";
 
 export function buildPlanPrompt(userPrompt, canvas) {
   const w = canvas.width;
@@ -54,7 +55,7 @@ export function buildPlanPrompt(userPrompt, canvas) {
     "- Texture rule: when the style needs texture DSL shapes cannot draw (pixel-art, neon glow, grunge, watercolor), the hero AND at least one decoration MUST be kind \"image\" with the full style baked into their describe.",
     "- Header is a kicker, at most half the headline size.",
     "- Rich headlines: multicolor titles are adjacent text runs (one element per color, same baseline, shared left edge); funky/pixel themes get an outline (stroke = canvas background, strokeWidth about fontSize/10) and a monospace fontFamily.",
-    "- Scatter decoration as MANY small DSL shapes (dots, stars, sparkles: tiny circles, rects, short lines) inside one decoration component — grouped, never image calls.",
+    "- Decoration regions use a reusable vocabulary (circles, arcs, stars, dots, grids, squiggles, underlines, corner brackets, ribbons, pills, dividers, small icons, background patterns); keep one family plus one small accent, behind content, never image calls.",
     "- Group every card/row: one group per visual unit (badge, info item, activity card). A group counts as one element and moves as one piece — density lives in groups, not in component count.",
     "- One style string (e.g. \"funky retro pixel-art, neon on dark\") baked into palette choices AND every image describe.",
     "",
@@ -84,8 +85,11 @@ export function buildComponentPrompt(component, canvas, plan, goal = null, rawPr
   const regionName = `${component.id || ""} ${component.describe || ""}`.toLowerCase();
   const isAttribution = /\b(attribution|who said|credit)\b/.test(regionName);
   const isQuote = /\b(quote|quotation)\b/.test(regionName);
+  const isDecoration = component.role === "decoration";
   const roleRule =
-    component.role === "headline"
+    isDecoration
+      ? " Decoration: choose one or two families from the vocabulary below. Do not write text and do not invent arbitrary shapes; the renderer expands your choice into editable vector primitives."
+      : component.role === "headline"
       ? ` Headline floor: fontSize at least ${Math.max(24, Math.round(canvas.height * 0.06))}px and larger than any other text. Use the approved copy or the message itself; never describe the design. Keep it short (at most 6 words) so it fits on one line at the planned size.`
       : component.role === "details"
         ? " Details floor: every text at least 16px. Use the approved copy or the exact date, time, venue and link from the original request — never a template example or a description of the design."
@@ -109,13 +113,32 @@ export function buildComponentPrompt(component, canvas, plan, goal = null, rawPr
         ...approvedCopy.map((line, index) => `${index + 1}. ${line}`),
       ].join("\n")
     : "";
+  const recommendedDecorations = isDecoration
+    ? recommendDecorationSpecs({ component, plan, goal, rawPrompt })
+    : [];
+  const decorationExample = recommendedDecorations.length
+    ? JSON.stringify(recommendedDecorations)
+    : '[{"kind":"stars","variant":"scatter","density":"normal","color":"accent"}]';
+  const decorationBlock = isDecoration
+    ? [
+        "Decoration vocabulary — choose from these exact kind ids:",
+        DECORATION_VOCABULARY,
+        "Decoration rules:",
+        "- Pick 1-2 kinds that reinforce the design. Use the recommendation below as the starting point; prefer one main family plus one small accent.",
+        `- Recommended for this design: ${recommendedDecorations.map((item) => item.kind).join(", ") || "stars"}.`,
+        "- `variant` is optional; use one of the listed variants for the chosen kind.",
+        "- `density` is sparse, normal or dense. `color` is accent, ink, secondary or muted.",
+        "- Leave `elements` empty. Put the specs in `decorations`.",
+        "- Never add text, copy, dates, labels or image elements to this region.",
+      ].join("\n")
+    : "";
   // Colour is a ROLE decision, not a hex decision. The prompt names the role
   // this region paints with AND its literal hex: q8 otherwise writes the role
   // name into `fill` ("textPrimary") or drops the leading "#".
   const roles = ensurePaletteRoles(palette);
   const colourRole =
-    component.role === "decoration"
-      ? `accent (${roles.accent}) — shapes, rules and small marks only, never text`
+    isDecoration
+      ? `accent (${roles.accent}) by default; use accent, ink (${roles.textPrimary}), secondary (${roles.textSecondary}) or muted (${roles.muted}) — shapes, rules and small marks only, never text`
       : component.role === "cta"
         ? `ctaText (${roles.ctaText}) on a ctaSurface block (${roles.ctaSurface})`
         : textRoleFor(component.role) === "textSecondary"
@@ -133,8 +156,8 @@ export function buildComponentPrompt(component, canvas, plan, goal = null, rawPr
   // itself is the wall clock: an unbounded "1-8 elements" got regions writing
   // 700+ tokens. Density is bought with SIZE and grouping, not element count.
   const budget =
-    component.role === "decoration"
-      ? "8-14 tiny shapes (dots, rects, short lines), grouped as one unit."
+    isDecoration
+      ? "1-2 decoration specs; the renderer expands them into 6-24 editable shapes."
       : component.role === "sections"
         ? /card|caption|item/i.test(component.id)
           ? "2-3 elements: one short label and one line of detail — this is a single card, not a section."
@@ -160,14 +183,21 @@ export function buildComponentPrompt(component, canvas, plan, goal = null, rawPr
     DESIGN_CORE,
     "",
     "Your task now: output the elements for exactly ONE region of the design. Another pass already decided the regions and this region's box; you only fill it.",
+    decorationBlock,
     "Region rules:",
-    "- Fill the box deliberately; an empty-looking box is a failure. Every element stays fully inside this box AND inside the canvas.",
+    isDecoration
+      ? "- Fill the reserved box with a deliberate decoration layer; it sits behind the content."
+      : "- Fill the box deliberately; an empty-looking box is a failure. Every element stays fully inside this box AND inside the canvas.",
     "- The reserved box is authoritative: do not move or resize the region, and do not invent a different position for it.",
-    "- Match the box: a tall box wants larger type and more grouped rows; a thin bar wants a single line.",
+    isDecoration
+      ? "- Match the box shape: thin strips want a few small marks; large boxes can carry a fuller pattern."
+      : "- Match the box: a tall box wants larger type and more grouped rows; a thin bar wants a single line.",
     "- Give every element an id prefixed with the region id.",
     "- Paint with the named palette roles only. Never invent a hue; the palette is a system, not a suggestion.",
     `- "fill" and "stroke" MUST be literal hex strings from the palette (for example "${roles.textPrimary}"), never a role name, a bare hex without "#", or prose.`,
-    'Return ONLY valid JSON: {"elements":[...]}.',
+    isDecoration
+      ? `Return ONLY valid JSON: {"elements":[],"decorations":${decorationExample}}.`
+      : 'Return ONLY valid JSON: {"elements":[...]}.',
     "",
     "[User]",
     `Canvas: ${canvas.width}x${canvas.height}. ${rolesLine} Theme: ${plan.style || "clean modern"}.`,

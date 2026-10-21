@@ -13,6 +13,7 @@ Oovi turns natural-language prompts into **fully editable graphic designs**. Not
 - **Full editor**: select, drag, resize, rotate, inline text editing, multi-select, layers panel, context toolbar, and AI-assisted edits.
 - **Reliable undo/redo**: post-state history where the current canvas is always on top; empty floors are no-ops and new edits clear the redo stack.
 - **Imagery, query-driven**: AI-filled designs search Unsplash by a query grounded in the brief, and manual template previews use Unsplash placeholders — the generated image always follows the prompt, never a random asset.
+- **A reusable decoration vocabulary**: Gemma picks from circles, arcs, stars, dots, grids, squiggles, underlines, corner brackets, ribbons, pills, dividers, small icons and background patterns. The renderer expands that choice into ordinary editable primitives, so decoration never becomes a flat image or free-form shape soup.
 - **Background removal**: one-click subject isolation for local images.
 - **Export**: PNG, JPG, SVG, and PDF.
 - **Autosave + Postgres persistence**: designs save to a local Postgres database with debounced autosave and soft-delete trash.
@@ -94,6 +95,16 @@ A few properties make it survivable on a slow local model:
   planned no smaller than 12px, the quality gate's readability floor, so
   utility labels stay legible at export.
 
+- **Decoration is a closed vocabulary, not a shape prompt.** Decoration
+  regions return one or two compact specs (`kind`, `variant`, `density`,
+  `color`) instead of free-form coordinates. `src/layout/decorations.js`
+  expands them into bounded rectangles, circles and line segments, all tagged
+  `role: "decoration"` and painted from palette roles. The same builders drive
+  the immediate template preview, manual template samples and saved-template
+  materialization, so those paths cannot drift from live generation. L4 gets a
+  short theme-grounded recommendation (for example, stars plus a small flower
+  icon for a festival brief) while the full vocabulary remains available.
+
 The **Design DSL** is the contract between AI and canvas: a plain-JSON document of canvas + elements:
 
 ```json
@@ -169,7 +180,7 @@ src/
   components/    Dashboard, TopBar, InsertPanel, AssistantPanel, DebugTabs, …
   design/        DSL schema, validator, canvas presets, design types
   editor/        Fabric canvas wrapper, HistoryManager, layers, toolbar
-  layout/        Layout engine, semantic validation, type scale
+  layout/        Layout engine, semantic validation, type scale, decoration vocabulary
   reference/     Reference-image analysis (color, OCR, shapes, layout)
   renderer/      Design DSL ↔ Fabric.js (only place that touches Fabric)
   storage/       REST client for /api/designs

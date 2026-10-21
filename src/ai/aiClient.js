@@ -47,6 +47,12 @@ import {
 import { validateSemanticDesign } from "../layout/semanticValidator";
 import { resolveSemanticDesign } from "../layout/layoutEngine";
 import { validateDesign } from "../design/designValidator";
+import {
+  DECORATIONS_SCHEMA,
+  buildDecorations,
+  normalizeDecorationSpecs,
+  recommendDecorationSpecs,
+} from "../layout/decorations";
 
 /**
  * AI service abstraction.
@@ -257,8 +263,25 @@ const COMPONENTS_SCHEMA = {
   type: "object",
   properties: {
     elements: { type: "array", items: { anyOf: [TEXT_VAR, RECT_VAR, CIRCLE_VAR, LINE_VAR, IMAGE_VAR, GROUP_VAR] } },
+    // Optional for prose regions, required for decoration regions. Keeping it
+    // out of `required` here lets the strict grammar stay backward-compatible
+    // with text/headline calls.
+    decorations: DECORATIONS_SCHEMA,
   },
   required: ["elements"],
+  additionalProperties: false,
+};
+
+// Decoration regions do not write copy or arbitrary pixel shapes. The model
+// chooses a compact spec from the reusable vocabulary; buildDecorations()
+// expands it into validated primitives.
+const DECORATION_COMPONENT_SCHEMA = {
+  type: "object",
+  properties: {
+    elements: { type: "array", items: { anyOf: [TEXT_VAR, RECT_VAR, CIRCLE_VAR, LINE_VAR, IMAGE_VAR, GROUP_VAR] } },
+    decorations: { ...DECORATIONS_SCHEMA, minItems: 1 },
+  },
+  required: ["decorations"],
   additionalProperties: false,
 };
 const PLAN_SCHEMA = {
@@ -1473,16 +1496,18 @@ export async function componentDesign(component, canvas, plan, goal = null, opts
   console.log(
     `[ai] component start ${component.id} (${component.kind}/${component.role || "?"})${correction ? " [refine]" : ""}`,
   );
+  const isDecoration = component.role === "decoration";
   let errors = [];
   let lastParsed = null;
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     const base = buildComponentPrompt(component, canvas, plan, goal, rawPrompt);
+    const retryShape = isDecoration ? '{"decorations":[...]}' : '{"elements":[...]}';
     const requestPrompt =
       attempt === 1
         ? correction
           ? `${base}\n\n[Correction]\n${correction}`
           : base
-        : `${base}\n\n[Correction]\nYour previous response failed (${errors.join("; ")}). Return ONLY {"elements":[...]}.`;
+        : `${base}\n\n[Correction]\nYour previous response failed (${errors.join("; ")}). Return ONLY ${retryShape}.`;
     // Same fail-fast rule as planning: corrections fix bad JSON, not networks.
     // Each attempt gets a fresh scanner and tells the caller to retract
     // anything painted from the previous attempt's partial output.
@@ -1491,7 +1516,7 @@ export async function componentDesign(component, canvas, plan, goal = null, opts
     let text;
     try {
       text = await fetchAiChat(requestPrompt, {
-        schema: COMPONENTS_SCHEMA,
+        schema: isDecoration ? DECORATION_COMPONENT_SCHEMA : COMPONENTS_SCHEMA,
         // Template plans carry a slot-specific example that anchors q8 copy.
         // Without a template there is no anchor; the tiny model tends to
         // echo the prompt rules there, so that path stays on the fallback.
@@ -1511,15 +1536,47 @@ export async function componentDesign(component, canvas, plan, goal = null, opts
       throw new Error(`Component "${component.id}" failed: ${error.message}`);
     }
     const parsed = regexRepairJson(text);
-    if (parsed === null || !Array.isArray(parsed.elements)) {
+    const parsedElements = Array.isArray(parsed?.elements) ? parsed.elements : [];
+    const parsedDecorations = normalizeDecorationSpecs(parsed?.decorations || parsed?.decoration);
+    if (parsed === null || (!parsedElements.length && !parsedDecorations.length)) {
       console.warn(`[ai] component retry ${component.id} attempt=${attempt} errors=unrecoverable JSON`);
       errors = ["unrecoverable JSON"];
+      continue;
+    }
+
+    // Decoration is a vocabulary choice, not another chance to draw arbitrary
+    // shapes. Expand the model's chosen family into our deterministic,
+    // palette-safe primitives and validate those before the raw fallback.
+    if (isDecoration && parsedDecorations.length) {
+      const built = buildDecorations(parsedDecorations, component.box, palette, { prefix: component.id });
+      const decCheck = validateDesign({ canvas, elements: built });
+      if (decCheck.ok) {
+        const finished = finishRegion(decCheck.design.elements, component, plan, goal, rawPrompt);
+        console.log(
+          `[ai] decoration ${component.id} ${Date.now() - tStart}ms kinds=${parsedDecorations.map((d) => d.kind).join(",")} pieces=${finished.length}`,
+        );
+        return { elements: finished, source: "ai" };
+      }
+      console.warn(
+        `[ai] decoration retry ${component.id} attempt=${attempt} errors=${decCheck.errors.slice(0, 2).join("; ")}`,
+      );
+      errors = decCheck.errors;
+      lastParsed = { ...parsed, elements: [] };
+      // Fall through to the legacy raw-element path only if the model also
+      // produced shapes. A failed spec is otherwise handled by the
+      // deterministic default at the end of the call.
+      if (!parsedElements.length) continue;
+    }
+
+    if (!parsedElements.length) {
+      console.warn(`[ai] component retry ${component.id} attempt=${attempt} errors=no elements`);
+      errors = ["no elements"];
       continue;
     }
     // The model sometimes invents an element role ("hidden") or writes a
     // palette role into that field. Normalise before colour repair so the
     // owning region's role remains authoritative.
-    const roleFixed = normalizeElementRoles(parsed.elements, component.role);
+    const roleFixed = normalizeElementRoles(parsedElements, component.role);
     // Colors are the #1 q8 failure: it writes role names ("textPrimary"),
     // bare hex ("E8F0FF"), empty strings, or prose into `fill`. Repair to the
     // palette before validation so a color typo cannot discard a good region.
@@ -1544,17 +1601,12 @@ export async function componentDesign(component, canvas, plan, goal = null, opts
         const shapes = usable.filter((e) => e.type !== "text");
         usable = shapes.length
           ? shapes
-          : [
-              {
-                id: `${component.id}-bar`,
-                type: "rectangle",
-                x: component.box.x,
-                y: component.box.y,
-                width: component.box.width,
-                height: Math.min(8, component.box.height),
-                fill: palette.accent,
-              },
-            ];
+          : buildDecorations(
+              recommendDecorationSpecs({ component, plan, goal, rawPrompt }),
+              component.box,
+              palette,
+              { prefix: component.id },
+            );
       }
       const finished = finishRegion(usable, component, plan, goal, rawPrompt);
       console.log(
@@ -1580,6 +1632,26 @@ export async function componentDesign(component, canvas, plan, goal = null, opts
       `[ai] component salvage ${component.id} ${Date.now() - tStart}ms kept=${salvaged.length}/${lastParsed.elements.length} errors=${errors.slice(0, 2).join("; ")}`,
     );
     return { elements: finishRegion(salvaged, component, plan, goal, rawPrompt), source: "salvage" };
+  }
+  // Decorations are deterministic by construction. If the model could not
+  // produce a usable spec, use the region's inferred default rather than
+  // leaving a hole in the template (the sample is still visible, but the
+  // finished design should own a real decoration layer too).
+  if (isDecoration) {
+    const parsedSpecs = normalizeDecorationSpecs(lastParsed?.decorations || lastParsed?.decoration);
+    const specs = parsedSpecs.length
+      ? parsedSpecs
+      : recommendDecorationSpecs({ component, plan, goal, rawPrompt });
+    const built = buildDecorations(specs, component.box, palette, {
+      prefix: component.id,
+    });
+    const fallback = validateDesign({ canvas, elements: built });
+    if (fallback.ok) {
+      console.warn(
+        `[ai] decoration fallback ${component.id} ${Date.now() - tStart}ms pieces=${fallback.design.elements.length} errors=${errors.slice(0, 2).join("; ")}`,
+      );
+      return { elements: finishRegion(fallback.design.elements, component, plan, goal, rawPrompt), source: "fallback" };
+    }
   }
   throw new Error(`Component "${component.id}" failed: ${errors.slice(0, 3).join("; ")}`);
 }
