@@ -5,10 +5,12 @@
  * still leaks prompt instructions into copy ("one short supporting line…"),
  * describes the design instead of addressing the reader, ignores the region's
  * character budget, or writes a footer for the wrong occasion. This module is
- * the last, non-model step: keep valid, prompt-specific copy; replace a bad
- * line with the copy deck's approved line for that region, then with a short
- * context-aware line derived from the brief. It never invents facts.
+ * the last, non-model step: keep valid, prompt-specific copy; restore an
+ * approved copy-deck line when one exists; otherwise drop the line so L4 can
+ * regenerate it. It never invents facts or fallback copy.
  */
+
+import { FEATURES } from "../config/features";
 
 const INSTRUCTION_PHRASES = [
   "supporting line",
@@ -147,6 +149,101 @@ const OCCASION_MESSAGES = [
 
 const normalize = (value) => String(value ?? "").replace(/\s+/g, " ").trim();
 
+/**
+ * Words that carry no copy identity. Repetition of these across regions is
+ * grammar, not a duplicated message, so the strict repetition check ignores
+ * them (two regions can both say "the" without reading as the same line).
+ */
+const COPY_STOPWORDS = new Set([
+  "a", "an", "the", "and", "or", "but", "for", "to", "of", "in", "on", "at",
+  "by", "with", "from", "as", "is", "are", "was", "were", "be", "been",
+  "being", "it", "its", "this", "that", "these", "those", "you", "your",
+  "we", "our", "us", "they", "their", "them", "i", "me", "my", "he", "she",
+  "his", "her", "not", "no", "so", "if", "then", "than", "too", "very",
+  "can", "will", "just", "now", "new", "more", "most", "all", "any", "each",
+  "every", "into", "over", "under", "about", "after", "before", "up", "down",
+  "out", "off", "again", "also", "only", "own", "same", "such", "via", "per",
+  "one", "two", "three", "four", "five", "six", "seven", "eight", "nine",
+  "ten", "here", "there", "what", "when", "where", "who", "why", "how",
+]);
+
+/** Lowercased words with punctuation stripped — the unit of the repeat guard. */
+export function contentWords(value) {
+  const text = normalizeCopyLines(value).join(" ").toLowerCase();
+  return (text.match(/[a-z0-9]+(?:['’-][a-z0-9]+)*/g) || []).map((word) =>
+    word.replace(/['’]s$/, ""),
+  );
+}
+
+/** Distinctive content words in one region — the vocabulary the repeat guard tracks. */
+export function distinctiveWords(value, allowed = null) {
+  const allowedSet = allowed instanceof Set ? allowed : new Set(allowed || []);
+  return [
+    ...new Set(
+      contentWords(value).filter(
+        (word) => word.length >= 3 && !COPY_STOPWORDS.has(word) && !allowedSet.has(word),
+      ),
+    ),
+  ];
+}
+
+/**
+ * Content words shared with an existing used-word set. Stopwords, numbers and
+ * greeting/brand vocabulary are allowed to repeat; everything else is a
+ * duplicate of copy already shipped in another region.
+ */
+export function repeatedContentWords(value, usedWords, allowed = null) {
+  const seen = usedWords instanceof Set ? usedWords : new Set(usedWords || []);
+  return distinctiveWords(value, allowed).filter((word) => seen.has(word));
+}
+
+/** Occasion and brand vocabulary is a sign-off, not a duplicate message. */
+export function repeatableWords(goal, rawPrompt = "") {
+  const shared = [
+    extractGreeting(goal, rawPrompt),
+    extractOccasionTagline(goal, rawPrompt),
+    extractBrand(goal, rawPrompt),
+  ]
+    .filter(Boolean)
+    .join(" ");
+  return new Set(contentWords(shared).filter((word) => word.length >= 3));
+}
+
+/**
+ * Strict repetition report over rendered regions. Any content word shared by
+ * two regions is flagged, so "New AI Assistant" and "New AI Assistant Product
+ * Launch" can no longer both ship just because the strings differ. Returns a
+ * Map of region id -> message (both sides of a collision are reported).
+ */
+export function findCopyRepetitions(regions, goal = null, rawPrompt = "") {
+  if (!FEATURES.copy.strictRepetition) return new Map();
+  const allowed = repeatableWords(goal, rawPrompt);
+  const owners = new Map(); // word -> region id
+  const reported = new Map();
+  const flag = (id, message) => {
+    const list = reported.get(id) || [];
+    if (!list.includes(message)) list.push(message);
+    reported.set(id, list);
+  };
+  for (const region of regions || []) {
+    const id = String(region?.id || "");
+    const text = String(region?.text || "");
+    if (!id || !text.trim()) continue;
+    const words = distinctiveWords(text, allowed);
+    const shared = words.filter((word) => owners.has(word));
+    if (shared.length) {
+      const prev = owners.get(shared[0]);
+      const message = `repeats ${shared.map((word) => `"${word}"`).join(", ")} from region "${prev}"`;
+      flag(id, message);
+      flag(prev, message);
+    }
+    for (const word of words) if (!owners.has(word)) owners.set(word, id);
+  }
+  return reported;
+}
+
+
+
 /** One string or an array of strings -> a clean array of copy lines. */
 export function normalizeCopyLines(value) {
   const list = Array.isArray(value) ? value : [value];
@@ -160,12 +257,6 @@ function clamp(text, maxChars) {
   const space = cut.lastIndexOf(" ");
   if (space >= Math.floor(maxChars * 0.55)) cut = cut.slice(0, space);
   return cut.replace(/[\s,;:—–-]+$/, "").trim();
-}
-
-function firstSentence(text, maxChars) {
-  const value = normalize(text);
-  const sentence = value.split(/(?<=[.!?])\s+/)[0] || value;
-  return clamp(sentence, maxChars);
 }
 
 export function briefText(goal, rawPrompt = "") {
@@ -472,106 +563,79 @@ export function copyProblem(value, component, goal, rawPrompt = "") {
   return "";
 }
 
-/** Short, context-aware copy for a region whose AI answer is unusable. */
-export function fallbackCopy(component, goal, rawPrompt = "", index = 0) {
+/** Matches an element's content against every approved deck line, in order. */
+function approvedDeckMatcher(component) {
   const approved = normalizeCopyLines(component?.copy);
-  const preferred = approved[index] || approved[0];
-  if (preferred) return clamp(preferred, component?.maxChars);
+  return (content) => {
+    if (!approved.length) return true;
+    const lines = normalizeCopyLines(String(content).split(/\n+/));
+    return lines.length === approved.length && lines.every((line, index) => line === approved[index]);
+  };
+}
 
-  const subject = normalize(goal?.subject) || normalize(goal?.summary) || "Your design";
-  const keywords = (Array.isArray(goal?.keywords) ? goal.keywords : [])
-    .map(normalize)
-    .filter(Boolean);
-  const summary = normalize(goal?.summary) || subject;
-  const greeting = extractGreeting(goal, rawPrompt);
-  const brand = extractBrand(goal, rawPrompt);
-  const designType = String(goal?.designType || "").toLowerCase();
-  const extras = keywords.filter((keyword) => !subject.toLowerCase().includes(keyword.toLowerCase()));
-  const max = Number(component?.maxChars) || 0;
-  let text;
-
-  if (component?.id === "brand") {
-    text = brand || subject;
-  } else if (isAttributionComponent(component)) {
-    text = brand ? `— ${brand}` : subject;
-  } else if (isRecipientComponent(component) && greeting) {
-    text = recipientLine(goal, max);
-  } else {
-    switch (component?.role) {
-      case "headline":
-        text = greeting || subject;
-        break;
-      case "tagline": {
-        const tagline = extractOccasionTagline(goal, rawPrompt);
-        text = tagline && (!max || tagline.length <= max)
-          ? tagline
-          : greeting || (extras.length ? `${subject} · ${extras[0]}` : subject);
-        break;
+/**
+ * Text lines a region would have to regenerate: the model wrote copy that
+ * fails validation and there is no approved deck line to restore. Used by the
+ * L4 loop so it retries the region instead of silently substituting a generic
+ * line.
+ */
+export function regionCopyProblems(elements, component, goal, rawPrompt = "") {
+  const approved = normalizeCopyLines(component?.copy);
+  const matchesApprovedDeck = approvedDeckMatcher(component);
+  const problems = [];
+  let textIndex = 0;
+  const walk = (list) => {
+    for (const element of Array.isArray(list) ? list : []) {
+      if (!element || typeof element !== "object") continue;
+      if (element.type === "group" && Array.isArray(element.children)) {
+        walk(element.children);
+        continue;
       }
-      case "header":
-        text = brand || greeting || subject;
-        break;
-      case "cta":
-        if (designType === "invitation") text = "RSVP";
-        else if (designType === "ticket") text = "Get tickets";
-        else if (designType === "menu") text = "View the menu";
-        else if (designType === "schedule") text = "See the schedule";
-        else if (designType === "listing") text = "See the lineup";
-        else if (designType === "product-launch" && /\bearly access\b/i.test(briefText(goal, rawPrompt))) {
-          text = "Get early access";
-        } else text = "Learn more";
-        break;
-      case "footer":
-        if (greeting) text = brand ? `${greeting} from ${brand}` : greeting;
-        else if (designType === "invitation") text = "RSVP";
-        else if (designType === "ticket") text = "Get tickets";
-        else if (designType === "product-launch") text = "Learn more";
-        else text = "Details TBA";
-        break;
-      case "details":
-        if (greeting) {
-          text = isSourceDetails(component)
-            ? sourceMessage(goal, rawPrompt, brand)
-            : brand
-              ? `${occasionMessage(goal, rawPrompt)} From ${brand}.`
-              : occasionMessage(goal, rawPrompt);
-        } else {
-          const sentence = firstSentence(summary, component?.maxChars);
-          text = sentence && !isMetaCopy(sentence) && !hasStyleDescription(sentence) ? sentence : subject;
-        }
-        break;
-      case "attribution":
-        text = brand ? `— ${brand}` : subject;
-        break;
-      default:
-        text = subject;
+      if (element.type !== "text" || typeof element.content !== "string") continue;
+      const index = textIndex++;
+      const approvedLine = approved[index];
+      const exactApproved =
+        approved.length > 0 && normalize(element.content) === approvedLine;
+      const problem = copyProblem(element.content, component, goal, rawPrompt);
+      if (!problem && (exactApproved || matchesApprovedDeck(element.content))) continue;
+      const restorable =
+        approvedLine && !copyProblem(approvedLine, component, goal, rawPrompt);
+      if (!restorable) {
+        problems.push({
+          index,
+          content: normalize(element.content),
+          reason: problem || "does not match the approved deck copy",
+        });
+      }
     }
-  }
-  return clamp(text, component?.maxChars);
+  };
+  walk(elements);
+  return problems;
 }
 
 /**
  * Returns a new element list with text content made layout-safe. IDs and all
  * non-copy props are preserved so the region remains a normal design patch.
- * Approved copy-deck lines are preferred over the generic fallback.
+ * Approved copy-deck lines are preferred. A text element with unusable copy
+ * and no approved line is DROPPED — never replaced with generic copy. L4
+ * retries copy problems (regionCopyProblems) before this runs, so dropping is
+ * the final safety net, not the normal path.
  */
 export function sanitizeRegionCopy(elements, component, goal, rawPrompt = "") {
   if (!Array.isArray(elements) || !elements.length) return elements;
   const approved = normalizeCopyLines(component?.copy);
-  const matchesApprovedDeck = (content) => {
-    if (!approved.length) return true;
-    const lines = normalizeCopyLines(String(content).split(/\n+/));
-    return lines.length === approved.length && lines.every((line, index) => line === approved[index]);
-  };
+  const matchesApprovedDeck = approvedDeckMatcher(component);
   let textIndex = 0;
   const walk = (list) =>
-    list.map((element) => {
-      if (!element || typeof element !== "object") return element;
+    list.flatMap((element) => {
+      if (!element || typeof element !== "object") return [element];
       if (element.type === "group" && Array.isArray(element.children)) {
         const children = walk(element.children);
-        return children === element.children ? element : { ...element, children };
+        // An empty group would fail validation; drop it with its text.
+        if (!children.length) return [];
+        return [{ ...element, children }];
       }
-      if (element.type !== "text" || typeof element.content !== "string") return element;
+      if (element.type !== "text" || typeof element.content !== "string") return [element];
       const index = textIndex++;
       const approvedLine = approved[index];
       const exactApproved = approved.length > 0 && normalize(element.content) === approvedLine;
@@ -579,14 +643,17 @@ export function sanitizeRegionCopy(elements, component, goal, rawPrompt = "") {
       // When the copy deck approved exact lines, L4 is a layout pass: a valid
       // but rewritten line ("Graphilla Technology — Happy Diwali", "1. To our
       // clients…") is still a deviation. Put the approved line back.
-      if (!problem && (exactApproved || matchesApprovedDeck(element.content))) return element;
+      if (!problem && (exactApproved || matchesApprovedDeck(element.content))) return [element];
       const replacement =
-        approvedLine && !copyProblem(approvedLine, component, goal, rawPrompt)
-          ? approvedLine
-          : fallbackCopy(component, goal, rawPrompt, index);
-      const clamped = clamp(replacement, component?.maxChars);
-      if (!clamped || clamped === element.content) return element;
-      return { ...element, content: clamped };
+        approvedLine && !copyProblem(approvedLine, component, goal, rawPrompt) ? approvedLine : "";
+      const clamped = replacement ? clamp(replacement, component?.maxChars) : "";
+      if (!clamped) {
+        console.warn(
+          `[copy] dropping invalid text in ${component?.id || "?"}: ${problem || "not approved"} — "${normalize(element.content)}"`,
+        );
+        return [];
+      }
+      return clamped === element.content ? [element] : [{ ...element, content: clamped }];
     });
   return walk(elements);
 }

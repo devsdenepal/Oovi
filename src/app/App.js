@@ -9,7 +9,8 @@ import {
 } from "../ai/aiClient";
 import { evaluateDesign } from "../ai/quality";
 import { correctColors } from "../ai/colorCorrect";
-import { fallbackCopy } from "../ai/copySanitize";
+import { findCopyRepetitions } from "../ai/copySanitize";
+import { FEATURES } from "../config/features";
 import { searchPhotos, triggerDownload } from "../ai/unsplash";
 import { isMockEnabled, mockAssetDataUrl } from "../ai/mockProvider";
 import { validateDesign } from "../design/designValidator";
@@ -850,6 +851,36 @@ export class App {
       const failing = crowded ? new Map() : flagRegions(report, plan);
       const hasErrors = report.issues.some((i) => i.severity === "error");
 
+      // Strict word-repetition check over what actually rendered. Comparing
+      // the rendered elements (not the plan) catches duplicates introduced by
+      // a failed deck pass, and word-level matching catches partial copies
+      // such as "New AI Assistant" / "New AI Assistant Product Launch".
+      const collectCopyRepetitions = () => {
+        const designTexts = new Map();
+        for (const el of this.editor.toDesign().elements || []) {
+          if (el.type === "text" && typeof el.content === "string") {
+            const text = el.content.trim();
+            if (text) designTexts.set(el.id, text);
+          }
+        }
+        const renderedRegions = [];
+        for (const [id, region] of result.regions) {
+          const comp = plan.components.find((c) => c.id === id);
+          if (!comp) continue;
+          const owned = (region.ids || []).map((x) => designTexts.get(x)).filter(Boolean);
+          if (!owned.length) continue;
+          renderedRegions.push({ id, text: owned.join(" ") });
+        }
+        return findCopyRepetitions(renderedRegions, goal, prompt);
+      };
+      const mergeRepetitions = (map) => {
+        for (const [id, messages] of collectCopyRepetitions()) {
+          const list = map.get(id) || [];
+          for (const message of messages) if (!list.includes(message)) list.push(message);
+          map.set(id, list);
+        }
+      };
+
       // A small headline is a copy/fit problem, not a layout problem.
       // Replanning the whole canvas for it sends a template build down the
       // slow free-form path (and usually produces a worse layout). Route the
@@ -865,6 +896,10 @@ export class App {
           failing.set(headlineComponent.id, notes);
         }
       }
+
+      // Copy repetition is a region failure too: regenerate the offenders
+      // rather than letting the duplicate words ship.
+      if (!crowded && FEATURES.copy.strictRepetition) mergeRepetitions(failing);
 
       const replanOnce = async (why) => {
         console.warn(`[build] refining template in place: ${why}`);
@@ -918,12 +953,9 @@ export class App {
         }
       };
 
-      if (crowded) {
-        await replanOnce(
-          `Sections overlap (${overlapErrors} collisions) — stagger boxes vertically with breathing room, keep bars behind their own text.`,
-        );
-      } else if (failing.size) {
-        const ids = [...failing.keys()].slice(0, 2);
+      const refineRegions = async (reasons) => {
+        const ids = [...reasons.keys()].slice(0, FEATURES.copy.maxRegionRepairs);
+        if (!ids.length) return;
         console.warn(`[build] per-region refinement: ${ids.join(", ")}`);
         this.assistant.pushAssistant(
           `Refining ${ids.length} template region(s) in place: ${ids.join(", ")} — the layout stays the same.`,
@@ -943,7 +975,7 @@ export class App {
             const { elements } = await componentDesign(component, canvas, plan, goal, {
               rawPrompt: prompt,
               onProgress: live(`Refining ${cid}`),
-              correction: `This region was flagged by the quality gate: ${failing.get(cid).join(" ")} Rewrite ONLY this region's elements to fix it. Keep every element inside the reserved box.`,
+              correction: `This region was flagged by the quality gate: ${reasons.get(cid).join(" ")} Rewrite ONLY this region's elements to fix it. Keep every element inside the reserved box and do not reuse words from other regions.`,
             });
             const at = component.role === "decoration" ? 0 : undefined;
             let res;
@@ -980,8 +1012,34 @@ export class App {
           }
         }
         report = reEval(plan);
+      };
+
+      if (crowded) {
+        await replanOnce(
+          `Sections overlap (${overlapErrors} collisions) — stagger boxes vertically with breathing room, keep bars behind their own text.`,
+        );
+      } else if (failing.size) {
+        await refineRegions(failing);
       } else if (hasErrors) {
         await replanOnce(`First pass under-built (${topDefects(report)}).`);
+      }
+
+      // One strict second pass: the first regeneration may have fixed the
+      // quality issue but left a word collision, and replanning can reuse deck
+      // copy. Regenerate the remaining offenders once; if it still persists,
+      // say so instead of silently shipping the duplicate.
+      if (!crowded && FEATURES.copy.strictRepetition && FEATURES.copy.repairPasses > 1) {
+        const repeats = collectCopyRepetitions();
+        if (repeats.size) {
+          await refineRegions(repeats);
+          const remaining = collectCopyRepetitions();
+          if (remaining.size) {
+            this.assistant.pushAssistant(
+              `Copy repetition remains in ${[...remaining.keys()].join(", ")} — the region kept its last valid content.`,
+              "error",
+            );
+          }
+        }
       }
 
       // Recount from per-region state so the summary reflects any refinement.
@@ -992,32 +1050,6 @@ export class App {
         appliedTotal = applied.reduce((s, [, r]) => s + r.count, 0);
         renderedIds = applied.map(([id]) => id);
 
-        // Duplicate detection: identical text copy across regions repeats the
-        // exact regression the fallback created. Read the RENDERED text (the
-        // deck lines plus whatever L4 wrote), not the plan, so duplicates
-        // created by a failed deck are caught too.
-        const designTexts = new Map();
-        for (const el of this.editor.toDesign().elements || []) {
-          if (el.type === "text" && typeof el.content === "string") {
-            const text = el.content.trim();
-            if (text) designTexts.set(el.id, text);
-          }
-        }
-        const contentMap = new Map();
-        for (const [id, region] of result.regions) {
-          const comp = plan.components.find((c) => c.id === id);
-          if (!comp) continue;
-          const owned = (region.ids || []).map((x) => designTexts.get(x)).filter(Boolean);
-          if (!owned.length) continue;
-          const text = owned.join(" ");
-          if (contentMap.has(text)) {
-            const prevId = contentMap.get(text);
-            const msg = `Duplicate copy of "${text}" in regions ${prevId} and ${id}`;
-            failing.set(prevId, msg);
-            failing.set(id, msg);
-          }
-          if (text) contentMap.set(text, id);
-        }
       }
 
       // The wireframe has served its purpose: the design is settled, so retire

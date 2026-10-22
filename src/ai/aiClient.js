@@ -28,7 +28,8 @@ import { buildPatchPrompt } from "./patchPrompt";
 import { validatePatch } from "./patch";
 import { contrastRatio } from "./quality";
 import { fitRegion } from "../layout/regionFit";
-import { sanitizeRegionCopy, copyProblem, normalizeCopyLines } from "./copySanitize";
+import { FEATURES } from "../config/features";
+import { sanitizeRegionCopy, copyProblem, normalizeCopyLines, regionCopyProblems, repeatedContentWords, repeatableWords, distinctiveWords } from "./copySanitize";
 import { buildCopyPrompt, buildCopyRepairPrompt, copyDeckSchema, copyLineLimit, isCopyRegion } from "./copyPrompt";
 import { normalizeElementRoles } from "./elementRoles";
 import {
@@ -1156,6 +1157,7 @@ export async function planCopyDeck(components, goal, canvas, rawPrompt = "", onP
             rawPrompt,
             rejected,
             canvas,
+            copies,
           ),
           {
             schema: copyDeckSchema(rejected.map((entry) => entry.component)),
@@ -1217,9 +1219,12 @@ function normalizeCopyDeck(parsed, components) {
   return copies;
 }
 
-function validateCopyDeck(copies, components, goal, rawPrompt) {
+export function validateCopyDeck(copies, components, goal, rawPrompt) {
   const rejected = [];
   const seen = new Map();
+  const usedWords = new Map(); // word -> component id
+  // Occasion/brand vocabulary is a sign-off, not a repeated message.
+  const allowed = repeatableWords(goal, rawPrompt);
   for (const component of components) {
     const lines = copies[component.id] || [];
     let reason = copyProblem(lines, component, goal, rawPrompt);
@@ -1229,7 +1234,22 @@ function validateCopyDeck(copies, components, goal, rawPrompt) {
       if (duplicate) {
         reason = `duplicates copy used by ${seen.get(duplicate)}`;
       } else {
-        normalized.forEach((line) => seen.set(line, component.id));
+        // Strict word repetition: a region may not reuse another region's
+        // distinctive vocabulary, even when the full line differs. This is
+        // what let "New AI Assistant" and "New AI Assistant Product Launch"
+        // ship together before.
+        const repeated = FEATURES.copy.strictRepetition
+          ? repeatedContentWords(lines, new Set(usedWords.keys()), allowed)
+          : [];
+        if (repeated.length) {
+          const owners = [...new Set(repeated.map((word) => usedWords.get(word)))];
+          reason = `repeats ${repeated.map((word) => `"${word}"`).join(", ")} used by ${owners.join(", ")}`;
+        } else {
+          normalized.forEach((line) => seen.set(line, component.id));
+          for (const word of distinctiveWords(lines, allowed)) {
+            if (!usedWords.has(word)) usedWords.set(word, component.id);
+          }
+        }
       }
     }
     if (reason) rejected.push({ component, lines, reason });
@@ -1607,6 +1627,23 @@ export async function componentDesign(component, canvas, plan, goal = null, opts
               palette,
               { prefix: component.id },
             );
+      }
+      // Copy is part of the region contract, not a post-process: if the model
+      // wrote a line the guard cannot ship and no approved deck line exists,
+      // regenerate THIS region with the failure as a correction. Generic
+      // fallback copy is gone; the final sanitizer drops what still fails.
+      const copyIssues = regionCopyProblems(usable, component, goal, rawPrompt);
+      if (copyIssues.length) {
+        const summary = copyIssues
+          .slice(0, 3)
+          .map((issue) => `text element ${issue.index + 1} "${issue.content}": ${issue.reason}`)
+          .join("; ");
+        console.warn(`[ai] component copy retry ${component.id} attempt=${attempt} summary=${summary}`);
+        if (FEATURES.copy.regenerateBadCopy && attempt < MAX_ATTEMPTS) {
+          errors = [`copy failed — ${summary}`];
+          lastParsed = { ...parsed, elements: prepared };
+          continue;
+        }
       }
       const finished = finishRegion(usable, component, plan, goal, rawPrompt);
       console.log(

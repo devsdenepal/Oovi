@@ -184,8 +184,17 @@ export function buildCopyPrompt(components, goal, rawPrompt, canvas) {
     .join("\n");
 }
 
-export function buildCopyRepairPrompt(components, goal, rawPrompt, rejected, canvas) {
+export function buildCopyRepairPrompt(components, goal, rawPrompt, rejected, canvas, accepted = {}) {
   const regions = (components || []).filter(isCopyRegion);
+  const rejectedIds = new Set(
+    (rejected || [])
+      .map((entry) => entry.component?.id || entry.id)
+      .filter(Boolean),
+  );
+  const usedLines = Object.entries(accepted && typeof accepted === "object" ? accepted : {})
+    .filter(([id, lines]) => !rejectedIds.has(id) && Array.isArray(lines) && lines.length)
+    .map(([id, lines]) => `- ${id}: "${lines.map(normalize).filter(Boolean).join(" / ")}"`)
+    .join("\n");
   const problems = (rejected || [])
     .map((entry) => {
       const id = entry.component?.id || entry.id || "?";
@@ -199,6 +208,9 @@ export function buildCopyRepairPrompt(components, goal, rawPrompt, rejected, can
     "Your task now: rewrite ONLY the rejected regions below. Keep the same reader-facing voice and obey the limits.",
     "The first copy pass had these problems:",
     problems,
+    usedLines
+      ? `Copy already accepted for other regions — do not reuse any of its distinctive words:\n${usedLines}`
+      : "",
     "",
     "[User]",
     `Canvas: ${canvas.width}x${canvas.height} pixels.`,

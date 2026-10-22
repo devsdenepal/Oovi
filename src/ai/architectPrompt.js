@@ -14,6 +14,7 @@
  */
 
 import { DESIGN_CORE, formatGoal } from "./layerPrompt";
+import { FEATURES } from "../config/features";
 import { formatPaletteRoles, textRoleFor, ensurePaletteRoles } from "../layout/paletteRoles";
 import { DECORATION_VOCABULARY, recommendDecorationSpecs } from "../layout/decorations";
 
@@ -188,7 +189,7 @@ export function buildComponentPrompt(component, canvas, plan, goal = null, rawPr
     isDecoration
       ? "- Fill the reserved box with a deliberate decoration layer; layer shapes behind text and add a dense accent (dots, grids, stars, dividers)."
       : "- Fill the box deliberately; no large empty zones. Layer decorative shapes (bars, dots, small grids, thin strips) behind the text, add a small label/badge beside it, keep content prominent, and add a supporting detail (divider, chip, pill) where space allows.",
-    "- Visual coverage: aim to fill at least 80% of the reserved box. Layer shapes behind the text, add a side panel, small label or badge beside it, and use supporting details (thin rules, dots, chips) so no large area stays empty.",
+    `- Visual coverage: aim to fill at least ${Math.round(FEATURES.layout.coverageTarget * 100)}% of the reserved box. Layer shapes behind the text, add a side panel, small label or badge beside it, and use supporting details (thin rules, dots, chips) so no large area stays empty.`,
     "- The reserved box is authoritative: do not move or resize the region, and do not invent a different position for it.",
     isDecoration
       ? "- Match the box shape: thin strips want a few small marks; large boxes can carry a fuller pattern."

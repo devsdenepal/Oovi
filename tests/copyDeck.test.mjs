@@ -8,7 +8,8 @@ import {
   copyDeckSchema,
   copyLineLimit,
 } from "../src/ai/copyPrompt";
-import { copyProblem, extractGreeting, extractOccasionTagline } from "../src/ai/copySanitize";
+import { copyProblem, extractGreeting, extractOccasionTagline, findCopyRepetitions } from "../src/ai/copySanitize";
+import { validateCopyDeck } from "../src/ai/aiClient";
 import { normalizeElementRole, normalizeElementRoles } from "../src/ai/elementRoles";
 
 const GOAL = {
@@ -84,6 +85,89 @@ test("the repair prompt repeats only the rejected regions", () => {
   assert.match(prompt, /claims availability/);
   assert.match(prompt, /Occasion: Happy Diwali/);
   assert.doesNotMatch(prompt, /headline-quote/);
+});
+
+test("strict repetition guard flags partial copies, not just exact duplicates", () => {
+  const repeats = findCopyRepetitions(
+    [
+      { id: "headline-main", text: "New AI Assistant" },
+      { id: "tagline-line", text: "New AI Assistant Product Launch" },
+    ],
+    { summary: "Launch a new AI assistant product.", subject: "AI assistant", keywords: [] },
+    "",
+  );
+  assert.deepEqual([...repeats.keys()].sort(), ["headline-main", "tagline-line"]);
+  assert.match(repeats.get("tagline-line")[0], /"assistant" from region "headline-main"/);
+});
+
+test("strict repetition guard allows stopwords and the greeting sign-off", () => {
+  const repeats = findCopyRepetitions(
+    [
+      { id: "headline-main", text: "Happy Diwali" },
+      { id: "footer-registration", text: "Happy Diwali from Graphilla Technology" },
+    ],
+    GOAL,
+    "",
+  );
+  assert.equal(repeats.size, 0);
+});
+
+test("copy-deck validation rejects a region that reuses another region's words", () => {
+  const components = [
+    { id: "headline-main", role: "headline", kind: "dsl", describe: "title", maxChars: 40 },
+    { id: "tagline-line", role: "tagline", kind: "dsl", describe: "supporting line", maxChars: 60 },
+  ];
+  const rejected = validateCopyDeck(
+    {
+      "headline-main": ["New AI Assistant"],
+      "tagline-line": ["New AI Assistant Product Launch"],
+    },
+    components,
+    { summary: "Launch a new AI assistant product.", subject: "AI assistant", keywords: [] },
+    "",
+  );
+  assert.equal(rejected.length, 1);
+  assert.equal(rejected[0].component.id, "tagline-line");
+  assert.match(rejected[0].reason, /repeats "assistant"/);
+});
+
+test("copy-deck validation keeps a repeated greeting in the footer sign-off", () => {
+  const components = [
+    { id: "headline-main", role: "headline", kind: "dsl", describe: "title", maxChars: 40 },
+    { id: "footer-registration", role: "footer", kind: "dsl", describe: "sign-off", maxChars: 70 },
+  ];
+  const rejected = validateCopyDeck(
+    {
+      "headline-main": ["Happy Diwali"],
+      "footer-registration": ["Happy Diwali from Graphilla Technology"],
+    },
+    components,
+    GOAL,
+    "",
+  );
+  assert.equal(rejected.length, 0);
+});
+
+test("the repair prompt names accepted copy so the rewrite differs", () => {
+  const rejected = [
+    {
+      component: REGIONS[2],
+      lines: ["Available now"],
+      reason: "claims availability not stated in the brief",
+    },
+  ];
+  const prompt = buildCopyRepairPrompt(
+    [REGIONS[2]],
+    GOAL,
+    "A Diwali card from Graphilla.",
+    rejected,
+    CANVAS,
+    { "headline-quote": ["Happy Diwali"], "footer-registration": ["Available now"] },
+  );
+  assert.match(prompt, /Copy already accepted for other regions/);
+  const block = prompt.split("Copy already accepted")[1].split("[User]")[0];
+  assert.match(block, /headline-quote: "Happy Diwali"/);
+  assert.doesNotMatch(block, /footer-registration/);
 });
 
 test("greeting extraction handles the Diwali brief", () => {

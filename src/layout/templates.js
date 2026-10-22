@@ -25,6 +25,7 @@ import { sizeToPx } from "./typeScale";
 import { GRID, snapBox, snapFontSize } from "./grid";
 import { EXAMPLES } from "./templateExamples";
 import { templateFromJson } from "./templateJson";
+import { FEATURES } from "../config/features";
 import raw from "./templateLibrary.json";
 import extraRaw from "./extraTemplates.json";
 const JSON_TABLE = raw.map(templateFromJson);
@@ -37,7 +38,8 @@ const GUTTER = 0.025;
 /** Decoration lives outside the frame so it can never sit under text. */
 const DECOR_H = 0.045;
 
-const DENSITY = { tight: 0.42, dense: 0.6, normal: 0.82, airy: 1.2 };
+const DENSITY = FEATURES.layout.gutters;
+const DEFAULT_DENSITY = FEATURES.layout.density in DENSITY ? FEATURES.layout.density : "normal";
 
 const rect = (x, y, w, h) => ({ x, y, w, h });
 
@@ -1354,7 +1356,7 @@ function tuningEntries(value, valueKeys) {
  * read from the model — only the bounded vocabulary below survives.
  */
 export function sanitizeTuning(raw, template) {
-  const out = { variant: template?.variants?.[0]?.id || "", density: "tight", hide: [], scale: {}, align: {}, images: {} };
+  const out = { variant: template?.variants?.[0]?.id || "", density: DEFAULT_DENSITY, hide: [], scale: {}, align: {}, images: {} };
   if (!raw || typeof raw !== "object") return out;
   if (template) {
     const wanted = String(raw.variant ?? raw.variantId ?? "");

@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { sanitizeRegionCopy } from "../src/ai/copySanitize";
+import { sanitizeRegionCopy, regionCopyProblems } from "../src/ai/copySanitize";
 
 const GOAL = {
   summary: "Launch a new AI assistant for teams.",
@@ -31,25 +31,25 @@ const component = (overrides = {}) => ({
   ...overrides,
 });
 
-test("instruction leakage is replaced with prompt-derived copy", () => {
+test("instruction leakage is dropped, never replaced with fallback copy", () => {
   const out = sanitizeRegionCopy(
     [text("One short supporting line (audience, price or what is included), not a repeat of the headline")],
     component(),
     GOAL,
   );
-  assert.equal(out[0].content, "AI assistant · automation");
+  assert.equal(out.length, 0);
 });
 
-test("an over-budget headline falls back to the subject", () => {
+test("an over-budget headline is dropped instead of truncated to the subject", () => {
   const out = sanitizeRegionCopy(
     [text("Launch our new AI assistant that automates repetitive team work")],
     component({ role: "headline", maxChars: 34, describe: "Large cinematic title", sample: "Beyond the ordinary" }),
     GOAL,
   );
-  assert.equal(out[0].content, "AI assistant");
+  assert.equal(out.length, 0);
 });
 
-test("a template sample is not allowed to pass as generated copy", () => {
+test("a template sample is dropped, not replaced", () => {
   const out = sanitizeRegionCopy(
     [text("Introducing the next generation of intelligent tools.")],
     component({
@@ -60,7 +60,7 @@ test("a template sample is not allowed to pass as generated copy", () => {
     }),
     GOAL,
   );
-  assert.equal(out[0].content, "Launch a new AI assistant for teams.");
+  assert.equal(out.length, 0);
 });
 
 test("short, valid copy is kept", () => {
@@ -68,45 +68,45 @@ test("short, valid copy is kept", () => {
   assert.equal(out[0].content, "Meet the AI assistant");
 });
 
-test("a footer without a link or date gets a safe footer line", () => {
+test("a footer without a link or date is dropped, not given a safe line", () => {
   const out = sanitizeRegionCopy(
     [text("Join us — Dark, confident product announcement")],
     component({ id: "footer", role: "footer", maxChars: 65, describe: "Website or launch date", sample: "" }),
     GOAL,
   );
-  assert.equal(out[0].content, "Learn more");
+  assert.equal(out.length, 0);
 });
 
-test("a CTA without an action gets the launch action", () => {
+test("a CTA without an action is dropped, not given a generic action", () => {
   const out = sanitizeRegionCopy(
     [text("Dark, confident product announcement")],
     component({ id: "cta", role: "cta", maxChars: 35, describe: "Short call to action", sample: "" }),
     GOAL,
   );
-  assert.equal(out[0].content, "Learn more");
+  assert.equal(out.length, 0);
 });
 
-test("early access is only used when the brief asks for it", () => {
+test("early access is never injected as fallback copy", () => {
   const out = sanitizeRegionCopy(
     [text("Dark, confident product announcement")],
     component({ id: "cta", role: "cta", maxChars: 35, describe: "Short call to action", sample: "" }),
     { ...GOAL, summary: "Open early access to the new AI assistant.", mustInclude: ["early access"] },
   );
-  assert.equal(out[0].content, "Get early access");
+  assert.equal(out.length, 0);
 });
 
 test("a generic audience label does not pass as a tagline", () => {
   const out = sanitizeRegionCopy([text("Team members")], component(), GOAL);
-  assert.equal(out[0].content, "AI assistant · automation");
+  assert.equal(out.length, 0);
 });
 
-test("a generic brand label falls back to the subject", () => {
+test("a generic brand label is dropped, not replaced with the subject", () => {
   const out = sanitizeRegionCopy(
     [text("Team members")],
     component({ id: "brand", role: "header", maxChars: 32, describe: "Minimal brand or production label", sample: "NEPTECH LABS" }),
     GOAL,
   );
-  assert.equal(out[0].content, "AI assistant");
+  assert.equal(out.length, 0);
 });
 
 const DIWALI = {
@@ -117,7 +117,7 @@ const DIWALI = {
   mustInclude: ["greeting", "organiser signature"],
 };
 
-test("a greeting-card footer uses the occasion, not availability", () => {
+test("a greeting-card footer with availability language is dropped", () => {
   const out = sanitizeRegionCopy(
     [text("Available now")],
     component({
@@ -129,10 +129,10 @@ test("a greeting-card footer uses the occasion, not availability", () => {
     }),
     DIWALI,
   );
-  assert.equal(out[0].content, "Happy Diwali from Graphilla Technology");
+  assert.equal(out.length, 0);
 });
 
-test("a keyword-join tagline is replaced with the greeting", () => {
+test("a keyword-join tagline is dropped", () => {
   const out = sanitizeRegionCopy(
     [text("Diwali · Happy")],
     component({
@@ -144,10 +144,10 @@ test("a keyword-join tagline is replaced with the greeting", () => {
     }),
     DIWALI,
   );
-  assert.equal(out[0].content, "Festival of Lights");
+  assert.equal(out.length, 0);
 });
 
-test("meta copy that describes the card is replaced with reader-facing copy", () => {
+test("meta copy that describes the card is dropped", () => {
   const out = sanitizeRegionCopy(
     [text("A festive greeting card wishing a Happy Diwali from Graphilla Technology")],
     component({
@@ -159,10 +159,10 @@ test("meta copy that describes the card is replaced with reader-facing copy", ()
     }),
     DIWALI,
   );
-  assert.equal(out[0].content, "Wishing you joy and light from Graphilla Technology.");
+  assert.equal(out.length, 0);
 });
 
-test("an attribution must name the source, not the audience or language", () => {
+test("an attribution naming the audience or language is dropped", () => {
   const out = sanitizeRegionCopy(
     [text("For clients and community · Hindi")],
     component({
@@ -174,7 +174,7 @@ test("an attribution must name the source, not the audience or language", () => 
     }),
     DIWALI,
   );
-  assert.equal(out[0].content, "— Graphilla Technology");
+  assert.equal(out.length, 0);
 });
 
 test("approved copy wins over the generic fallback", () => {
@@ -200,7 +200,7 @@ const DIWALI_BARE = {
   keywords: ["Diwali", "clients", "community"],
 };
 
-test("a bare occasion becomes a real greeting even without the word Happy", () => {
+test("a headline that is only the brand is dropped", () => {
   const out = sanitizeRegionCopy(
     [text("Graphilla Technology")],
     component({
@@ -212,10 +212,10 @@ test("a bare occasion becomes a real greeting even without the word Happy", () =
     }),
     DIWALI_BARE,
   );
-  assert.equal(out[0].content, "Happy Diwali");
+  assert.equal(out.length, 0);
 });
 
-test("a greeting-card recipient names the audience, not the design type", () => {
+test("a recipient naming the design type is dropped", () => {
   const out = sanitizeRegionCopy(
     [text("Diwali Greeting Card")],
     component({
@@ -227,7 +227,7 @@ test("a greeting-card recipient names the audience, not the design type", () => 
     }),
     DIWALI_BARE,
   );
-  assert.equal(out[0].content, "To our clients and community");
+  assert.equal(out.length, 0);
 });
 
 test("a production note never survives as the details copy", () => {
@@ -242,10 +242,10 @@ test("a production note never survives as the details copy", () => {
     }),
     DIWALI_BARE,
   );
-  assert.match(out[0].content, /^Wishing you light, joy, and prosperity this Diwali\./);
+  assert.equal(out.length, 0);
 });
 
-test("a bare occasion tagline is an occasion line, not 'Diwali Greeting'", () => {
+test("a design-label tagline is dropped", () => {
   const out = sanitizeRegionCopy(
     [text("Diwali Greeting")],
     component({
@@ -257,10 +257,10 @@ test("a bare occasion tagline is an occasion line, not 'Diwali Greeting'", () =>
     }),
     DIWALI_BARE,
   );
-  assert.equal(out[0].content, "Festival of Lights");
+  assert.equal(out.length, 0);
 });
 
-test("the greeting footer signs the card even without an explicit 'Happy'", () => {
+test("a placeholder footer is dropped", () => {
   const out = sanitizeRegionCopy(
     [text("Details TBA")],
     component({
@@ -272,7 +272,7 @@ test("the greeting footer signs the card even without an explicit 'Happy'", () =
     }),
     DIWALI_BARE,
   );
-  assert.equal(out[0].content, "Happy Diwali from Graphilla Technology");
+  assert.equal(out.length, 0);
 });
 
 test("L4 cannot add a brand to an approved headline", () => {
@@ -335,7 +335,7 @@ test("invented dates and placeholder names never survive", () => {
     }),
     DIWALI_BARE,
   );
-  assert.equal(date[0].content, "Festival of Lights");
+  assert.equal(date.length, 0);
 
   const recipient = sanitizeRegionCopy(
     [text("Client X")],
@@ -348,10 +348,10 @@ test("invented dates and placeholder names never survive", () => {
     }),
     DIWALI_BARE,
   );
-  assert.equal(recipient[0].content, "To our clients and community");
+  assert.equal(recipient.length, 0);
 });
 
-test("certificate language is replaced in a greeting card", () => {
+test("certificate language is dropped in a greeting card", () => {
   const out = sanitizeRegionCopy(
     [text("Awarded for innovative data analytics solutions")],
     component({
@@ -363,5 +363,48 @@ test("certificate language is replaced in a greeting card", () => {
     }),
     DIWALI_BARE,
   );
-  assert.match(out[0].content, /^Wishing you light, joy, and prosperity this Diwali\./);
+  assert.equal(out.length, 0);
+});
+
+test("dropping invalid copy keeps the rest of the region intact", () => {
+  const shape = {
+    id: "sample-bg",
+    type: "rectangle",
+    x: 0,
+    y: 0,
+    width: 200,
+    height: 80,
+    fill: "#111111",
+  };
+  const out = sanitizeRegionCopy([shape, text("Team members"), text("Meet the AI assistant")], component(), GOAL);
+  assert.equal(out.length, 2);
+  assert.equal(out[0].id, "sample-bg");
+  assert.equal(out[1].content, "Meet the AI assistant");
+});
+
+test("regionCopyProblems reports the line L4 must regenerate", () => {
+  const problems = regionCopyProblems(
+    [text("One short supporting line (audience, price or what is included), not a repeat of the headline")],
+    component({ maxChars: 160 }),
+    GOAL,
+  );
+  assert.equal(problems.length, 1);
+  assert.match(problems[0].reason, /instruction leakage/);
+  assert.match(problems[0].content, /One short supporting line/);
+});
+
+test("regionCopyProblems accepts a restorable approved deck line", () => {
+  const problems = regionCopyProblems(
+    [text("For clients and community · Hindi")],
+    component({
+      id: "tagline-attribution-text",
+      role: "tagline",
+      maxChars: 40,
+      describe: "who said it",
+      sample: "",
+      copy: ["— Graphilla Technology"],
+    }),
+    DIWALI,
+  );
+  assert.equal(problems.length, 0);
 });
