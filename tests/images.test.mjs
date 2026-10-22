@@ -34,10 +34,32 @@ test("image subject is a structural hand-off of the model's scene", () => {
       { imageSubject: "engineers in safety helmets at a sunrise substation" },
       "power company recruitment",
     ),
-    ["engineers in safety helmets at a sunrise substation", "power company recruitment"],
+    [
+      "engineers in safety helmets at a sunrise substation",
+      "engineers safety helmets sunrise substation",
+      "power company recruitment",
+    ],
   );
   assert.deepEqual(imageQueryCandidates({}, "a short tuning query"), ["a short tuning query"]);
   assert.deepEqual(imageQueryCandidates({}, ""), []);
+});
+
+test("a long scene gets a compact query without the brand or grammar filler", () => {
+  const queries = imageQueryCandidates({
+    brand: "Graphilla",
+    imageSubject:
+      "travelers happily using a tablet displaying a graphilla interface with a stylized cityscape in the background",
+    keywords: ["travel app", "itinerary", "cityscape"],
+  });
+  assert.equal(
+    queries[0],
+    "travelers happily using a tablet displaying a graphilla interface with a stylized cityscape in the background",
+  );
+  assert.equal(
+    queries[1],
+    "travelers happily tablet interface stylized cityscape background",
+  );
+  assert.ok(!/graphilla/i.test(queries[1]));
 });
 
 test("template sample artwork is palette-derived and keeps the semantic query", () => {

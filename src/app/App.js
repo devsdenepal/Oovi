@@ -899,6 +899,16 @@ export class App {
       const crowded = overlapErrors >= 5;
       const failing = crowded ? new Map() : flagRegions(report, plan);
       const hasErrors = report.issues.some((i) => i.severity === "error");
+      // An image miss is not a template-layout problem. Re-tuning and
+      // rebuilding the whole template for one failed photo was wiping manual
+      // edits and then failing on the same photo again. Keep the template (and
+      // its edits) intact; retry only the image with the compact search
+      // variants, then fail closed if Unsplash still has no honest result.
+      const failedImages = plan.components.filter(
+        (component) =>
+          component.kind === "image" && (result.regions.get(component.id)?.count || 0) === 0,
+      );
+      const imageOnlyFailure = failedImages.length > 0 && !failing.size && !crowded;
 
       // Strict word-repetition check over what actually rendered. Comparing
       // the rendered elements (not the plan) catches duplicates introduced by
@@ -1110,7 +1120,7 @@ export class App {
         );
       } else if (failing.size) {
         await refineRegions(failing);
-      } else if (hasErrors) {
+      } else if (hasErrors && !imageOnlyFailure) {
         await replanOnce(`First pass under-built (${topDefects(report)}).`);
       }
 
@@ -1370,7 +1380,7 @@ export class App {
     }
 
     const orientation = orientationFor(box);
-    for (const candidate of candidates.slice(0, 2)) {
+    for (const candidate of candidates.slice(0, 4)) {
       try {
         let photos = await searchPhotos(candidate, { orientation });
         if (!photos.length) photos = await searchPhotos(candidate);

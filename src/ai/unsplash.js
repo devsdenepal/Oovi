@@ -1,17 +1,25 @@
 /**
  * Unsplash photo search (Insert panel + AI image regions).
  *
- * Search and download tracking go through the local `/api/photos` route so the
- * Unsplash access key stays on the server. The browser only ever receives
- * result URLs, never the key.
+ * Uses the public access key (VITE_UNSPLASH_ACCESS_KEY) exactly as before —
+ * designed for client-side use and rate-limited. The secret key is never
+ * stored or sent anywhere: this integration does not use OAuth.
  *
- * API terms honored: download tracking fires on every insert (triggerDownload),
- * photographer credit is surfaced in the UI, and utm_source/medium ride on
- * every photo URL.
+ * API terms honored: download tracking fires on every insert
+ * (triggerDownload), photographer credit is surfaced in the UI, and
+ * utm_source/medium ride on every photo URL.
  */
 
-const SEARCH_ENDPOINT = "/api/photos";
+const SEARCH_ENDPOINT = "https://api.unsplash.com/search/photos";
 const PER_PAGE = 12;
+
+function accessKey() {
+  try {
+    return (import.meta.env?.VITE_UNSPLASH_ACCESS_KEY || "").trim();
+  } catch {
+    return "";
+  }
+}
 
 function withUtm(url) {
   if (!url) return url;
@@ -36,12 +44,15 @@ export function orientationFor(box = {}) {
  * @returns {Promise<Array<{id:string,thumb:string,full:string,alt:string,photographer:string,download:string,width:number,height:number}>>}
  */
 export async function searchPhotos(query, options = {}) {
+  const key = accessKey();
+  if (!key) throw new Error("photo search needs VITE_UNSPLASH_ACCESS_KEY in .env");
   const q = String(query || "").trim();
   if (!q) return [];
   const orientation = String(options.orientation || "").trim().toLowerCase();
   const params = new URLSearchParams({
-    q,
+    query: q,
     per_page: String(options.perPage || PER_PAGE),
+    client_id: key,
   });
   if (["landscape", "portrait", "squarish"].includes(orientation)) {
     params.set("orientation", orientation);
@@ -49,44 +60,33 @@ export async function searchPhotos(query, options = {}) {
   if (Number(options.page) > 0) params.set("page", String(options.page));
 
   const res = await fetch(`${SEARCH_ENDPOINT}?${params}`);
-  if (res.status === 401) throw new Error("photo search is not configured on the server");
+  if (res.status === 401) throw new Error("Unsplash rejected the access key (401)");
   if (res.status === 403 || res.status === 429) {
-    throw new Error("photo rate limit reached — try again later");
+    throw new Error("Unsplash rate limit reached — try again later");
   }
-  if (!res.ok) {
-    let message = `photo search ${res.status}`;
-    try {
-      const body = await res.json();
-      if (body?.error) message = body.error;
-    } catch {
-      // keep the status message
-    }
-    throw new Error(message);
-  }
+  if (!res.ok) throw new Error(`photo search ${res.status}`);
   const data = await res.json();
-  return (data?.photos || [])
+  return (data?.results || [])
     .map((p) => ({
       id: p.id,
-      thumb: withUtm(p.thumb || p.urls?.small || ""),
-      full: withUtm(p.full || p.urls?.regular || ""),
-      alt: p.alt || "Unsplash photo",
-      photographer: p.photographer || "Unknown",
-      download: p.download || "",
+      thumb: withUtm(p.urls?.thumb || p.urls?.small || ""),
+      full: withUtm(p.urls?.regular || p.urls?.full || ""),
+      alt: p.alt_description || p.description || "Unsplash photo",
+      photographer: p.user?.name || "Unknown",
+      download: p.links?.download_location || "",
       width: Number(p.width) || 0,
       height: Number(p.height) || 0,
     }))
-    .filter((p) => p.full);
+    .filter((p) => p.thumb && p.full);
 }
 
 /** Best-effort download tracking (API terms). Never blocks insertion. */
 export async function triggerDownload(photo) {
   try {
-    if (!photo?.download) return;
-    await fetch(SEARCH_ENDPOINT, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ download: photo.download }),
-    });
+    const key = accessKey();
+    if (!photo?.download || !key) return;
+    const sep = photo.download.includes("?") ? "&" : "?";
+    await fetch(`${photo.download}${sep}client_id=${key}`);
   } catch {
     // tracking must never break the user flow
   }

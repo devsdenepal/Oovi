@@ -89,7 +89,7 @@ Copy `.env.example` to `.env`. Keys are server-only unless prefixed with `VITE_`
 | `OLLAMA_MODEL_TUNE` / `OLLAMA_MODEL_COPY_DECK` / `OLLAMA_MODEL_COPY` / `OLLAMA_MODEL_FALLBACK` | Server | Optional per-layer model overrides; blank falls back to `OLLAMA_MODEL` |
 | `AI_CHAIN` | Server | Provider chain; `ollama` is the only supported provider |
 | `POLLINATIONS_KEY` | Server | Optional AI image generation (`api/asset.js`) |
-| `UNSPLASH_ACCESS_KEY` | Server | Photo search (`api/photos.js`) |
+| `VITE_UNSPLASH_ACCESS_KEY` | Browser | Unsplash photo search (public, rate-limited) |
 | `PGHOST` / `PGPORT` / `PGUSER` / `PGPASSWORD` / `PGDATABASE` | Server | Postgres connection (`server/index.js`) |
 | `VITE_MOCK_AI=1` | Browser | Offline mode with no network calls |
 
