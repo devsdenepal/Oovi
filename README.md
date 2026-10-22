@@ -4,6 +4,8 @@ Oovi turns natural-language prompts into **fully editable graphic designs** | no
 
 ![Oovi editor generating a design](docs/screenshot.png)
 
+![Dashboard replay — 3s to 9s](docs/dashboard-recording.gif)
+
 **Prompt to plan to validated Design DSL to editable canvas.**
 
 ## Quickstart
