@@ -1,7 +1,7 @@
 /**
  * InsertPanel - manual design tools that need no AI generation:
  * drop text and shapes onto the canvas, pick the new-element color
- * and the canvas background. Works like general design tools —
+ * and the canvas background. Works like general design tools |
  * everything stays editable via the existing toolbar/layers.
  */
 

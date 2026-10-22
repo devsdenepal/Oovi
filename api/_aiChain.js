@@ -1,14 +1,14 @@
 /**
  * Server-side AI provider (server-only).
  *
- * One call — `runChain({ messages, schema, name, maxTokens, effort })` —
+ * One call | `runChain({ messages, schema, name, maxTokens, effort })` |
  * runs the configured on-device provider and returns its reply. The
  * provider is Ollama serving the local Gemma model: no API key, no outbound
  * network, nothing bundled into the browser.
  *
  * We call Ollama's NATIVE endpoint (/api/chat), not its OpenAI shim, for two
  * reasons that matter on CPU:
- *   - `think: false` — Gemma 4 is a thinking model (default: on); letting it
+ *   - `think: false` | Gemma 4 is a thinking model (default: on); letting it
  *     reason first burns minutes of tokens before any JSON appears.
  *   - real per-token streaming (the OpenAI shim buffers), so we get liveness
  *     and can log progress.
@@ -38,7 +38,7 @@ import https from "node:https";
 
 const PROVIDER_TIMEOUT = 75_000;
 // On-device CPU generation is slow (~1-3 tok/s on a 4-core box), so the chain
-// gets a long wall clock — far more than a hosted provider would ever need.
+// gets a long wall clock | far more than a hosted provider would ever need.
 const CHAIN_DEADLINE = 1_800_000;
 const MAX_ATTEMPTS = 2;
 
@@ -73,7 +73,7 @@ function modelForRequest(name) {
   const override = LAYER_MODEL_ENV[name] ? process.env[LAYER_MODEL_ENV[name]] : "";
   return (override && override.trim()) || process.env.OLLAMA_MODEL || OLLAMA_MODEL_DEFAULT;
 }
-// Truncation guard ONLY — caps are measured never to bind (a ~30-token answer
+// Truncation guard ONLY | caps are measured never to bind (a ~30-token answer
 // cost 425 generated tokens while e2b was thinking silently; with think:false
 // it costs 9). One constant, so the options object below is byte-identical on
 // every call.
@@ -96,7 +96,7 @@ function positiveInt(value, dflt) {
  * The ONE options object sent on every single call.
  *
  * A differing load-time option (num_ctx, num_thread, ...) makes Ollama tear
- * the model down and reload it — measured ~19-22s here — which also throws
+ * the model down and reload it | measured ~19-22s here | which also throws
  * away the prompt cache the shared static prefix depends on. So nothing
  * per-layer lives in here: `num_predict` is fixed too, because the caps never
  * bind and a truncation guard needs no per-layer value.
@@ -207,7 +207,7 @@ async function readChatStream(stream, onProgress, onDelta) {
         prompt_tokens: prompt,
         completion_tokens: completion,
         total_tokens: prompt != null && completion != null ? prompt + completion : null,
-        // 0.40.6 exposes the prefix-cache hit count — the number that tells us
+        // 0.40.6 exposes the prefix-cache hit count | the number that tells us
         // whether the shared static prompt prefix is actually being reused.
         cached_tokens: obj.prompt_eval_cached_count ?? null,
         load_duration_ms: nsToMs(obj.load_duration),
@@ -237,7 +237,7 @@ async function readChatStream(stream, onProgress, onDelta) {
  * We deliberately avoid global fetch here. Node's fetch is undici, whose
  * default `headersTimeout`/`bodyTimeout` is 300s. With OLLAMA_NUM_PARALLEL=1 a
  * queued request receives no bytes until the generation ahead of it completes,
- * so undici aborts it at 300s with "fetch failed" — far short of our own
+ * so undici aborts it at 300s with "fetch failed" | far short of our own
  * budget. Core http has no such default, so a queued request simply waits,
  * bounded only by the AbortSignal we hand it.
  */
@@ -271,7 +271,7 @@ async function drain(stream) {
 }
 
 /**
- * On-device provider: Ollama's native /api/chat. Ollama may not be running —
+ * On-device provider: Ollama's native /api/chat. Ollama may not be running |
  * a 1.5s health probe fails fast instead of waiting out the request timeout.
  * `think: false` skips the model's reasoning phase; `num_ctx` pins the
  * context window so a large plan prompt is never silently truncated.
@@ -391,7 +391,7 @@ export async function runChain(req, opts = {}) {
         return { ...out, provider: name, attempts: attempts.concat([{ provider: name, ok: true, ms }]) };
       } catch (error) {
         lastError = error;
-        // 429 means this provider is spent for now — stop immediately. Only
+        // 429 means this provider is spent for now | stop immediately. Only
         // cheap transient faults (network blips, fast 5xx) get a same-provider
         // retry; slow verdicts are not worth doubling the burn.
         const spent = Date.now() - rungStart;

@@ -1,5 +1,5 @@
 /**
- * L3c — the copy deck.
+ * L3c | the copy deck.
  *
  * One bounded call writes the words for every text region AFTER the template
  * has been chosen and tuned. The per-region L4 call then lays those lines out;
@@ -143,7 +143,7 @@ function regionBrief(component, goal, rawPrompt) {
     case "header":
       return `the organisation sending the greeting (${brand || "the organiser"})`;
     case "headline":
-      return `the greeting itself (${greeting}) — not the brand or a description`;
+      return `the greeting itself (${greeting}) | not the brand or a description`;
     case "tagline":
       return `a short occasion line (${tagline}), using words not already in the headline`;
     case "sections":
@@ -240,7 +240,7 @@ function regionBlock(components, goal, rawPrompt) {
 
 /**
  * The validator treats brand words as ordinary content, so the writer must see
- * the actual reserved vocabulary — "brand" in the abstract is not enough for
+ * the actual reserved vocabulary | "brand" in the abstract is not enough for
  * a tiny model. Only emit this when a brand-like region is present.
  */
 function reservedBrandWords(goal) {
@@ -361,7 +361,7 @@ export function buildCopyRepairPrompt(components, goal, rawPrompt, rejected, can
       const cap = lineLimits[id] || 1;
       return `- ${id}: ${entry.reason}. Rewrite in at most ${cap} line${
         cap === 1 ? "" : "s"
-      }${max > 0 ? ` and ${max} characters total across all lines` : ""} — rejected copy: "${lines}"`;
+      }${max > 0 ? ` and ${max} characters total across all lines` : ""} | rejected copy: "${lines}"`;
     })
     .join("\n");
   const acceptedComponents = Object.keys(accepted || {}).map((id) => ({ id }));
@@ -374,7 +374,7 @@ export function buildCopyRepairPrompt(components, goal, rawPrompt, rejected, can
     "The first copy pass had these problems:",
     problems,
     usedLines
-      ? `Copy already accepted for other regions — do not reuse any of its distinctive words:\n${usedLines}`
+      ? `Copy already accepted for other regions | do not reuse any of its distinctive words:\n${usedLines}`
       : "",
     acceptedWords,
     reservedBrandBlock([...acceptedComponents, ...regions], goal),

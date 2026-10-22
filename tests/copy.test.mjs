@@ -70,7 +70,7 @@ test("short, valid copy is kept", () => {
 
 test("a footer without a link or date is dropped, not given a safe line", () => {
   const out = sanitizeRegionCopy(
-    [text("Join us — Dark, confident product announcement")],
+    [text("Join us | Dark, confident product announcement")],
     component({ id: "footer", role: "footer", maxChars: 65, describe: "Website or launch date", sample: "" }),
     GOAL,
   );
@@ -186,11 +186,11 @@ test("approved copy wins over the generic fallback", () => {
       maxChars: 40,
       describe: "who said it",
       sample: "",
-      copy: ["— Graphilla Technology"],
+      copy: ["| Graphilla Technology"],
     }),
     DIWALI,
   );
-  assert.equal(out[0].content, "— Graphilla Technology");
+  assert.equal(out[0].content, "| Graphilla Technology");
 });
 
 const DIWALI_BARE = {
@@ -207,7 +207,7 @@ test("a headline that is only the brand is dropped", () => {
       id: "headline-main",
       role: "headline",
       maxChars: 40,
-      describe: "what is being awarded — the largest type on the canvas",
+      describe: "what is being awarded | the largest type on the canvas",
       sample: "",
     }),
     DIWALI_BARE,
@@ -277,12 +277,12 @@ test("a placeholder footer is dropped", () => {
 
 test("L4 cannot add a brand to an approved headline", () => {
   const out = sanitizeRegionCopy(
-    [text("Graphilla Technology — Happy Diwali")],
+    [text("Graphilla Technology | Happy Diwali")],
     component({
       id: "headline-main",
       role: "headline",
       maxChars: 40,
-      describe: "what is being awarded — the largest type on the canvas",
+      describe: "what is being awarded | the largest type on the canvas",
       sample: "",
       copy: ["Happy Diwali"],
     }),
@@ -402,7 +402,7 @@ test("regionCopyProblems accepts a restorable approved deck line", () => {
       maxChars: 40,
       describe: "who said it",
       sample: "",
-      copy: ["— Graphilla Technology"],
+      copy: ["| Graphilla Technology"],
     }),
     DIWALI,
   );

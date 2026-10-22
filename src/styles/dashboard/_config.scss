@@ -211,11 +211,13 @@ $dash-layout: (
 $dash-breakpoints: (
   "wide": 1400px,
   "stacked": 1240px,
+  "editor-condense": 1120px,
   "tablet": 900px,
   "mobile": 720px,
   "compact": 520px,
   "narrow": 460px,
   "tiny": 360px,
+  "micro": 294px,
 );
 
 // ── Motion ─────────────────────────────────────────────────────────

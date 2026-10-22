@@ -139,7 +139,7 @@ test("every text slot has example copy that fits its own limit", () => {
         assert.ok(example.trim().length > 0, `${t.id}/${slot.id}: example is not empty`);
         assert.ok(
           example.length <= slot.maxChars,
-          `${t.id}/${slot.id}: example is ${example.length} chars, limit is ${slot.maxChars} — "${example}"`,
+          `${t.id}/${slot.id}: example is ${example.length} chars, limit is ${slot.maxChars} | "${example}"`,
         );
       }
     }
@@ -409,8 +409,8 @@ test("retrieval reads a real L1 goal, not a hand-made brief", () => {
   // The bug this pins: `retrieveTemplates` used to cover the prompt's whole
   // brief text, `mustInclude` included. A real goal carries content
   // requirements no layout vocabulary can describe ("Event details (Date, Time,
-  // Venue TBA)"), so every score was diluted and the Diwali brief — 51 % in the
-  // benchmark — abstained at 16 % in the app. Retrieval never fired in
+  // Venue TBA)"), so every score was diluted and the Diwali brief | 51 % in the
+  // benchmark | abstained at 16 % in the app. Retrieval never fired in
   // production while the benchmark looked healthy.
   const goal = {
     summary: "Vibrant, festive Diwali announcement poster",
@@ -451,7 +451,7 @@ test("a region that renders outside its reserved box is fitted back into it", ()
   assert.ok(after.x >= tagline.box.x - 2 && after.x + after.w <= tagline.box.x + tagline.box.width + 2, "and inside it horizontally");
   assert.ok(notes.length > 0, "a correction is never silent");
 
-  // A region that already fits is returned untouched — same array, no work.
+  // A region that already fits is returned untouched | same array, no work.
   const fine = [{ id: "a", type: "text", role: "tagline", x: 64, y: 240, width: 1064, fontSize: 20, content: "Happy Diwali" }];
   assert.equal(fitRegion(fine, tagline).elements, fine, "no correction when nothing overflows");
 
@@ -471,7 +471,7 @@ test("a region that renders outside its reserved box is fitted back into it", ()
 
 test("a region with one bad element is salvaged, not thrown away", () => {
   // Live symptom: elements stream onto the canvas, then the region's whole set
-  // fails validation, so they are retracted and the region is left empty —
+  // fails validation, so they are retracted and the region is left empty |
   // which the gate then reads as `empty-section` and regenerates (~250s). If
   // only one piece is at fault, keep the rest.
   const canvas = { width: 1200, height: 630 };

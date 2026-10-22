@@ -1,5 +1,5 @@
 /**
- * designShell — PURE INTERFACE LAYER (chrome helpers).
+ * designShell | PURE INTERFACE LAYER (chrome helpers).
  *
  * Isolation contract: this module must never import from
  * ../ai, ../editor, ../renderer, ../layout, ../reference, ../design,

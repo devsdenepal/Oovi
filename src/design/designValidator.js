@@ -92,7 +92,7 @@ function validateElement(element, path, errors) {
       // Positions (x/y/x2/y2) may be ANY finite number: top-level objects
       // can sit partially off-canvas, and group children live in
       // group-relative coords (routinely negative left/above the group
-      // origin). Both save fine, so open must accept them — rejecting
+      // origin). Both save fine, so open must accept them | rejecting
       // them bricks saved projects. Sizes stay non-negative everywhere.
       const isPosition = field === "x" || field === "y" || field === "x2" || field === "y2";
       if (value < 0 && !isPosition) {
@@ -111,7 +111,7 @@ function validateElement(element, path, errors) {
   }
 
   // Gradient overlay (optional): validated strictly, rendered by fabric.
-  // Strict-schema providers emit explicit nulls — default them here so the
+  // Strict-schema providers emit explicit nulls | default them here so the
   // shape check sees effective values (normalizeElement persists the same
   // defaults downstream).
   if (element.gradient !== undefined && element.gradient !== null) {
@@ -173,7 +173,7 @@ function normalizeElement(element) {
   for (const key of Object.keys(element)) {
     if (known.has(key)) normalized[key] = element[key];
   }
-  // Strict-schema providers emit explicit nulls for omitted optionals —
+  // Strict-schema providers emit explicit nulls for omitted optionals |
   // drop them so missing-field defaults apply instead of type errors.
   for (const key of Object.keys(normalized)) {
     if (normalized[key] === null) delete normalized[key];

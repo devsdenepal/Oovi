@@ -1,7 +1,7 @@
 /**
  * Unsplash routes (Vercel-shaped handler, also mounted by server/index.js).
  *
- * The access key lives ONLY in UNSPLASH_ACCESS_KEY server env — the
+ * The access key lives ONLY in UNSPLASH_ACCESS_KEY server env | the
  * browser never holds it (api/asset.js pattern for Pollinations).
  *
  *   GET  /api/photos?q=mountains&page=1&orientation=landscape
@@ -61,7 +61,7 @@ export default async function handler(req, res) {
         return;
       }
       if (upstream.status === 403 || upstream.status === 429) {
-        res.status(502).json({ error: "photo rate limit reached — try again later" });
+        res.status(502).json({ error: "photo rate limit reached | try again later" });
         return;
       }
       if (!upstream.ok) {

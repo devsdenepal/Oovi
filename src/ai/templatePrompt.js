@@ -1,5 +1,5 @@
 /**
- * L3 prompts (Phase 3) — retrieval first, then choice, then bounded tuning.
+ * L3 prompts (Phase 3) | retrieval first, then choice, then bounded tuning.
  *
  * L3 used to show the model EVERY template and ask it to pick one, then tune
  * it. That does not survive a library of ~30 layouts: the menu alone is most
@@ -9,7 +9,7 @@
  * Now the order is:
  *
  *   1. src/layout/retrieve.js filters by canvas shape and ranks the survivors
- *      against the brief — free, synchronous, deterministic;
+ *      against the brief | free, synchronous, deterministic;
  *   2. (a) the model is asked ONLY when the top candidates are close enough to
  *      need judgement, and it sees only the retrieved shortlist;
  *   3. (b) a tuning patch over the chosen template: variant, show/hide
@@ -18,8 +18,8 @@
  *
  * TEMPLATE_RULES is the STATIC prefix: it names no template, so it is
  * byte-identical on every call and the tuning call reuses the choice call's
- * prefix verbatim. Everything brief-specific — including the retrieved
- * candidates — comes after it, and the retrieved block is last so it sits
+ * prefix verbatim. Everything brief-specific | including the retrieved
+ * candidates | comes after it, and the retrieved block is last so it sits
  * closest to the model's answer.
  */
 
@@ -31,7 +31,7 @@ export const TEMPLATE_RULES = [
   "You are the layout director of a design pipeline. The regions of a design are fixed by ONE template; your job is to choose and tune a template, never to invent boxes or coordinates.",
   "Every template already reserves regions for a headline, a supporting line, the facts and a call to action, and every template's boxes are already guaranteed not to overlap.",
   "Choice rules:",
-  "- Choose by what the design IS and how much content it must hold — not by taste.",
+  "- Choose by what the design IS and how much content it must hold | not by taste.",
   "- Prefer the template whose regions match the brief's content blocks: a brief with many facts and a programme wants a listing, a brief that is one sentence wants a statement.",
   "- Answer with one of the candidates offered below.",
   "Tuning rules:",
@@ -39,10 +39,10 @@ export const TEMPLATE_RULES = [
   "- Pick the variant whose composition matches the brief's desired arrangement: artwork left vs right, centered vs split, stacked vs grid, the footer's side.",
   '- "hide" may contain ONLY region ids marked optional, and only when the brief has no content for that region.',
   '- "scale" takes one entry per region you want to re-size, factor between three quarters and one and a quarter.',
-  '- "align" is left, center or right — use it to resolve a deliberate symmetry, not to scatter. Moving the header/logo to the opposite edge from the hero is a valid deliberate mirror.',
+  '- "align" is left, center or right | use it to resolve a deliberate symmetry, not to scatter. Moving the header/logo to the opposite edge from the hero is a valid deliberate mirror.',
   '- "density" is tight, normal or airy: how much breathing room between regions.',
   "- Change nothing else. An untouched template is a valid answer.",
-  "Return ONLY valid JSON — no prose and no markdown.",
+  "Return ONLY valid JSON | no prose and no markdown.",
 ].join("\n");
 
 export const TUNING_SCHEMA = {
@@ -176,7 +176,7 @@ export function tuningSchema(template) {
 
 /**
  * Step (b): the bounded knobs for the chosen template. The region list is
- * deliberately short — id, role, and what the region holds.
+ * deliberately short | id, role, and what the region holds.
  */
 export function buildTuningPrompt(template, goal, palette, canvas, correction = "") {
   const variantList = template.variants.map((v) => `- ${v.id}: ${v.label}`).join("\n");
@@ -187,7 +187,7 @@ export function buildTuningPrompt(template, goal, palette, canvas, correction = 
   const imageSlots = slots.filter((s) => s.kind === "image");
   const imageLine = imageSlots.length
     ? [
-        "Image regions — write one short Unsplash search query per image region.",
+        "Image regions | write one short Unsplash search query per image region.",
         goal?.imageSubject
           ? `The visual understanding for this design is: "${goal.imageSubject}". Search for that scene, not for the title, brand or layout words.`
           : "Use the concrete scene implied by the brief, never the title or brand.",
@@ -202,7 +202,7 @@ export function buildTuningPrompt(template, goal, palette, canvas, correction = 
     `Variants:\n${variantList}`,
     `Regions:\n${slotList}`,
     imageLine,
-    correction ? `[Refinement]\nThe first pass had these problems: ${correction}\nKeep this same template — adjust only its variant, density, hide, scale and align knobs.` : "",
+    correction ? `[Refinement]\nThe first pass had these problems: ${correction}\nKeep this same template | adjust only its variant, density, hide, scale and align knobs.` : "",
     "",
     "[User]",
     `Canvas: ${canvas.width}x${canvas.height} pixels.`,

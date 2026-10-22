@@ -2,7 +2,7 @@
  * Semantic image direction.
  *
  * The meaning of a picture is a model decision, not a keyword table. L1
- * returns `imageSubject` — a concrete scene derived from the brief — and the
+ * returns `imageSubject` | a concrete scene derived from the brief | and the
  * image layer uses it as the search subject. This module only cleans the
  * hand-off and derives shorter search variants; it does not maintain a
  * vocabulary of approved visual nouns or guess an industry from keywords.

@@ -3,8 +3,8 @@
  *
  * The failure this pins is the one users actually reported: a terse brief
  * ("Ship faster with Acme") produced a headline in a field of empty containers.
- * The fix is structural — scope (L1) → palette roles (L2) → a template chosen
- * for the composition (L3) → content generated per assigned slot (L4) — and it
+ * The fix is structural | scope (L1) → palette roles (L2) → a template chosen
+ * for the composition (L3) → content generated per assigned slot (L4) | and it
  * is deterministic up to L4, so all of it must be testable without a model.
  *
  * This test drives the same path the app drives, with `materializePlan` standing

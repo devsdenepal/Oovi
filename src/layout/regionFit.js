@@ -16,7 +16,7 @@
  * So the correction is deterministic, applied to the region's own elements
  * before they reach the editor, and it keeps the composition intact:
  *
- *   1. type is capped at the size the template fixed — the prompt already says
+ *   1. type is capped at the size the template fixed | the prompt already says
  *      "keep the type at this size", this makes it true;
  *   2. if the region still renders outside its reservation, the whole region is
  *      scaled about the box origin, uniformly, so an icon keeps its place beside
@@ -77,7 +77,7 @@ export function clampRegionType(elements, fontSize, opts = {}) {
  * Scale + translate a region so it renders inside `box`.
  *
  * Never enlarges: a region that renders smaller than its reservation is an
- * under-fill, which the quality gate already reports — silently blowing it up
+ * under-fill, which the quality gate already reports | silently blowing it up
  * would hide that signal.
  *
  * @param {Array} elements the model's elements for this region
@@ -161,7 +161,7 @@ export function fitElementsToBox(elements, box, opts = {}) {
 
 /**
  * The whole correction for one region: planned type, then fit to the box.
- * Returns `{elements, notes}` — notes are what the console reports, so a
+ * Returns `{elements, notes}` | notes are what the console reports, so a
  * correction is never silent.
  */
 export function fitRegion(elements, component, opts = {}) {
@@ -180,7 +180,7 @@ export function fitRegion(elements, component, opts = {}) {
       .filter((e) => e && e.type === "text")
       .reduce((min, e) => Math.min(min, Number(e.fontSize) || Infinity), Infinity);
     notes.push(`scaled to fit ${Math.round(component.box.width)}x${Math.round(component.box.height)}`);
-    if (smallest < MIN_READABLE) notes.push(`copy is now ${Math.round(smallest)}px — unreadably small`);
+    if (smallest < MIN_READABLE) notes.push(`copy is now ${Math.round(smallest)}px | unreadably small`);
     if (extent) notes.push(`extent ${Math.round(extent.w)}x${Math.round(extent.h)}`);
     out = fitted;
   }

@@ -3,8 +3,8 @@
  *
  * A finished design already contains the one thing a hand-written template is
  * guessing at: a real, checked arrangement of regions on a real canvas. This
- * turns that back into a template — slots, boxes, roles, type sizes and the
- * design's own copy as example lines — so a layout the user liked can be
+ * turns that back into a template | slots, boxes, roles, type sizes and the
+ * design's own copy as example lines | so a layout the user liked can be
  * reused deliberately instead of being re-described to the model.
  *
  * Two rules make it safe to put user layouts into the same library the
@@ -12,7 +12,7 @@
  *
  *   1. boxes come from the RENDERED design, so the partition is real;
  *   2. the result must clear the SAME quality gate the test suite runs every
- *      template through (src/ai/quality.js) — a saved template that would
+ *      template through (src/ai/quality.js) | a saved template that would
  *      overflow, collide or fade is refused with the reasons, not stored.
  *
  * Pure: no Fabric, no network, no localStorage. The store is separate.
@@ -85,7 +85,7 @@ export function designToTemplate(design, meta = {}) {
   if (boxes.length < 3) return { ok: false, reason: "a template needs at least three regions" };
 
   // Text and image boxes become slots; unroled shapes do not, because a bar
-  // the model drew as a text bed is a rendering detail, not structure — and
+  // the model drew as a text bed is a rendering detail, not structure | and
   // dropping it can only make the contrast check stricter, never looser.
   const items = [];
   for (const b of boxes) {
@@ -253,7 +253,7 @@ export function templateFromDesign(design, meta = {}) {
   if (!check.ok) {
     return {
       ok: false,
-      reason: `the saved layout does not pass the quality gate — ${check.reason}`,
+      reason: `the saved layout does not pass the quality gate | ${check.reason}`,
       template: converted.template,
       issues: check.issues,
     };

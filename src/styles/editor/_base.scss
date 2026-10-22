@@ -1,0 +1,275 @@
+@use "config" as *;
+
+// ==================================================================
+// Editor base: shell reset, controls, focus, and shared surfaces
+// ==================================================================
+
+#app {
+  height: 100vh;
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--ed-paper);
+  color: var(--ed-ink);
+  font-family: var(--ed-font-ui);
+  font-size: fs("base");
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+#app *,
+#app *::before,
+#app *::after {
+  box-sizing: border-box;
+}
+
+#app :where(button, input, textarea, select) {
+  font: inherit;
+}
+
+#app button:not(:disabled) {
+  cursor: pointer;
+}
+
+#app :focus-visible {
+  outline: 2px solid var(--ed-teal);
+  outline-offset: 2px;
+}
+
+#app ::selection {
+  background: var(--ed-teal-soft);
+  color: var(--ed-ink);
+}
+
+#app .text-secondary {
+  color: var(--ed-muted) !important;
+}
+
+#app .small {
+  font-size: fs("base");
+}
+
+#app .card {
+  border: 1px solid var(--ed-line);
+  border-radius: var(--ed-radius-panel);
+  background: var(--ed-surface);
+  box-shadow: none;
+}
+
+#app .card-body {
+  padding: sp(16);
+}
+
+#app .bg-white {
+  background: var(--ed-surface) !important;
+}
+
+#app .border,
+#app .border-top,
+#app .border-bottom {
+  border-color: var(--ed-line) !important;
+}
+
+#app .shadow-sm {
+  box-shadow: none !important;
+}
+
+#app .hidden,
+#app [hidden] {
+  display: none !important;
+}
+
+#app .btn {
+  --bs-btn-font-size: #{fs("base")};
+  min-height: ed("control");
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: sp(6);
+  padding: 0 sp(10);
+  border: 1px solid var(--ed-line);
+  border-radius: var(--ed-radius-field);
+  background: var(--ed-surface);
+  color: var(--ed-ink);
+  font-size: fs("base");
+  font-weight: 700;
+  line-height: 1;
+  box-shadow: none;
+  transition:
+    background var(--ed-ease),
+    border-color var(--ed-ease),
+    color var(--ed-ease),
+    transform var(--ed-ease);
+}
+
+#app .btn:hover {
+  border-color: var(--ed-line-strong);
+  background: var(--ed-surface-soft);
+  color: var(--ed-ink);
+}
+
+#app .btn:disabled {
+  opacity: 0.48;
+  cursor: not-allowed;
+  transform: none;
+}
+
+#app .btn-primary {
+  border-color: var(--ed-orange);
+  background: var(--ed-orange);
+  color: var(--ed-white);
+}
+
+#app .btn-primary:hover {
+  border-color: var(--ed-orange-strong);
+  background: var(--ed-orange-strong);
+  color: var(--ed-white);
+}
+
+#app .btn-light,
+#app .btn-outline-secondary {
+  border-color: var(--ed-line);
+  background: var(--ed-surface);
+  color: var(--ed-ink);
+}
+
+#app .btn-light:hover,
+#app .btn-outline-secondary:hover {
+  border-color: var(--ed-line-strong);
+  background: var(--ed-surface-soft);
+  color: var(--ed-ink);
+}
+
+#app .btn-sm,
+#app .btn-small {
+  min-height: ed("control-compact");
+  padding: 0 sp(9);
+  font-size: fs("base");
+}
+
+#app .btn-lg {
+  min-height: 38px;
+  padding: 0 sp(12);
+  font-size: fs("lg");
+}
+
+#app .btn-group {
+  display: inline-flex;
+}
+
+#app .btn-group > .btn {
+  border-radius: 0;
+}
+
+#app .btn-group > .btn:first-child {
+  border-radius: var(--ed-radius-field) 0 0 var(--ed-radius-field);
+}
+
+#app .btn-group > .btn:last-child {
+  border-radius: 0 var(--ed-radius-field) var(--ed-radius-field) 0;
+}
+
+#app .btn-group > .btn + .btn {
+  margin-left: -1px;
+}
+
+#app .form-select,
+#app .form-control {
+  min-height: ed("field");
+  padding: 0 sp(9);
+  border: 1px solid var(--ed-line);
+  border-radius: var(--ed-radius-field);
+  background-color: var(--ed-surface);
+  color: var(--ed-ink);
+  font-size: fs("base");
+  font-weight: 600;
+  box-shadow: none;
+}
+
+#app .form-select:focus,
+#app .form-control:focus {
+  border-color: var(--ed-teal);
+  background-color: var(--ed-surface);
+  box-shadow: var(--ed-focus-ring);
+}
+
+#app .form-select-sm {
+  min-height: ed("control");
+  padding-top: 0;
+  padding-bottom: 0;
+  padding-left: sp(9);
+  font-size: fs("base");
+}
+
+#app .panel-title {
+  margin: 0 0 sp(8);
+  color: var(--ed-faint);
+  font-size: fs("sm");
+  font-weight: 800;
+  letter-spacing: 0.16em;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+#app .muted {
+  color: var(--ed-faint);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+#app .file-drop {
+  display: block;
+  padding: sp(12);
+  border: 1px dashed var(--ed-line-strong);
+  border-radius: var(--ed-radius-field);
+  background: var(--ed-surface-soft);
+  color: var(--ed-ink);
+  font-size: fs("base");
+  font-weight: 650;
+  text-align: center;
+  transition:
+    border-color var(--ed-ease),
+    background var(--ed-ease),
+    color var(--ed-ease);
+}
+
+#app .file-drop:hover {
+  border-color: var(--ed-teal);
+  background: var(--ed-teal-soft);
+  color: var(--ed-teal-strong);
+}
+
+#app .left-panels,
+#app .inspector,
+#app .assistant-log,
+#app .layers-list,
+#app .json-body,
+#app .insert-results,
+#app .debug-tab-panel {
+  scrollbar-width: thin;
+  scrollbar-color: var(--ed-line-strong) transparent;
+}
+
+#app .left-panels::-webkit-scrollbar,
+#app .inspector::-webkit-scrollbar,
+#app .assistant-log::-webkit-scrollbar,
+#app .layers-list::-webkit-scrollbar,
+#app .json-body::-webkit-scrollbar,
+#app .insert-results::-webkit-scrollbar,
+#app .debug-tab-panel::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+#app .left-panels::-webkit-scrollbar-thumb,
+#app .inspector::-webkit-scrollbar-thumb,
+#app .assistant-log::-webkit-scrollbar-thumb,
+#app .layers-list::-webkit-scrollbar-thumb,
+#app .json-body::-webkit-scrollbar-thumb,
+#app .insert-results::-webkit-scrollbar-thumb,
+#app .debug-tab-panel::-webkit-scrollbar-thumb {
+  border-radius: var(--ed-radius-pill);
+  background: var(--ed-line-strong);
+}

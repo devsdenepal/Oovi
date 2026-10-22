@@ -48,7 +48,7 @@ export class HistoryManager {
   }
 
   canUndo() {
-    // The top entry is the current state — undo needs a state beneath it.
+    // The top entry is the current state | undo needs a state beneath it.
     return this.undoStack.length > 1;
   }
 
@@ -63,7 +63,7 @@ export class HistoryManager {
       // fabric 6: loadFromJSON returns a promise (2nd arg is a per-object
       // reviver, not a completion callback). Await the real completion.
       await this.canvas.loadFromJSON(state);
-      // Native revive leaves gradient paints as plain objects — re-apply
+      // Native revive leaves gradient paints as plain objects | re-apply
       // the recorded DSL gradients (exact; see hydrateGradients).
       hydrateGradients(this.canvas);
       this.canvas.renderAll();

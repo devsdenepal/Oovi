@@ -3,7 +3,7 @@
  *
  * Powers the UI and tests offline with zero tokens. Enabled via
  * `?mock=1` or `VITE_MOCK_AI=1`. Mock output is hand-built to always
- * pass validateDesign / validatePatch — no model involved.
+ * pass validateDesign / validatePatch | no model involved.
  */
 
 export function isMockEnabled() {
@@ -173,7 +173,7 @@ export function mockAssetDataUrl(describe, box) {
 }
 
 /**
- * Deterministic refined goal (L1) for the layered pipeline — offline/tests.
+ * Deterministic refined goal (L1) for the layered pipeline | offline/tests.
  * Mirrors the shape refineGoal() returns for the real model.
  */
 export function mockGoal(prompt, canvas) {
@@ -198,7 +198,7 @@ export function mockGoal(prompt, canvas) {
   };
 }
 
-/** Deterministic palette (L2) for the layered pipeline — offline/tests. */
+/** Deterministic palette (L2) for the layered pipeline | offline/tests. */
 export function mockPalette(goal, canvas) {
   const seed = String(goal?.summary || goal?.subject || goal || "");
   const pal = PALETTES[hash(seed) % PALETTES.length];

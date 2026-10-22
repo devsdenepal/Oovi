@@ -60,12 +60,12 @@ export const PALETTE_SCHEMA = {
  * Prefill is the bottleneck on this machine (~10 tok/s measured), so a
  * 3.8k-token prompt costs ~6 minutes before a single token is generated.
  * Ollama reuses the KV cache for the longest common prefix across calls, so
- * every layer that uses DESIGN_CORE — L1 goal and L4 region — starts with
+ * every layer that uses DESIGN_CORE | L1 goal and L4 region | starts with
  * these exact bytes: the first call pays for them, every later call gets them
  * from cache. (L2 palette and L3 template prompts deliberately use their own
  * short prefixes.) Two rules keep that true:
  *   1. Nothing variable lives here. No canvas size, palette, theme, ids or
- *      counters — those all go in the layer's [User] turn, which comes last.
+ *      counters | those all go in the layer's [User] turn, which comes last.
  *   2. Every layer's system message must BEGIN with this string verbatim.
  * It carries the DSL contract plus one compact example, kept near 350 tokens.
  */
@@ -80,11 +80,11 @@ export const DESIGN_CORE = [
   "- Colours are CSS hex strings.",
   "",
   "Element types (include every REQUIRED property; omit optional extras unless the theme needs them):",
-  '- text: {id, type:"text", content, x, y, width, fontSize, fontWeight, fill} — content is a plain string; fontSize 12-120.',
+  '- text: {id, type:"text", content, x, y, width, fontSize, fontWeight, fill} | content is a plain string; fontSize 12-120.',
   '- rectangle: {id, type:"rectangle", x, y, width, height, fill}',
   '- circle: {id, type:"circle", x, y, radius, fill}',
   '- line: {id, type:"line", x, y, x2, y2, stroke}',
-  '- group: {id, type:"group", x, y, children:[...]} — nests one level; a group counts as ONE element.',
+  '- group: {id, type:"group", x, y, children:[...]} | nests one level; a group counts as ONE element.',
   "",
   "Optional properties (only when the theme calls for them):",
   '- gradient {type:"linear"|"radial", stops:[{offset, color}]}; stroke, strokeWidth (contrasting outline); angle (-8 to 8, stickers only); fontFamily, textAlign, lineHeight, charSpacing, cornerRadius, opacity.',
@@ -119,7 +119,7 @@ export function formatGoal(goal) {
 }
 
 /**
- * L1 — Redefine the goal. Turns a rough request into an explicit brief:
+ * L1 | Redefine the goal. Turns a rough request into an explicit brief:
  * what it is, who it is for, what must appear, and what to avoid. Facts that
  * cannot be known stay as TBA placeholders (never invented).
  */
@@ -128,10 +128,10 @@ export function buildGoalPrompt(userPrompt, canvas, memory = "") {
   return [
     DESIGN_CORE,
     "",
-    "Your task now: expand the user's rough, possibly terse request into an explicit design goal for the layout above — without changing what the thing IS.",
+    "Your task now: expand the user's rough, possibly terse request into an explicit design goal for the layout above | without changing what the thing IS.",
     "Goal rules:",
     "- Infer the audience, tone, visual style and the content blocks the design needs from what the request implies. A terse request is expected: fill it in.",
-    "- NEVER invent verifiable facts — dates, times, venues, names, prices, sponsors, addresses. Those become obvious TBA placeholders the layout will show.",
+    "- NEVER invent verifiable facts | dates, times, venues, names, prices, sponsors, addresses. Those become obvious TBA placeholders the layout will show.",
     '- brand is the company, organiser or person the design is from, exactly as named in the brief. Use "" when the brief names none. Never infer a brand from a design label or an industry.',
     '- imageSubject is a concrete, photographable scene that makes the meaning of this design tangible: people, place, object, action and light. 4-10 words. It is not the title, the brand, a keyword list or a description of the layout. Example: for a power-company hiring notice, "engineers in safety helmets at a sunrise substation".',
     "- Keep it faithful: a certificate stays a certificate, a poster stays a poster. Refine the brief, do not redesign the subject.",
@@ -159,7 +159,7 @@ export function buildGoalPrompt(userPrompt, canvas, memory = "") {
 }
 
 /**
- * L2 — Color palette. One deliberate palette, chosen for strong
+ * L2 | Color palette. One deliberate palette, chosen for strong
  * background/ink contrast (no fading) with a single rationed accent.
  */
 export function buildPalettePrompt(goal, canvas) {

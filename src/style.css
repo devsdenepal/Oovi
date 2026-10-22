@@ -1,6 +1,6 @@
 /* ══════════════════════════════════════════════════════════════
-   Oovi Studio — Bootstrap theme layer (interface only).
-   Brand values live in src/ui/tokens.css — edit tokens there, never
+   Oovi Studio | Bootstrap theme layer (interface only).
+   Brand values live in src/ui/tokens.css | edit tokens there, never
    hardcode color/font/z-index here. The --studio-* names below are
    aliases kept for existing rules; new code uses --oovi-* directly.
    ══════════════════════════════════════════════════════════════ */
@@ -380,7 +380,7 @@ body { background: var(--oovi-bg); }
 .debug-hidden { display: none; }
 
 /* ══════════════════════════════════════════════════════════════
-   Goal 1 — Oovi editor chrome
+   Goal 1 | Oovi editor chrome
    ══════════════════════════════════════════════════════════════ */
 
 /* ── Top bar ── */

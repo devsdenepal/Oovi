@@ -1,8 +1,8 @@
 /**
- * leftTabs — ONE left sidebar tab controller (Goal 1 chrome).
+ * leftTabs | ONE left sidebar tab controller (Goal 1 chrome).
  *
  * Replaces the old icon-rail + accordion duplication: tab buttons
- * `[data-ltab]` switch panels `[data-lpanel]`. Pure DOM, no imports —
+ * `[data-ltab]` switch panels `[data-lpanel]`. Pure DOM, no imports |
  * the handle is created in main.js and handed to App for view shortcuts.
  *
  * @param {{initial?: string}} [options] tab to open first (defaults to Insert)

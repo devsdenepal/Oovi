@@ -1,5 +1,5 @@
 /**
- * POST /api/asset — server-side Pollinations proxy (Vercel function).
+ * POST /api/asset | server-side Pollinations proxy (Vercel function).
  *
  * The secret lives in the POLLINATIONS_KEY server env var and never
  * reaches the browser. Body: { describe, width, height, seed, model,

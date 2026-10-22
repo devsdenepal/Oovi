@@ -8,7 +8,7 @@
  * shows up as an overlap rather than hiding behind short sample copy.
  *
  * It lives in src/ so "Save as template" validates a saved layout through
- * exactly the same lens the test suite uses — one definition of what a
+ * exactly the same lens the test suite uses | one definition of what a
  * template renders like.
  */
 

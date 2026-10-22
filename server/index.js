@@ -5,7 +5,7 @@ import assetHandler from '../api/asset.js';
 import photosHandler from '../api/photos.js';
 import aiHandler from '../api/ai.js';
 
-// NOTE: stdlib http, not Express — the environment's npm tree cannot
+// NOTE: stdlib http, not Express | the environment's npm tree cannot
 // materialize express's transitive deps (see DECISIONS). 8 JSON routes
 // don't justify fighting that; pg + dotenv load fine.
 

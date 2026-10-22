@@ -5,7 +5,7 @@
  * Records are plain data (the instantiated slots plus metadata); this module
  * is the only place that knows how to persist and rehydrate them.
  *
- * Storage is localStorage — the app has no server-side document store for
+ * Storage is localStorage | the app has no server-side document store for
  * templates, and a saved layout is only as useful as the browser it was saved
  * from. Every read is defensive: a corrupt or hand-edited record is skipped
  * rather than allowed to break the library.

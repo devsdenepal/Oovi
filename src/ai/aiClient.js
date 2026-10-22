@@ -87,7 +87,7 @@ import {
  * The provider (on-device Ollama serving the local Gemma model) lives
  * server-side in api/_aiChain.js, so nothing provider-specific reaches the
  * browser and no API key ever leaves the server. Swapping the model only
- * means editing that file — the renderer and validator are untouched.
+ * means editing that file | the renderer and validator are untouched.
  */
 
 // How many times we ask the model to fix an invalid design before giving up.
@@ -186,7 +186,7 @@ function splitPrompt(full) {
 
 /** All validator-tolerated styling fields. Strict json_schema mode demands
  * every property key appear in `required`, so optionals are nullable
- * unions — and normalizeElement strips nulls back out before validation. */
+ * unions | and normalizeElement strips nulls back out before validation. */
 const OPT_COMMON = {
   role: { type: ["string", "null"] },
   stroke: { type: ["string", "null"] },
@@ -442,7 +442,7 @@ async function fetchAiChat(prompt, opts = {}) {
       throw networkError(`ai request failed (network): ${error.message}`);
     }
     if (!res.ok || !res.body) {
-      // Pre-stream rejection (bad request, method, etc.) — read the JSON body.
+      // Pre-stream rejection (bad request, method, etc.) | read the JSON body.
       let data = null;
       try {
         data = await res.json();
@@ -663,7 +663,7 @@ function sanitizePlan(raw, canvas) {
   const seen = new Set();
   const components = [];
   // Roles drive size floors, hero checks and hierarchy warnings downstream,
-  // but models often omit them — infer from the id so the contract holds.
+  // but models often omit them | infer from the id so the contract holds.
   const inferRole = (id, kind) => {
     if (/hero|focal|art|illustration|mascot/.test(id)) return "hero";
     if (/headline|title/.test(id)) return "headline";
@@ -688,7 +688,7 @@ function sanitizePlan(raw, canvas) {
     let box = c.box && typeof c.box === "object" ? sanitizeBox(c.box, canvas, warnings, id) : null;
     if (!box && kind === "dsl") {
       box = { x: 0, y: 0, width: canvas.width, height: canvas.height };
-      warnings.push(`plan: "${id}" got no box — full canvas assumed`);
+      warnings.push(`plan: "${id}" got no box | full canvas assumed`);
     }
     if (!box) {
       warnings.push(`plan: image component "${id}" needs a box`);
@@ -704,7 +704,7 @@ function sanitizePlan(raw, canvas) {
     });
   }
   // Planned boxes that already overlap (decoration may bleed, anything
-  // else collides by construction) — surfaced now, fixed by replan.
+  // else collides by construction) | surfaced now, fixed by replan.
   let boxClash = null;
   for (let i = 0; i < components.length && !boxClash; i++) {
     for (let j = i + 1; j < components.length; j++) {
@@ -722,7 +722,7 @@ function sanitizePlan(raw, canvas) {
       }
     }
   }
-  if (boxClash) warnings.push(`plan: ${boxClash} boxes overlap — sections will collide`);
+  if (boxClash) warnings.push(`plan: ${boxClash} boxes overlap | sections will collide`);
   return { palette, style, components, warnings };
 }
 
@@ -883,7 +883,7 @@ function sanitizePalette(raw, styleFallback) {
 }
 
 /**
- * L1 — Refine the raw request into an explicit goal. Soft-fails: if the
+ * L1 | Refine the raw request into an explicit goal. Soft-fails: if the
  * model cannot answer, the raw prompt itself becomes the brief, so the
  * cascade never dies at the cheap first step.
  */
@@ -910,14 +910,14 @@ export async function refineGoal(userPrompt, canvas, onProgress = null, memory =
       console.log(`[ai] goal ok ${Date.now() - tStart}ms mustInclude=${goal.mustInclude.length}`);
       return { ...goal, source: "ai" };
     }
-    console.warn("[ai] goal unrecoverable JSON — raw prompt used as the brief");
+    console.warn("[ai] goal unrecoverable JSON | raw prompt used as the brief");
   } catch (error) {
-    console.warn(`[ai] goal failed (${error.message}) — raw prompt used as the brief`);
+    console.warn(`[ai] goal failed (${error.message}) | raw prompt used as the brief`);
   }
   return { ...sanitizeGoal({ summary: userPrompt, subject: userPrompt }), source: "fallback" };
 }
 
-/** L2 — Choose ONE palette for the goal, guaranteed to not fade. */
+/** L2 | Choose ONE palette for the goal, guaranteed to not fade. */
 export async function planPalette(goal, canvas, onProgress = null) {
   if (isMockEnabled()) {
     const p = mockPalette(goal, canvas);
@@ -925,7 +925,7 @@ export async function planPalette(goal, canvas, onProgress = null) {
   }
   const tStart = Date.now();
   // Phase 2D: a brief the curated library recognises needs no model call at
-  // all — this is ~88s of prefill saved on exact, pre-verified colours.
+  // all | this is ~88s of prefill saved on exact, pre-verified colours.
   const known = lookupPalette(goal);
   if (known && paletteIsUsable(known)) {
     const ratio = contrastRatio(known.ink, known.background);
@@ -962,9 +962,9 @@ export async function planPalette(goal, canvas, onProgress = null) {
       );
       return { ...palette, source: "ai" };
     }
-    console.warn("[ai] palette unrecoverable JSON — default palette used");
+    console.warn("[ai] palette unrecoverable JSON | default palette used");
   } catch (error) {
-    console.warn(`[ai] palette failed (${error.message}) — default palette used`);
+    console.warn(`[ai] palette failed (${error.message}) | default palette used`);
   }
   return { ...sanitizePalette({}, goal?.style), source: "fallback" };
 }
@@ -1005,7 +1005,7 @@ function requestedTemplate(rawPrompt) {
 }
 
 /**
- * L3a — choose ONE template. The pipeline is template-only, so this function
+ * L3a | choose ONE template. The pipeline is template-only, so this function
  * always returns a usable id: retrieval decides when it can, and a forced
  * canvas-sized fallback covers briefs the corpus has never seen.
  *
@@ -1025,7 +1025,7 @@ export async function chooseTemplate(goal, palette, canvas, onProgress = null, r
       console.log(`[ai] template ok 0ms (request) -> ${requested}`);
       return { id: requested, candidates: [requested], source: "request", coverage: 1 };
     }
-    console.warn(`[ai] requested template ${requested} not in library — using retrieval`);
+    console.warn(`[ai] requested template ${requested} not in library | using retrieval`);
   }
   const found = retrieveTemplates(goal, canvas, { limit: RETRIEVAL_LIMIT, extra: listSavedTemplates() });
   const candidates = found.candidates;
@@ -1050,7 +1050,7 @@ export async function chooseTemplate(goal, palette, canvas, onProgress = null, r
   const shortlist = candidates.filter((id) => {
     const template = findAnyTemplate(id);
     if (template?.type === "roster" && !wantsPeople) {
-      console.log(`[ai] template skip ${id} — roster layout but the brief has no people/team content`);
+      console.log(`[ai] template skip ${id} | roster layout but the brief has no people/team content`);
       return false;
     }
     return true;
@@ -1094,15 +1094,15 @@ export async function chooseTemplate(goal, palette, canvas, onProgress = null, r
       console.log(`[ai] template ok ${Date.now() - tStart}ms -> ${id}`);
       return { id, candidates: shortlist, source: "ai", coverage: found.coverage };
     }
-    console.warn(`[ai] template choice "${id}" outside shortlist — using ${shortlist[0]}`);
+    console.warn(`[ai] template choice "${id}" outside shortlist | using ${shortlist[0]}`);
   } catch (error) {
-    console.warn(`[ai] template choice failed (${error.message}) — using ${shortlist[0]}`);
+    console.warn(`[ai] template choice failed (${error.message}) | using ${shortlist[0]}`);
   }
   return { id: shortlist[0], candidates: shortlist, source: "fallback", coverage: found.coverage };
 }
 
 /**
- * L3b — bounded tuning patch for a chosen template. Always returns a usable
+ * L3b | bounded tuning patch for a chosen template. Always returns a usable
  * tuning object: the default (untouched template) is a valid answer.
  */
 export async function planTemplateTuning(template, goal, palette, canvas, onProgress = null, opts = {}) {
@@ -1129,15 +1129,15 @@ export async function planTemplateTuning(template, goal, palette, canvas, onProg
       );
       return { ...tuning, source: "ai" };
     }
-    console.warn("[ai] template-tuning unrecoverable JSON — template left untouched");
+    console.warn("[ai] template-tuning unrecoverable JSON | template left untouched");
   } catch (error) {
-    console.warn(`[ai] template-tuning failed (${error.message}) — template left untouched`);
+    console.warn(`[ai] template-tuning failed (${error.message}) | template left untouched`);
   }
   return { ...defaults, source: "fallback" };
 }
 
 /**
- * L3c — one copy deck for every text region of the chosen template.
+ * L3c | one copy deck for every text region of the chosen template.
  *
  * The per-region L4 call is deliberately good at geometry, colour and fit; it
  * is not a reliable copywriter at 270m. This pass writes all the words while
@@ -1191,7 +1191,7 @@ export async function planCopyDeck(components, goal, canvas, rawPrompt = "", onP
     if (rejected.length) {
       console.warn(
         `[ai] copy-deck rejected ${rejected
-          .map((entry) => `${entry.component.id}: ${entry.reason} — ${JSON.stringify(entry.lines)}`)
+          .map((entry) => `${entry.component.id}: ${entry.reason} | ${JSON.stringify(entry.lines)}`)
           .join("; ")}`,
       );
       while (rejected.length && attempts < FEATURES.copy.repairPasses) {
@@ -1267,7 +1267,7 @@ export async function planCopyDeck(components, goal, canvas, rawPrompt = "", onP
     );
     return { copies, source, stats, rejected, unresolved };
   } catch (error) {
-    console.warn(`[ai] copy-deck failed (${error.message}) — blocking the build`);
+    console.warn(`[ai] copy-deck failed (${error.message}) | blocking the build`);
     const rejected = regions.map((component) => ({
       component,
       lines: [],
@@ -1356,7 +1356,7 @@ export function validateCopyDeck(copies, components, goal, rawPrompt) {
 /**
  * The palette a PLAN carries. Roles are attached here, once, so every
  * downstream consumer (L4 prompt, L5 correction, the quality gate) reads the
- * same role set instead of each re-deriving it — and so a plan is
+ * same role set instead of each re-deriving it | and so a plan is
  * self-contained: it can be logged, replayed or saved without the L2 result.
  */
 function planPaletteObject(palette) {
@@ -1401,7 +1401,7 @@ export async function planTemplate(goal, palette, canvas, onProgress = null, opt
     const tuning = await planTemplateTuning(template, goal, palette, canvas, onProgress, { correction });
     const built = instantiateTemplate(template, tuning, canvas);
     if (!built.ok) {
-      console.warn(`[ai] template ${template.id} unusable (${built.reason}) — trying next template`);
+      console.warn(`[ai] template ${template.id} unusable (${built.reason}) | trying next template`);
       continue;
     }
     // The visual brief is L1's `imageSubject` (a scene), not the page title.
@@ -1452,7 +1452,7 @@ export async function planDesign(userPrompt, canvas) {
       attempt === 1
         ? buildPlanPrompt(userPrompt, canvas)
         : `${buildPlanPrompt(userPrompt, canvas)}\n\n[Correction]\nYour previous response was not usable JSON (${errors.join("; ")}). Return ONLY the JSON plan.`;
-    // Corrections only fix malformed model output — a dead network never
+    // Corrections only fix malformed model output | a dead network never
     // recovers by re-asking, so fetch failures throw immediately instead
     // of burning (attempts × timeout) on a hung provider.
     let text;
@@ -1642,7 +1642,7 @@ export async function componentDesign(component, canvas, plan, goal = null, opts
       // A local model can drop a request (Ollama restart, timeout). That is a
       // call failure too, so use the same three-call budget rather than
       // treating transient transport errors differently from bad JSON.
-      errors = [`call failed — ${error.message}`];
+      errors = [`call failed | ${error.message}`];
       console.warn(`[ai] component retry ${component.id} attempt=${attempt} errors=${errors[0]}`);
       if (attempt >= MAX_ATTEMPTS) {
         throw new Error(`Component "${component.id}" failed after ${MAX_ATTEMPTS} calls: ${error.message}`);
@@ -1734,14 +1734,14 @@ export async function componentDesign(component, canvas, plan, goal = null, opts
           .join("; ");
         console.warn(`[ai] component copy retry ${component.id} attempt=${attempt} summary=${summary}`);
         if (attempt < MAX_ATTEMPTS && FEATURES.copy.regenerateBadCopy) {
-          errors = [`copy failed — ${summary}`];
+          errors = [`copy failed | ${summary}`];
           lastParsed = { ...parsed, elements: prepared };
           continue;
         }
         // Never return a region whose copy still fails the gate. The caller
         // will mark the region failed and block persistence after the third
         // call instead of letting the sanitizer drop a line silently.
-        throw new Error(`Component "${component.id}" failed: copy — ${summary}`);
+        throw new Error(`Component "${component.id}" failed: copy | ${summary}`);
       }
       const finished = finishRegion(usable, component, plan, goal, rawPrompt);
       console.log(
@@ -1755,7 +1755,7 @@ export async function componentDesign(component, canvas, plan, goal = null, opts
     errors = check.errors;
   }
   // Salvage before giving up. The region's elements are ALREADY on the canvas
-  // from the token stream — the user watched them arrive — so rejecting the
+  // from the token stream | the user watched them arrive | so rejecting the
   // whole set means retracting them and leaving a hole where their content was
   // (and the hole then reads as `empty-section`, which triggers a full
   // ~250 s regeneration). When one bad piece is what failed validation, keep

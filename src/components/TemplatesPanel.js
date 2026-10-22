@@ -1,5 +1,5 @@
 /**
- * TemplatesPanel — the manual, no-AI template library in the left sidebar.
+ * TemplatesPanel | the manual, no-AI template library in the left sidebar.
  *
  * Canva's template tab is a visual browser: small previews grouped by kind,
  * searchable, and a click applies the layout. This panel uses the same

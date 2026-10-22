@@ -77,7 +77,7 @@ function commonOptions(element) {
 function toFabricFill(element) {
   const g = element.gradient;
   if (!g || typeof g !== "object") return element.fill;
-  // Fabric percentage coords are NUMBERS (1 = 100% of bbox) — "50%"
+  // Fabric percentage coords are NUMBERS (1 = 100% of bbox) | "50%"
   // strings reach createLinearGradient verbatim and throw non-finite,
   // bricking the whole canvas render. Clamp to [0,1], never negative
   // (negative radii throw too).
@@ -97,7 +97,7 @@ function toFabricFill(element) {
       colorStops: (Array.isArray(g.stops) ? g.stops : []).map((s) => ({ offset: s.offset, color: s.color })),
     });
     // Fabric defers the real canvas calls to render time, outside this
-    // try — so smoke-test the paint NOW on a scratch context. Anything
+    // try | so smoke-test the paint NOW on a scratch context. Anything
     // pathological (bad color, wild offset) throws here and degrades to
     // the solid fill instead of bricking the design on open.
     smokeTestPaint(paint);
@@ -122,7 +122,7 @@ function smokeTestPaint(paint) {
 }
 
 function createText(element) {
-  // Textbox (not FabricText) so the DSL width is a real wrap width —
+  // Textbox (not FabricText) so the DSL width is a real wrap width |
   // this is what makes the inspector width row meaningful for text.
   const text = new Textbox(element.content, {
     ...commonOptions(element),
@@ -238,7 +238,7 @@ export function createDesignObject(element) {
  * Image placeholder: a dashed box at the DSL rect carrying the pending
  * source. The real pixels arrive via hydrateImages() (async, after the
  * sync render pass), so generation/rendering never blocks on network.
- * A failed load keeps the placeholder — layout never breaks.
+ * A failed load keeps the placeholder | layout never breaks.
  * @param {import("../design/designTypes").DesignElement} element
  */
 function createImagePlaceholder(element) {
@@ -259,7 +259,7 @@ function createImagePlaceholder(element) {
 /**
  * Re-applies recorded gradients after a native loadFromJSON revive.
  * History snapshots serialize the live Gradient instance as a plain
- * object, which fabric does not turn back into paint on its own — but
+ * object, which fabric does not turn back into paint on its own | but
  * the DSL originals ride along (HISTORY_PROPS), so re-mapping them is
  * exact. Walks group children too.
  */
@@ -382,7 +382,7 @@ export function canvasToDesign(canvas) {
  * Canvas-space origin of an object. Members of an ActiveSelection store
  * coordinates relative to the selection (v6 behavior), so reading
  * obj.left/top raw makes persist, validate and quality depend on what
- * happens to be selected — the exact corruption the resolver runs exposed
+ * happens to be selected | the exact corruption the resolver runs exposed
  * (moved pieces serialized hundreds of px off). Ancestor matrices compose,
  * so nested groups resolve exactly too.
  */

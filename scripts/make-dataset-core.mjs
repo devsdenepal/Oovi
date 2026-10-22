@@ -230,12 +230,12 @@ const HELD_OUT_CAP = 50;
 // what a bilingual L1 answer looks like in practice.
 const FRAMES = [
   { lang: "en", make: (a) => `Design a ${a.designType} for ${a.subject}` },
-  { lang: "en", make: (a) => `${cap(a.subject)} — a ${a.tone} ${a.designType} for ${a.audience}` },
+  { lang: "en", make: (a) => `${cap(a.subject)} | a ${a.tone} ${a.designType} for ${a.audience}` },
   { lang: "en", make: (a) => `We need a ${a.designType} announcing ${a.subject}` },
   { lang: "en", make: (a) => `${cap(a.subject)}: ${a.tone} ${a.designType}, aimed at ${a.audience}` },
   { lang: "en", make: (a) => `Create a ${a.designType} for ${a.subject}, ${a.purpose}` },
   { lang: "en", make: (a) => `Create a ${a.tone} ${a.designType} for ${a.subject}` },
-  { lang: "en", make: (a) => `${cap(a.subject)} ${a.designType} — ${a.purpose}` },
+  { lang: "en", make: (a) => `${cap(a.subject)} ${a.designType} | ${a.purpose}` },
   { lang: "en", make: (a) => `${cap(a.audience)} need a ${a.designType} for ${a.subject}` },
   { lang: "es", make: (a) => `Diseña un póster para ${a.subject}` },
   { lang: "hi", make: (a) => `${a.subject} के लिए एक पोस्टर बनाइए` },
@@ -266,7 +266,7 @@ const AVOIDS = [
 // example. Real jobs carry names, dates, places and prices in the brief, and
 // the copy must use THOSE. Every brief therefore gets concrete facts, they are
 // written into mustInclude (so they are in the production prompt text), and
-// the copy target is built from them — never from the one-shot example.
+// the copy target is built from them | never from the one-shot example.
 // ---------------------------------------------------------------------------
 
 const NAMES = [
@@ -321,10 +321,10 @@ const ITEMS = {
   workshop: ["Bookbinding", "Letterpress", "Zine making", "Book arts", "Screen printing", "Drop-in session"],
   gallery: ["Harbour at dawn", "Low tide", "Studio window", "Night ferry", "Salt marsh", "The long room"],
   product: ["Canvas tote", "Enamel mug", "Field notebook", "Wool throw", "Cedar soap", "Pocket knife"],
-  team: ["Coach — A. Mensah", "Forward — J. Cole", "Keeper — R. Silva", "Captain — M. Okafor", "Physio — L. Chen"],
+  team: ["Coach | A. Mensah", "Forward | J. Cole", "Keeper | R. Silva", "Captain | M. Okafor", "Physio | L. Chen"],
   comparison: ["Starter", "Studio", "Team", "Billed yearly", "Cancel anytime", "Free trial"],
   metrics: ["1,240 members", "£86k raised", "92% attendance", "18 partners", "4.7 rating", "3 new sites"],
-  timeline: ["Phase 1 — Research", "Phase 2 — Build", "Phase 3 — Launch", "Prototype", "Test", "Ship"],
+  timeline: ["Phase 1 | Research", "Phase 2 | Build", "Phase 3 | Launch", "Prototype", "Test", "Ship"],
   map: ["Main stage", "Workshops", "Food court", "Quiet room", "Box office", "First aid"],
   ticket: ["Admit one", "Doors 19:00", "Row C, Seat 12", "£12", "Under 16s free"],
   quote: ["A room of one's own", "The work speaks first", "Make it plain"],
@@ -402,7 +402,7 @@ function factCopyCandidates(role, facts) {
   const when = `${facts.date} · ${facts.time}`;
   const list = {
     header: [facts.organizer, facts.eventName],
-    headline: [facts.eventName, `${facts.organizer} — ${facts.eventName}`, facts.eventName.replace(/\s+\d{4}$/, "")],
+    headline: [facts.eventName, `${facts.organizer} | ${facts.eventName}`, facts.eventName.replace(/\s+\d{4}$/, "")],
     tagline: [`${items[0]} · ${items[1]}`, `${facts.venue} · ${facts.date}`, `For ${facts.audience} · ${facts.venue}`],
     details: [`${when} · ${facts.venue}`, `${facts.date} · ${facts.venue}`, when, facts.venue],
     sections: [
@@ -413,7 +413,7 @@ function factCopyCandidates(role, facts) {
     ],
     footer: [`${facts.organizer} · ${facts.link}`, facts.link, `${facts.organizer} · ${facts.venue}`],
     audience: [`For ${facts.audience}`, `${facts.audience} · ${facts.venue}`, `${facts.venue} · ${facts.date}`],
-    cta: [`Book at ${facts.link}`, `Join us — ${facts.link}`, facts.link],
+    cta: [`Book at ${facts.link}`, `Join us | ${facts.link}`, facts.link],
     hero: [`${items[0]} · ${items[1]}`, facts.eventName, `${facts.venue} · ${facts.date}`],
   }[role] || [facts.eventName, `${facts.date} · ${facts.venue}`, items[0]];
   return list.filter(Boolean);

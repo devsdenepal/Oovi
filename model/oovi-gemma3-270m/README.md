@@ -14,13 +14,13 @@ will produce poor or empty output.
 
 ## Files
 
-- `adapter_model.safetensors` — LoRA weights (15 MB).
-- `adapter_config.json` — PEFT config: rank 16, alpha 32, dropout 0.05,
+- `adapter_model.safetensors` | LoRA weights (15 MB).
+- `adapter_config.json` | PEFT config: rank 16, alpha 32, dropout 0.05,
   q/k/v/o/gate/up/down projections.
-- `Modelfile` — Ollama definition (Gemma chat template, 8192 context,
+- `Modelfile` | Ollama definition (Gemma chat template, 8192 context,
   temperature 0.2, top_p 0.95, top_k 64).
-- `chat_template.jinja` — the chat template from the merged export.
-- `checksums.txt` — SHA-256 of the adapter and the Q8_0 GGUF.
+- `chat_template.jinja` | the chat template from the merged export.
+- `checksums.txt` | SHA-256 of the adapter and the Q8_0 GGUF.
 
 ## Training
 
@@ -33,7 +33,7 @@ will produce poor or empty output.
 - Dataset: 800 briefs → 2,500 records (choice/tune/copy), 30/30 templates,
   189 copy slots, 168 held-out eval records. Regenerate with:
   `node scripts/make-dataset.mjs` (the generated `data/` tree is not committed).
-- Notebook: `train/colab_lora.ipynb` — encodes the exact production prompt
+- Notebook: `train/colab_lora.ipynb` | encodes the exact production prompt
   strings, trains the adapter, merges, converts to GGUF Q8_0, and writes the
   Modelfile.
 
@@ -43,7 +43,7 @@ The committed files are the adapter, not the merged model or GGUF. To rebuild
 the served tag:
 
 ```bash
-# 1. Train/merge/convert (Colab, GPU) — writes adapter/, merged/, gguf/
+# 1. Train/merge/convert (Colab, GPU) | writes adapter/, merged/, gguf/
 #    Open train/colab_lora.ipynb and run all cells.
 
 # 2. Quantize is already done by the notebook (Q8_0). Put the GGUF next to

@@ -125,7 +125,7 @@ test("L4 carries approved copy verbatim and tailors attribution regions", () => 
     box: { x: 64, y: 300, width: 600, height: 60 },
     fontSize: 22,
     maxChars: 40,
-    copy: ["— Graphilla Technology"],
+    copy: ["| Graphilla Technology"],
   };
   const prompt = buildComponentPrompt(
     component,
@@ -133,8 +133,8 @@ test("L4 carries approved copy verbatim and tailors attribution regions", () => 
     { palette: PALETTE, style: PALETTE.style, components: [component] },
     GOAL,
   );
-  assert.match(prompt, /Approved copy — use these exact lines/);
-  assert.match(prompt, /1\. — Graphilla Technology/);
+  assert.match(prompt, /Approved copy | use these exact lines/);
+  assert.match(prompt, /1\. | Graphilla Technology/);
   assert.match(prompt, /Attribution: name the person or organisation/);
   assert.match(prompt, /Never an audience, language, date or keyword label/);
 });
@@ -172,7 +172,7 @@ test("L4 hands the model the semantic palette roles, not just three hexes", () =
   };
   const palette = { ...PALETTE, roles: derivePaletteRoles(PALETTE) };
   const prompt = buildComponentPrompt(component, CANVAS, { palette, style: palette.style, components: [component] }, GOAL);
-  assert.match(prompt, /Palette roles —/);
+  assert.match(prompt, /Palette roles |/);
   for (const role of ["surface", "secondary text", "CTA surface", "CTA text", "border"]) {
     assert.match(prompt, new RegExp(`${role} #`), `${role} reaches L4`);
   }

@@ -1,5 +1,5 @@
 /**
- * Layout-quality gate (Phase 3). Pure functions — no Fabric, no AI —
+ * Layout-quality gate (Phase 3). Pure functions | no Fabric, no AI |
  * so they run in node tests as well as the browser.
  *
  * evaluateDesign() measures the RENDERED design with canvas-relative
@@ -154,7 +154,7 @@ export function evaluateDesign(design, opts = {}) {
   };
   collectCopy(design.elements);
 
-  // 1. Bounds — text escaping the canvas is an error; decorations may bleed.
+  // 1. Bounds | text escaping the canvas is an error; decorations may bleed.
   for (const b of boxes) {
     const over =
       Math.max(0, -b.box.x) + Math.max(0, -(W - (b.box.x + b.box.w))) +
@@ -170,7 +170,7 @@ export function evaluateDesign(design, opts = {}) {
     }
   }
 
-  // 2. Text-on-text obscuring (shape layering is intentional — ignored).
+  // 2. Text-on-text obscuring (shape layering is intentional | ignored).
   for (let i = 0; i < texts.length; i++) {
     for (let j = i + 1; j < texts.length; j++) {
       const a = texts[i].box;
@@ -187,7 +187,7 @@ export function evaluateDesign(design, opts = {}) {
   for (const t of texts) {
     const el = (design.elements || []).find((e) => e.id === t.id) || {};
     const fs = el.fontSize || 0;
-    if (fs > 0 && fs < 12) warn("tiny-text", `"${t.id}" is ${Math.round(fs)}px — unreadable at export.`);
+    if (fs > 0 && fs < 12) warn("tiny-text", `"${t.id}" is ${Math.round(fs)}px | unreadable at export.`);
   }
 
   // 4. Coverage (coarse grid sample of all painted boxes).
@@ -207,12 +207,12 @@ export function evaluateDesign(design, opts = {}) {
     }
   }
   const coverage = filled / (N * N);
-  if (coverage < 0.25) err("sparse", `Only ${Math.round(coverage * 100)}% of the canvas is used — the poster reads empty.`);
+  if (coverage < 0.25) err("sparse", `Only ${Math.round(coverage * 100)}% of the canvas is used | the poster reads empty.`);
   else if (coverage < 0.4) warn("sparse", `Only ${Math.round(coverage * 100)}% of the canvas is used.`);
   if (coverage >= 0.25 && rightHalf > 0 && leftHalf / rightHalf < 0.35) {
-    warn("balance", "Content is bunched on the left — the right half is nearly empty.");
+    warn("balance", "Content is bunched on the left | the right half is nearly empty.");
   } else if (coverage >= 0.25 && leftHalf > 0 && rightHalf / leftHalf < 0.35) {
-    warn("balance", "Content is bunched on the right — the left half is nearly empty.");
+    warn("balance", "Content is bunched on the right | the left half is nearly empty.");
   }
 
   // 5. Headline prominence (canvas-relative).
@@ -225,7 +225,7 @@ export function evaluateDesign(design, opts = {}) {
   } else {
     const top = sizes.reduce((a, b) => (b.fs > a.fs ? b : a));
     if (top.fs < H * 0.05) {
-      err("headline", `Largest type is ${Math.round(top.fs)}px on a ${H}px canvas — no clear headline.`);
+      err("headline", `Largest type is ${Math.round(top.fs)}px on a ${H}px canvas | no clear headline.`);
     }
     const headlined = sizes.find((s) => s.role === "headline");
     if (headlined && headlined.fs < top.fs) {
@@ -233,11 +233,11 @@ export function evaluateDesign(design, opts = {}) {
     }
     const header = sizes.find((s) => s.role === "header");
     if (header && top.fs > 0 && header.id !== top.id && header.fs > top.fs * 0.6) {
-      warn("hierarchy", `"${header.id}" (header) is nearly as large as the headline — shrink it to kicker size.`);
+      warn("hierarchy", `"${header.id}" (header) is nearly as large as the headline | shrink it to kicker size.`);
     }
   }
 
-  // 6. Contrast of text against its LOCAL backdrop (bar, disc, gradient —
+  // 6. Contrast of text against its LOCAL backdrop (bar, disc, gradient |
   // never just the canvas, which is how same-ink-on-same-bar dissolves go
   // uncaught). Document order is bottom-first, so the nearest solid shape
   // below the text's center wins; artwork gets one capped notice instead
@@ -291,7 +291,7 @@ export function evaluateDesign(design, opts = {}) {
         (g) => cx > g.box.x && cx < g.box.x + g.box.w && cy > g.box.y && cy < g.box.y + g.box.h,
       );
     });
-    if (onArt) warn("contrast", "Some text sits on artwork — verify contrast against the pixels on export.");
+    if (onArt) warn("contrast", "Some text sits on artwork | verify contrast against the pixels on export.");
   }
 
   // 6b. Palette discipline + type discipline. Every painted fill must be
@@ -342,7 +342,7 @@ export function evaluateDesign(design, opts = {}) {
     collect(design.elements);
     const rogue = paints.filter((p) => !planColors.has(norm(p.color)) && !isNeutral(p.color));
     for (const r of rogue.slice(0, 3)) {
-      warn("palette", `"${r.id}" uses ${r.color}, outside the plan palette — ration the accent, harmonize the rest.`);
+      warn("palette", `"${r.id}" uses ${r.color}, outside the plan palette | ration the accent, harmonize the rest.`);
     }
   }
   {
@@ -351,7 +351,7 @@ export function evaluateDesign(design, opts = {}) {
       if (el && el.type === "text") families.add(el.fontFamily || "Arial");
     }
     if (families.size > 2) {
-      warn("typography", `${families.size} typefaces (${[...families].slice(0, 4).join(", ")}) — two max: one display, one text.`);
+      warn("typography", `${families.size} typefaces (${[...families].slice(0, 4).join(", ")}) | two max: one display, one text.`);
     }
   }
 
@@ -374,7 +374,7 @@ export function evaluateDesign(design, opts = {}) {
         cx > W / 3 && cx < (2 * W) / 3 &&
         cy > H / 3 && cy < (2 * H) / 3
       ) {
-        warn("focal", `Hero ("${biggest.id}") sits dead center — push the focal mass toward third-lines.`);
+        warn("focal", `Hero ("${biggest.id}") sits dead center | push the focal mass toward third-lines.`);
       }
       // Competing dominants: a huge hero AND a huge headline fight.
       const topFs = texts.reduce((m, t) => {
@@ -382,7 +382,7 @@ export function evaluateDesign(design, opts = {}) {
         return Math.max(m, el.fontSize || 0);
       }, 0);
       if (areaFrac > 0.2 && topFs > H * 0.08) {
-        warn("focal", "Hero and headline both dominate — step one down so a single focal wins (2:1).");
+        warn("focal", "Hero and headline both dominate | step one down so a single focal wins (2:1).");
       }
     }
   }
@@ -415,7 +415,7 @@ export function evaluateDesign(design, opts = {}) {
       // cosmetic warning. Every other empty region stays a warning so a sparse
       // brief does not trigger regeneration.
       if (c.role === "hero") {
-        err("empty-hero", `Hero region "${c.id}" rendered nothing inside its box — a hero must carry visual content.`);
+        err("empty-hero", `Hero region "${c.id}" rendered nothing inside its box | a hero must carry visual content.`);
       } else {
         warn("empty-section", `Planned section "${c.id}" rendered nothing inside its box.`);
       }
@@ -429,20 +429,20 @@ export function evaluateDesign(design, opts = {}) {
       warn(
         "thin-section",
         `Planned section "${c.id}" fills ${Math.round(fill * 100)}% of its box ` +
-          `(${Math.round(minFill * 100)}% expected) — it reads nearly empty.`,
+          `(${Math.round(minFill * 100)}% expected) | it reads nearly empty.`,
       );
     }
     // Role fit: the region must hold the KIND of content its role promises.
     if (c.role === "sections") {
       const lines = inside.filter((f) => f.kind === "text" && (copy.get(f.id) || "").trim()).length;
       if (lines < 2) {
-        warn("role-content", `Section region "${c.id}" holds ${lines} line(s) — a section needs grouped entries, not one label.`);
+        warn("role-content", `Section region "${c.id}" holds ${lines} line(s) | a section needs grouped entries, not one label.`);
       }
     }
     if (c.maxChars > 0) {
       const chars = inside.reduce((s, f) => s + (copy.get(f.id) || "").length, 0);
       if (chars > Math.round(c.maxChars * 1.4)) {
-        warn("copy-length", `Region "${c.id}" holds ${chars} characters against a ${c.maxChars} limit — the copy is not fitting its slot.`);
+        warn("copy-length", `Region "${c.id}" holds ${chars} characters against a ${c.maxChars} limit | the copy is not fitting its slot.`);
       }
     }
   }
@@ -452,7 +452,7 @@ export function evaluateDesign(design, opts = {}) {
     warn(
       "decoration-sparse",
       `Only ${decorationPieces} decoration piece${decorationPieces === 1 ? "" : "s"} rendered ` +
-        `(${FEATURES.decoration.minPieces} expected) — the layout reads bare.`,
+        `(${FEATURES.decoration.minPieces} expected) | the layout reads bare.`,
     );
   }
 
@@ -462,14 +462,14 @@ export function evaluateDesign(design, opts = {}) {
     const roles = new Set(texts.map((t) => t.role).filter(Boolean));
     const support = ["tagline", "details", "sections", "audience", "footer", "cta", "body"];
     if (roles.has("headline") && !support.some((r) => roles.has(r))) {
-      warn("support", "The design is a headline with no supporting copy — add the facts, a tagline or a call to action.");
+      warn("support", "The design is a headline with no supporting copy | add the facts, a tagline or a call to action.");
     }
   }
 
   // 9. Ragged alignment + inconsistent gaps (text left edges / vertical rhythm).
   if (texts.length >= 3) {
     const edges = new Set(texts.map((t) => Math.round(t.box.x / 8) * 8));
-    if (edges.size > 5) warn("alignment", `${edges.size} distinct text left-edges — alignment looks ragged.`);
+    if (edges.size > 5) warn("alignment", `${edges.size} distinct text left-edges | alignment looks ragged.`);
     const ordered = [...texts].sort((a, b) => a.box.y - b.box.y);
     const gaps = [];
     for (let i = 1; i < ordered.length; i++) {
@@ -491,7 +491,7 @@ export function evaluateDesign(design, opts = {}) {
   const sparseErr = onlySparse.find((i) => i.code === "sparse");
   if (sparseErr && onlySparse.length === 1 && coverage >= 0.15) {
     sparseErr.severity = "warn";
-    sparseErr.message += " (structured — treated leniently)";
+    sparseErr.message += " (structured | treated leniently)";
   }
 
   const errors = issues.filter((i) => i.severity === "error").length;

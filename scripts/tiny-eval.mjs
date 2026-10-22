@@ -1,5 +1,5 @@
 /**
- * Tiny-model eval — the three narrow pipeline calls through one model at a time.
+ * Tiny-model eval | the three narrow pipeline calls through one model at a time.
  *
  * For each realistic brief it runs the SAME production prompt builders the app
  * uses (template choice, tuning patch, slot copy) with Ollama's schema-

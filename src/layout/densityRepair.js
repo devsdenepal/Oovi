@@ -3,8 +3,8 @@
  *
  * The quality gate measures what actually rendered. When a text region fills
  * too little of its reserved box, or the design carries fewer decoration
- * pieces than the dense default, this module adds deliberate composition —
- * a backing frame, an accent rail, a rule and a few dots — from the design's
+ * pieces than the dense default, this module adds deliberate composition |
+ * a backing frame, an accent rail, a rule and a few dots | from the design's
  * own palette. It never invents copy, never changes the template, and never
  * replaces a region the model already filled.
  *

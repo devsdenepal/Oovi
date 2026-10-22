@@ -1,9 +1,9 @@
 /**
- * Layout templates (Phase 2D) — the structural spine of a design.
+ * Layout templates (Phase 2D) | the structural spine of a design.
  *
  * Before this module L3 asked the model for free-form boxes. On this box that
  * call costs ~5 minutes (1.16k-token prompt at ~10 tok/s) and its boxes were
- * only *probably* collision-free — the plan had to be re-asked when they were
+ * only *probably* collision-free | the plan had to be re-asked when they were
  * not. A template replaces that with:
  *
  *   - boxes that cannot collide by construction: every slot is a sub-rectangle
@@ -117,7 +117,7 @@ function heroSplit(side, gap) {
     DECOR_SLOT(),
     S("hero-visual", "hero", art, { kind: "image", asset: "illustration", describe: "one focal artwork that carries the theme" }),
     S("header-branding", "header", header, { optional: true, size: "body", maxChars: 30, describe: "organizer or event kicker, one short line" }),
-    S("headline-main", "headline", headline, { size: "display", maxChars: 40, describe: "the main title and its year — the largest type on the canvas" }),
+    S("headline-main", "headline", headline, { size: "display", maxChars: 40, describe: "the main title and its year | the largest type on the canvas" }),
     S("tagline-line", "tagline", tagline, { optional: true, size: "subtitle", maxChars: 58, describe: "one supporting line under the title" }),
     S("details-info", "details", details, { size: "body", maxChars: 70, describe: "date, time and venue, one grouped row per fact" }),
     S("footer-registration", "footer", footer, { size: "body", maxChars: 70, describe: "registration link, organizer or partner line" }),
@@ -134,7 +134,7 @@ function heroTop(artTop, gap) {
     DECOR_SLOT(),
     S("hero-visual", "hero", art, { kind: "image", asset: "illustration", describe: "one focal artwork that carries the theme" }),
     S("header-branding", "header", header, { optional: true, size: "body", maxChars: 30, describe: "organizer or event kicker, one short line" }),
-    S("headline-main", "headline", headline, { size: "display", maxChars: 44, describe: "the main title and its year — the largest type on the canvas" }),
+    S("headline-main", "headline", headline, { size: "display", maxChars: 44, describe: "the main title and its year | the largest type on the canvas" }),
     S("tagline-line", "tagline", tagline, { optional: true, size: "subtitle", maxChars: 64, describe: "one supporting line under the title" }),
     S("details-info", "details", details, { size: "body", maxChars: 70, describe: "date, time and venue, one grouped row per fact" }),
     S("footer-registration", "footer", footer, { size: "body", maxChars: 70, describe: "registration link, organizer or partner line" }),
@@ -148,7 +148,7 @@ function centeredPoster(withAudience, gap) {
   const slots = [
     DECOR_SLOT(),
     S("header-branding", "header", top, { size: "body", maxChars: 30, describe: "organizer or event kicker, one short line" }),
-    S("headline-main", "headline", headline, { size: "display", maxChars: 42, describe: "the main title and its year — the largest type on the canvas" }),
+    S("headline-main", "headline", headline, { size: "display", maxChars: 42, describe: "the main title and its year | the largest type on the canvas" }),
     S("tagline-line", "tagline", tagline, { optional: true, size: "subtitle", maxChars: 64, describe: "one supporting line under the title" }),
   ];
   if (withAudience) {
@@ -171,7 +171,7 @@ function editorialColumns(threeUp, gap) {
   const slots = [
     DECOR_SLOT(),
     S("header-branding", "header", header, { optional: true, size: "body", maxChars: 26, describe: "organizer or event kicker, one short line" }),
-    S("headline-main", "headline", headLeft, { size: "display", maxChars: 44, describe: "the main title and its year — the largest type on the canvas" }),
+    S("headline-main", "headline", headLeft, { size: "display", maxChars: 44, describe: "the main title and its year | the largest type on the canvas" }),
     S("tagline-line", "tagline", tagline, { optional: true, size: "subtitle", maxChars: 46, describe: "one supporting line under the title" }),
     S("sections-primary", "sections", cols[0], { size: "subtitle", maxChars: 120, describe: "the main content column: a heading plus grouped rows" }),
     S("sections-secondary", "sections", cols[1], { size: "body", maxChars: 110, describe: "the second content column: a heading plus grouped rows" }),
@@ -189,7 +189,7 @@ function bannerStrip(gap) {
     DECOR_SLOT(),
     S("header-branding", "header", header, { optional: true, size: "body", maxChars: 30, describe: "organizer or event kicker, one short line" }),
     S("tagline-line", "tagline", tagline, { optional: true, size: "body", maxChars: 24, align: "right", describe: "one supporting line, short" }),
-    S("headline-main", "headline", mid, { size: "display", maxChars: 48, describe: "the main title and its year — the largest type on the canvas" }),
+    S("headline-main", "headline", mid, { size: "display", maxChars: 48, describe: "the main title and its year | the largest type on the canvas" }),
     S("details-when", "details", d1, { size: "body", maxChars: 34, describe: "the date and time" }),
     S("details-where", "details", d2, { size: "body", maxChars: 34, describe: "the venue or place" }),
     S("details-who", "audience", d3, { size: "body", maxChars: 34, describe: "who this is for or who is hosting" }),
@@ -209,7 +209,7 @@ function cardGrid(count, gap) {
   }
   const slots = [
     DECOR_SLOT(),
-    S("headline-main", "headline", headline, { size: "display", maxChars: 40, describe: "the main title and its year — the largest type on the canvas" }),
+    S("headline-main", "headline", headline, { size: "display", maxChars: 40, describe: "the main title and its year | the largest type on the canvas" }),
     S("tagline-line", "tagline", tagline, { optional: true, size: "subtitle", maxChars: 60, describe: "one supporting line under the title" }),
   ];
   cards.forEach((box, i) => {
@@ -229,7 +229,7 @@ function storyStack(bleed, gap) {
     DECOR_SLOT(),
     S("hero-visual", "hero", art, { kind: "image", asset: "photo", describe: "one full-width focal photo that carries the theme" }),
     S("header-branding", "header", header, { optional: true, size: "body", maxChars: 30, describe: "organizer or event kicker, one short line" }),
-    S("headline-main", "headline", headline, { size: "display", maxChars: 40, describe: "the main title and its year — the largest type on the canvas" }),
+    S("headline-main", "headline", headline, { size: "display", maxChars: 40, describe: "the main title and its year | the largest type on the canvas" }),
     S("tagline-line", "tagline", tagline, { optional: true, size: "subtitle", maxChars: 58, describe: "one supporting line under the title" }),
     S("details-info", "details", details, { size: "body", maxChars: 70, describe: "date, time and venue, one grouped row per fact" }),
     S("footer-registration", "footer", footer, { size: "body", maxChars: 70, describe: "registration link, organizer or partner line" }),
@@ -243,7 +243,7 @@ function statementQuote(centered, gap) {
   return [
     DECOR_SLOT(),
     S("header-branding", "header", top, { size: "body", maxChars: 32, describe: "organizer or event kicker, one short line" }),
-    S("headline-statement", "headline", statement, { size: "display", maxChars: 60, align, describe: "the single statement this design exists to say — the largest type on the canvas" }),
+    S("headline-statement", "headline", statement, { size: "display", maxChars: 60, align, describe: "the single statement this design exists to say | the largest type on the canvas" }),
     S("tagline-attribution", "tagline", attribution, { size: "subtitle", maxChars: 44, align, describe: "who said it or what it is from" }),
     S("details-source", "details", source, { size: "body", maxChars: 70, align, describe: "the supporting facts: date, place or call to action" }),
     S("footer-registration", "footer", footer, { size: "body", maxChars: 70, describe: "registration link, organizer or partner line" }),
@@ -260,7 +260,7 @@ function eventListing(side, gap) {
   const [whatBox, moreBox] = vstack(what, [0.6, 0.4], gap);
   return [
     DECOR_SLOT(),
-    S("headline-main", "headline", headline, { size: "display", maxChars: 40, describe: "the main title and its year — the largest type on the canvas" }),
+    S("headline-main", "headline", headline, { size: "display", maxChars: 40, describe: "the main title and its year | the largest type on the canvas" }),
     S("tagline-line", "tagline", tagline, { optional: true, size: "subtitle", maxChars: 60, describe: "one supporting line under the title" }),
     S("details-info", "details", whenBox, { size: "subtitle", maxChars: 60, describe: "date, time and venue, one grouped row per fact" }),
     S("audience-who", "audience", whoBox, { optional: true, size: "body", maxChars: 50, describe: "who should come, as a short grouped list" }),
@@ -280,7 +280,7 @@ function featureCta(side, gap) {
     DECOR_SLOT(),
     S("hero-visual", "hero", art, { kind: "image", asset: "illustration", describe: "one product or theme artwork, the visual anchor" }),
     S("header-branding", "header", header, { optional: true, size: "body", maxChars: 28, describe: "organizer or event kicker, one short line" }),
-    S("headline-main", "headline", headline, { size: "display", maxChars: 38, describe: "the main title and its year — the largest type on the canvas" }),
+    S("headline-main", "headline", headline, { size: "display", maxChars: 38, describe: "the main title and its year | the largest type on the canvas" }),
     S("tagline-line", "tagline", tagline, { optional: true, size: "subtitle", maxChars: 54, describe: "one supporting line under the title" }),
     S("sections-benefits", "sections", benefits, { size: "body", maxChars: 90, describe: "three or four grouped benefit rows: icon plus one line each" }),
     S("cta-action", "cta", cta, { optional: true, size: "subtitle", maxChars: 34, describe: "the single call to action plus how to act on it" }),
@@ -290,8 +290,8 @@ function featureCta(side, gap) {
 
 // --- Phase 3 geometry families -------------------------------------------
 //
-// Same contract as the families above — nested partitions of ONE frame with
-// real gutters, so boxes cannot collide by construction — but these are the
+// Same contract as the families above | nested partitions of ONE frame with
+// real gutters, so boxes cannot collide by construction | but these are the
 // layouts a RETRIEVAL library needs: enough distinct shapes that a brief can
 // land on a template that genuinely fits instead of a nearest generic.
 //
@@ -319,7 +319,7 @@ function sidebarRail(side, gap) {
     DECOR_SLOT(),
     S("hero-visual", "hero", art, { kind: "image", asset: "illustration", describe: "the main artwork, filling the top of the content column" }),
     S("header-branding", "header", kicker, { optional: true, size: "body", maxChars: 24, describe: "organizer or event kicker, one short line" }),
-    S("headline-main", "headline", headline, { size: "headline", maxChars: 44, describe: "the main title — the largest type on the canvas" }),
+    S("headline-main", "headline", headline, { size: "headline", maxChars: 44, describe: "the main title | the largest type on the canvas" }),
     S("tagline-line", "tagline", tagline, { optional: true, size: "body", maxChars: 56, describe: "one supporting line under the title" }),
     S("details-info", "details", facts, { size: "body", maxChars: 54, describe: "the facts as grouped rows: date, time, place, price" }),
     S("cta-action", "cta", cta, { optional: true, size: "subtitle", maxChars: 26, describe: "the single call to action" }),
@@ -337,7 +337,7 @@ function magazineCover(gap) {
     S("hero-visual", "hero", art, { kind: "image", asset: "photo", describe: "the single full-width cover image" }),
     S("header-branding", "header", brand, { optional: true, size: "body", maxChars: 24, describe: "the masthead or publication name" }),
     S("tagline-line", "tagline", issue, { optional: true, size: "body", maxChars: 16, align: "right", describe: "issue number or date, short" }),
-    S("headline-main", "headline", lead, { size: "headline", maxChars: 46, describe: "the lead cover line — the largest type on the canvas" }),
+    S("headline-main", "headline", lead, { size: "headline", maxChars: 46, describe: "the lead cover line | the largest type on the canvas" }),
     S("sections-notes", "sections", second, { size: "subtitle", maxChars: 62, describe: "the second cover line: a supporting story" }),
     S("audience-who", "audience", third, { optional: true, size: "body", maxChars: 62, describe: "the third cover line: who or what else is inside" }),
     S("footer-registration", "footer", footer, { size: "body", maxChars: 80, describe: "the footer: where to get it or who made it" }),
@@ -355,7 +355,7 @@ function threeBand(gap) {
     DECOR_SLOT(),
     S("hero-visual", "hero", art, { kind: "image", asset: "illustration", describe: "the focal artwork for the middle band" }),
     S("header-branding", "header", kicker, { optional: true, size: "body", maxChars: 26, describe: "organizer or event kicker, one short line" }),
-    S("headline-main", "headline", headline, { size: "headline", maxChars: 46, describe: "the main title — the largest type on the canvas" }),
+    S("headline-main", "headline", headline, { size: "headline", maxChars: 46, describe: "the main title | the largest type on the canvas" }),
     S("sections-notes", "sections", notes, { size: "body", maxChars: 80, describe: "a short block of supporting detail" }),
     S("cta-action", "cta", cta, { optional: true, size: "subtitle", maxChars: 28, describe: "the single call to action" }),
     S("details-when", "details", when, { size: "body", maxChars: 28, describe: "the date and time" }),
@@ -374,7 +374,7 @@ function photoGrid(count, gap) {
     : hsplit(grid, [1, 1], gap).flatMap((col) => vstack(col, [1, 1], gap));
   const slots = [
     DECOR_SLOT(),
-    S("headline-main", "headline", headline, { size: "headline", maxChars: 46, describe: "the main title — the largest type on the canvas" }),
+    S("headline-main", "headline", headline, { size: "headline", maxChars: 46, describe: "the main title | the largest type on the canvas" }),
     S("tagline-line", "tagline", tagline, { optional: true, size: "body", maxChars: 56, describe: "one supporting line under the title" }),
   ];
   tiles.forEach((box, i) => {
@@ -397,7 +397,7 @@ function quoteCard(framed, gap) {
     DECOR_SLOT(),
     S("header-branding", "header", kicker, { optional: true, size: "body", maxChars: 30, describe: "organizer or event kicker, one short line" }),
     S("tagline-line", "tagline", meta, { optional: true, size: "body", maxChars: 18, align: "right", describe: "a short label, date or section, right-aligned" }),
-    S("headline-quote", "headline", quote, { size: "display", maxChars: 72, align: "center", describe: "the quotation itself — the largest type on the canvas" }),
+    S("headline-quote", "headline", quote, { size: "display", maxChars: 72, align: "center", describe: "the quotation itself | the largest type on the canvas" }),
     S("tagline-attribution", "tagline", attribution, { size: "subtitle", maxChars: 40, align: "center", describe: "who said it" }),
     S("details-source", "details", source, { size: "body", maxChars: 70, align: "center", describe: "the supporting facts: where it is from, or what to do next" }),
     S("footer-registration", "footer", footer, { size: "body", maxChars: 70, describe: "registration link, organizer or partner line" }),
@@ -411,7 +411,7 @@ function timelineRows(compact, gap) {
   const list = vstack(rows, compact ? [1, 1, 1, 1] : [1, 1, 1], gap);
   const slots = [
     DECOR_SLOT(),
-    S("headline-main", "headline", headline, { size: "display", maxChars: 40, describe: "the main title — the largest type on the canvas" }),
+    S("headline-main", "headline", headline, { size: "display", maxChars: 40, describe: "the main title | the largest type on the canvas" }),
     S("tagline-line", "tagline", tagline, { optional: true, size: "subtitle", maxChars: 56, describe: "one supporting line under the title" }),
   ];
   list.forEach((box, i) => {
@@ -434,7 +434,7 @@ function comparisonTable(stacked, gap) {
   const [nameB, bodyB] = vstack(colB, [0.24, 0.76], gap);
   return [
     DECOR_SLOT(),
-    S("headline-main", "headline", headline, { size: "headline", maxChars: 44, describe: "the main title — the largest type on the canvas" }),
+    S("headline-main", "headline", headline, { size: "headline", maxChars: 44, describe: "the main title | the largest type on the canvas" }),
     S("tagline-line", "tagline", tagline, { optional: true, size: "body", maxChars: 56, describe: "one supporting line under the title" }),
     S("sections-name-a", "sections", nameA, { size: "subtitle", maxChars: 30, describe: "the name of the first option" }),
     S("sections-body-a", "sections", bodyA, { size: "body", maxChars: 90, describe: "the first option's rows: one fact per line" }),
@@ -450,7 +450,7 @@ function teamRoster(count, gap) {
   const [headline, tagline] = vstack(head, [0.6, 0.4], gap);
   const slots = [
     DECOR_SLOT(),
-    S("headline-main", "headline", headline, { size: "headline", maxChars: 44, describe: "the main title — the largest type on the canvas" }),
+    S("headline-main", "headline", headline, { size: "headline", maxChars: 44, describe: "the main title | the largest type on the canvas" }),
     S("tagline-line", "tagline", tagline, { optional: true, size: "body", maxChars: 56, describe: "one supporting line under the title" }),
   ];
   hsplit(cards, Array(count).fill(1), gap).forEach((col, i) => {
@@ -469,7 +469,7 @@ function posterRail(gap) {
   const [when, where, who] = hsplit(rail, [1, 1, 1], gap);
   return [
     DECOR_SLOT(),
-    S("headline-main", "headline", headline, { size: "display", maxChars: 52, describe: "the main title — the largest type on the canvas" }),
+    S("headline-main", "headline", headline, { size: "display", maxChars: 52, describe: "the main title | the largest type on the canvas" }),
     S("tagline-line", "tagline", tagline, { optional: true, size: "subtitle", maxChars: 64, describe: "one supporting line under the title" }),
     S("details-when", "details", when, { size: "body", maxChars: 30, describe: "the date and time" }),
     S("details-where", "details", where, { size: "body", maxChars: 30, describe: "the venue or place" }),
@@ -489,7 +489,7 @@ function ticketStub(side, gap) {
   return [
     DECOR_SLOT(),
     S("hero-visual", "hero", art, { kind: "image", asset: "illustration", describe: "the artwork on the ticket's face" }),
-    S("headline-main", "headline", headline, { size: "headline", maxChars: 42, describe: "the main title — the largest type on the canvas" }),
+    S("headline-main", "headline", headline, { size: "headline", maxChars: 42, describe: "the main title | the largest type on the canvas" }),
     S("tagline-line", "tagline", tagline, { optional: true, size: "body", maxChars: 52, describe: "one supporting line under the title" }),
     S("details-info", "details", facts, { size: "body", maxChars: 54, describe: "the facts: date, time, doors and venue" }),
     S("sections-code", "sections", code, { size: "body", maxChars: 18, describe: "the reference, ticket number or gate" }),
@@ -506,7 +506,7 @@ function agendaColumn(dense, gap) {
   const rows = vstack(list, dense ? [1, 1, 1, 1] : [1, 1, 1], gap);
   const slots = [
     DECOR_SLOT(),
-    S("headline-main", "headline", headline, { size: "headline", maxChars: 40, describe: "the main title — the largest type on the canvas" }),
+    S("headline-main", "headline", headline, { size: "headline", maxChars: 40, describe: "the main title | the largest type on the canvas" }),
     S("tagline-line", "tagline", tagline, { optional: true, size: "body", maxChars: 30, describe: "the date or sitting, short" }),
   ];
   rows.forEach((box, i) => {
@@ -529,7 +529,7 @@ function mapCard(side, gap) {
   return [
     DECOR_SLOT(),
     S("hero-visual", "hero", art, { kind: "image", asset: "illustration", describe: "a map, floor plan or the venue's artwork" }),
-    S("headline-main", "headline", headline, { size: "headline", maxChars: 40, describe: "the main title — the largest type on the canvas" }),
+    S("headline-main", "headline", headline, { size: "headline", maxChars: 40, describe: "the main title | the largest type on the canvas" }),
     S("tagline-line", "tagline", tagline, { optional: true, size: "body", maxChars: 50, describe: "one supporting line under the title" }),
     S("details-address", "details", address, { size: "body", maxChars: 56, describe: "the address as grouped rows" }),
     S("sections-hours", "sections", hours, { size: "body", maxChars: 56, describe: "opening hours or service times" }),
@@ -545,7 +545,7 @@ function productShelf(labelled, gap) {
   const [note, cta] = vstack(notes, [0.6, 0.4], gap);
   const slots = [
     DECOR_SLOT(),
-    S("headline-main", "headline", headline, { size: "headline", maxChars: 40, describe: "the main title — the largest type on the canvas" }),
+    S("headline-main", "headline", headline, { size: "headline", maxChars: 40, describe: "the main title | the largest type on the canvas" }),
     S("tagline-line", "tagline", tagline, { optional: true, size: "body", maxChars: 52, describe: "one supporting line under the title" }),
   ];
   hsplit(shelf, [1, 1, 1], gap).forEach((col, i) => {
@@ -574,7 +574,7 @@ function certificateFormal(sealed, gap) {
     DECOR_SLOT(),
     S("header-branding", "header", org, { optional: true, size: "body", maxChars: 30, describe: "the awarding organization" }),
     S("tagline-line", "tagline", date, { optional: true, size: "body", maxChars: 18, align: "right", describe: "the date of award, short" }),
-    S("headline-main", "headline", title, { size: "display", maxChars: 40, align: "center", describe: "what is being awarded — the largest type on the canvas" }),
+    S("headline-main", "headline", title, { size: "display", maxChars: 40, align: "center", describe: "what is being awarded | the largest type on the canvas" }),
     S("sections-recipient", "sections", recipient, { size: "title", maxChars: 40, align: "center", describe: "the recipient's name" }),
     S("details-statement", "details", awarded, { size: "body", maxChars: 80, align: "center", describe: "the citation: what it is awarded for" }),
   ];
@@ -590,7 +590,7 @@ function socialPost(gap) {
     DECOR_SLOT(),
     S("header-branding", "header", kicker, { optional: true, size: "body", maxChars: 30, describe: "a short kicker or handle at the top" }),
     S("hero-visual", "hero", art, { kind: "image", asset: "photo", describe: "the one image this post is about" }),
-    S("headline-main", "headline", headline, { size: "display", maxChars: 44, describe: "the line — the largest type on the canvas" }),
+    S("headline-main", "headline", headline, { size: "display", maxChars: 44, describe: "the line | the largest type on the canvas" }),
     S("cta-action", "cta", action, { size: "subtitle", maxChars: 56, describe: "the action or question this post asks for" }),
     S("footer-registration", "footer", footer, { size: "body", maxChars: 60, describe: "the handle, hashtag or link line" }),
   ];
@@ -608,7 +608,7 @@ function newsletterMasthead(gap) {
     DECOR_SLOT(),
     S("header-branding", "header", brand, { optional: true, size: "body", maxChars: 26, describe: "the newsletter's name or the organizer" }),
     S("tagline-line", "tagline", issue, { optional: true, size: "body", maxChars: 18, align: "right", describe: "the issue number or date, short" }),
-    S("headline-main", "headline", headline, { size: "headline", maxChars: 44, describe: "the lead item's title — the largest type on the canvas" }),
+    S("headline-main", "headline", headline, { size: "headline", maxChars: 44, describe: "the lead item's title | the largest type on the canvas" }),
     S("sections-lead", "sections", tagline, { size: "body", maxChars: 80, describe: "one sentence of lead-in for the top item" }),
     S("sections-head-1", "sections", head1, { size: "body", maxChars: 30, describe: "the first column's heading" }),
     S("sections-list-1", "sections", items1, { size: "body", maxChars: 90, describe: "the first column's items, one per line" }),
@@ -629,7 +629,7 @@ function statementSplit(side, gap) {
   return [
     DECOR_SLOT(),
     S("hero-visual", "hero", art, { kind: "image", asset: "photo", describe: "the image the statement is set against" }),
-    S("headline-main", "headline", headline, { size: "display", maxChars: 54, describe: "the statement — the largest type on the canvas" }),
+    S("headline-main", "headline", headline, { size: "display", maxChars: 54, describe: "the statement | the largest type on the canvas" }),
     S("tagline-attribution", "tagline", attribution, { size: "subtitle", maxChars: 44, describe: "who said it, or what it refers to" }),
     S("details-when", "details", when, { size: "body", maxChars: 30, describe: "the date and time" }),
     S("details-where", "details", where, { size: "body", maxChars: 30, describe: "the venue or place" }),
@@ -649,7 +649,7 @@ function metricPanel(gap) {
   );
   return [
     DECOR_SLOT(),
-    S("headline-main", "headline", headline, { size: "headline", maxChars: 42, describe: "the main title — the largest type on the canvas" }),
+    S("headline-main", "headline", headline, { size: "headline", maxChars: 42, describe: "the main title | the largest type on the canvas" }),
     S("tagline-line", "tagline", tagline, { optional: true, size: "body", maxChars: 56, describe: "one supporting line under the title" }),
     ...metrics,
     S("sections-notes", "sections", note, { size: "body", maxChars: 80, describe: "the source or qualifier for the figures" }),
@@ -665,7 +665,7 @@ function menuSheet(gap) {
   const rows = vstack(list, [1, 1, 1], gap);
   const slots = [
     DECOR_SLOT(),
-    S("headline-main", "headline", headline, { size: "headline", maxChars: 40, describe: "the main title — the largest type on the canvas" }),
+    S("headline-main", "headline", headline, { size: "headline", maxChars: 40, describe: "the main title | the largest type on the canvas" }),
     S("tagline-line", "tagline", tagline, { optional: true, size: "body", maxChars: 52, describe: "one supporting line under the title" }),
   ];
   rows.forEach((box, i) => {
@@ -683,7 +683,7 @@ function classSchedule(gap) {
   const [headline, tagline] = vstack(head, [0.62, 0.38], gap);
   const slots = [
     DECOR_SLOT(),
-    S("headline-main", "headline", headline, { size: "display", maxChars: 40, describe: "the main title — the largest type on the canvas" }),
+    S("headline-main", "headline", headline, { size: "display", maxChars: 40, describe: "the main title | the largest type on the canvas" }),
     S("tagline-line", "tagline", tagline, { optional: true, size: "subtitle", maxChars: 56, describe: "one supporting line under the title" }),
   ];
   hsplit(cols, [1, 1, 1], gap).forEach((col, i) => {
@@ -1353,7 +1353,7 @@ function tuningEntries(value, valueKeys) {
 /**
  * Step (b): sanitize the model's tuning patch. Unknown keys are dropped,
  * numbers are clamped, only optional slots may be hidden, and boxes are never
- * read from the model — only the bounded vocabulary below survives.
+ * read from the model | only the bounded vocabulary below survives.
  */
 export function sanitizeTuning(raw, template) {
   const out = { variant: template?.variants?.[0]?.id || "", density: DEFAULT_DENSITY, hide: [], scale: {}, align: {}, images: {} };

@@ -117,7 +117,7 @@ export class CanvasEditor {
    * Draws the planned skeleton as a non-destructive wireframe: one dashed box
    * plus a role label per region.
    *
-   * Guides carry NO `designId`, so canvasToDesign() skips them — they never
+   * Guides carry NO `designId`, so canvasToDesign() skips them | they never
    * enter the design, exports, patches, history or the quality gate. They
    * exist only so the canvas shows the planned structure while the slow
    * per-region generation fills it in; each guide is dropped as its real
@@ -203,7 +203,7 @@ export class CanvasEditor {
     }
   }
 
-  /** Guides still owned by the canvas — undo/redo can swap the object list. */
+  /** Guides still owned by the canvas | undo/redo can swap the object list. */
   _liveGuides() {
     const c = this.canvas;
     if (!c) return [];
@@ -211,7 +211,7 @@ export class CanvasEditor {
     return (this._guides || []).filter((g) => objects.includes(g));
   }
 
-  /** Drops one region's guide — called as its real elements land. */
+  /** Drops one region's guide | called as its real elements land. */
   clearGuideFor(id) {
     const c = this.canvas;
     if (!c || !this._guides || this._guides.length === 0) return;
@@ -245,7 +245,7 @@ export class CanvasEditor {
    * Removes the background of the selected image (on-device ONNX model,
    * lazily imported so the ~MB runtime never touches initial load).
    * Pixels are swapped in place: same box, same stack position, one
-   * history entry. Only local (dataURL) images — hotlinked URLs would
+   * history entry. Only local (dataURL) images | hotlinked URLs would
    * taint on fetch.
    * @returns {Promise<boolean>} false when nothing applicable selected
    * @throws on load/model/result failure (caller toasts)
@@ -334,7 +334,7 @@ export class CanvasEditor {
   /**
    * Drops a new editable element at the canvas center (with a small
    * cascade offset so repeated inserts don't stack invisibly). Needs no
-   * AI — the object is created straight from a DSL fragment through the
+   * AI | the object is created straight from a DSL fragment through the
    * same factory the renderer uses, then selected for immediate editing.
    * @param {"text"|"rectangle"|"circle"|"line"} type
    * @param {string} [fill] CSS color for the new element
@@ -379,7 +379,7 @@ export class CanvasEditor {
   }
 
   /**
-   * Inserts a local image (dataURL — never taints the canvas, so PNG
+   * Inserts a local image (dataURL | never taints the canvas, so PNG
    * export keeps working) fitted into the artboard, then hydrates it.
    * @param {string} src dataURL of the image
    * @param {number} naturalW intrinsic pixels
@@ -1051,7 +1051,7 @@ export class CanvasEditor {
     if (!c) return;
     const active = c.getActiveObjects();
     if (active.length === 0) return;
-    // NOTE: fabric 6.9 objects have no .remove() — removal goes through
+    // NOTE: fabric 6.9 objects have no .remove() | removal goes through
     // the canvas. Suppressed so the batch is a single history entry.
     this.suppressHistory = true;
     try {
@@ -1066,7 +1066,7 @@ export class CanvasEditor {
 
   /**
    * Applies one property edit to every selected object, then routes through
-   * _handleMutation() — the same snapshot + sync path as direct canvas edits,
+   * _handleMutation() | the same snapshot + sync path as direct canvas edits,
    * so every inspector change is exactly one undo entry.
    * @param {string} prop x|y|width|height|radius|angle|opacity|content|fontSize|fontWeight|fontFamily|textAlign|lineHeight|charSpacing|fill|stroke|strokeWidth|cornerRadius
    * @param {string} value raw input value (coerced for numeric props)
@@ -1228,7 +1228,7 @@ export class CanvasEditor {
     };
     // Displacement budget: sliding back inside is unbounded (always
     // correct), but overlap shoves beyond this scream plan failure, not
-    // tidyable collision — refuse and report instead of rearranging the
+    // tidyable collision | refuse and report instead of rearranging the
     // poster into new overlaps (observed: +290px cascades).
     const SHOVE_CAP = 120;
     const shift = (o, dx, dy, capped) => {
@@ -1273,7 +1273,7 @@ export class CanvasEditor {
           const B = order[j];
           const aT = bearsText(A);
           const bT = bearsText(B);
-          if (!aT && !bT) continue; // two layers — intentional, never touch
+          if (!aT && !bT) continue; // two layers | intentional, never touch
           const a = placed(A);
           const b = placed(B);
           const smaller = Math.min(area(a), area(b));
@@ -1537,7 +1537,7 @@ export class CanvasEditor {
     if (!c) return;
     const picked = c.getActiveObjects();
     if (picked.length === 0) return;
-    // NOTE: fabric 6.9 has no bringForward/sendToFront — reorder manually
+    // NOTE: fabric 6.9 has no bringForward/sendToFront | reorder manually
     // via remove + insertAt under suppressHistory for a single entry.
     this.suppressHistory = true;
     try {

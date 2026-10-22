@@ -168,8 +168,8 @@ export class Toolbar {
       <div class="prop-section-name">${esc(label)}</div>
       ${this._geomRows(obj, "rect")}
       <div class="prop-row"><label>source</label><input type="text" value="${esc(obj.designSrc || obj.pendingSrc || "")}" disabled /></div>
-      <div class="insert-hint">Local uploads only. Keeps PNG export working.</div>
-      <button class="btn btn-sm btn-light border w-100" data-cmd="remove-bg" title="Remove the image background on-device"><i class="fa-solid fa-eraser"></i> Remove background</button>
+      <div class="insert-hint">Image from this device.</div>
+      <button class="btn btn-sm btn-light border w-100" data-cmd="remove-bg" title="Remove the image background"><i class="fa-solid fa-eraser"></i> Remove background</button>
       ${this._alignRow()}
       ${this._orderRow()}`;
     }

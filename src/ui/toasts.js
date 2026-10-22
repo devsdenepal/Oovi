@@ -1,5 +1,5 @@
 /**
- * toasts — Bootstrap toast notifications (interface layer only).
+ * toasts | Bootstrap toast notifications (interface layer only).
  *
  * Isolation contract: imports nothing from ai/editor/app. App-layer code
  * fires updates via notify(); this module only touches toast DOM.

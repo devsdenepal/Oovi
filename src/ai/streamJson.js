@@ -14,7 +14,7 @@
 function findArrayStart(text) {
   const key = text.indexOf('"elements"');
   if (key !== -1) {
-    // Wait for the array itself — do not fall back to some other bracket.
+    // Wait for the array itself | do not fall back to some other bracket.
     return text.indexOf("[", key);
   }
   // Fallback: a root-level array of objects, e.g. `[{"id":…`

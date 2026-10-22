@@ -1,5 +1,5 @@
 /**
- * POST /api/ai — server-side AI gateway (Vercel function + local server).
+ * POST /api/ai | server-side AI gateway (Vercel function + local server).
  *
  * Routes every generation to the on-device provider (Ollama serving the
  * local Gemma model) through api/_aiChain.js. The browser only ever calls

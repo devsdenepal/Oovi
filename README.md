@@ -1,6 +1,6 @@
 # Oovi: AI Design Studio
 
-Oovi turns natural-language prompts into **fully editable graphic designs** — not flat images. Every headline, shape, and illustration stays a live Fabric.js object: selectable, movable, resizable, and re-editable.
+Oovi turns natural-language prompts into **fully editable graphic designs** | not flat images. Every headline, shape, and illustration stays a live Fabric.js object: selectable, movable, resizable, and re-editable.
 
 ![Oovi editor generating a design](docs/screenshot.png)
 
@@ -16,10 +16,10 @@ npm install
 createdb oovi
 node scripts/db-probe.mjs
 
-# Terminal 1 — API + persistence (:3001)
+# Terminal 1 | API + persistence (:3001)
 npm run dev:api
 
-# Terminal 2 — editor UI (:5173)
+# Terminal 2 | editor UI (:5173)
 npm run dev
 ```
 

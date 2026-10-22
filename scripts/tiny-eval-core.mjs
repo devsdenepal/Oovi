@@ -102,12 +102,12 @@ const CASES = [
   },
   {
     id: "diwali-office",
-    prompt: "दिवाली उत्सव पोस्टर — ऑफिस के कर्मचारियों के लिए",
+    prompt: "दिवाली उत्सव पोस्टर | ऑफिस के कर्मचारियों के लिए",
     canvas: { width: 1200, height: 630 },
     expect: "centered-poster",
     tolerated: ["poster-rail", "statement-quote"],
     goal: {
-      summary: "दिवाली उत्सव पोस्टर — ऑफिस के कर्मचारियों के लिए",
+      summary: "दिवाली उत्सव पोस्टर | ऑफिस के कर्मचारियों के लिए",
       subject: "Diwali celebration at the office",
       audience: "office colleagues and staff",
       purpose: "invite everyone to the office Diwali celebration",
@@ -844,11 +844,11 @@ function copyBudgetTokens(component, maxItems) {
 // Report
 // ---------------------------------------------------------------------------
 
-const fmtS = (ms) => (ms == null ? "—" : `${(ms / 1000).toFixed(1)}s`);
-const fmtN = (n) => (n == null ? "—" : String(n));
+const fmtS = (ms) => (ms == null ? "|" : `${(ms / 1000).toFixed(1)}s`);
+const fmtN = (n) => (n == null ? "|" : String(n));
 const rate = (list, key) => {
   const real = list.filter((r) => !String(r.detail || "").startsWith("error:"));
-  if (!real.length) return "—";
+  if (!real.length) return "|";
   return `${real.filter((r) => r[key]).length}/${real.length}`;
 };
 const mean = (list, key) => {
@@ -861,7 +861,7 @@ function report(model) {
   for (const call of ["choice", "tune", "copy"]) {
     const list = all.filter((r) => r.call === call);
     if (!list.length) continue;
-    console.log(`\n=== ${model} — ${call} ===`);
+    console.log(`\n=== ${model} | ${call} ===`);
     console.log(
       "case | valid | san | match | wall | prefill tok | prefill s | eval tok | eval s | detail",
     );
@@ -871,12 +871,12 @@ function report(model) {
           r.case,
           r.valid ? "Y" : "N",
           r.san ? "Y" : "N",
-          r.match == null ? "—" : r.match ? "Y" : "N",
+          r.match == null ? "|" : r.match ? "Y" : "N",
           fmtS(r.wallMs),
           fmtN(r.prefillTok),
-          r.prefillMs ? (r.prefillMs / 1000).toFixed(1) : "—",
+          r.prefillMs ? (r.prefillMs / 1000).toFixed(1) : "|",
           fmtN(r.evalTok),
-          r.evalMs ? (r.evalMs / 1000).toFixed(1) : "—",
+          r.evalMs ? (r.evalMs / 1000).toFixed(1) : "|",
           r.detail || "",
         ].join(" | "),
       );
@@ -900,14 +900,14 @@ function summary() {
     };
     const prefillRate = (() => {
       const list = all.filter((r) => (r.prefillTok || 0) > 0 && (r.prefillMs || 0) > 0);
-      if (!list.length) return "—";
+      if (!list.length) return "|";
       const tok = list.reduce((s, r) => s + r.prefillTok, 0);
       const ms = list.reduce((s, r) => s + r.prefillMs, 0);
       return `${(tok / (ms / 1000)).toFixed(1)}`;
     })();
     const evalRate = (() => {
       const list = all.filter((r) => (r.evalTok || 0) > 0 && (r.evalMs || 0) > 0);
-      if (!list.length) return "—";
+      if (!list.length) return "|";
       const tok = list.reduce((s, r) => s + r.evalTok, 0);
       const ms = list.reduce((s, r) => s + r.evalMs, 0);
       return `${(tok / (ms / 1000)).toFixed(1)}`;
@@ -934,7 +934,7 @@ function summary() {
 
 async function main() {
   const banner = PREFLIGHT ? "PREFLIGHT (no model calls)" : `models: ${MODELS.join(", ")}`;
-  console.log(`tiny-eval — ${CASES.length} briefs — ${banner}`);
+  console.log(`tiny-eval | ${CASES.length} briefs | ${banner}`);
   console.log(`ollama: ${OLLAMA}\n`);
 
   if (PREFLIGHT) {

@@ -267,7 +267,7 @@ export class App {
   async boot() {
     // Start with an empty canvas restricted to the default design-type
     // preset (Facebook Post). Generation only runs when the user presses
-    // Generate — never automatically on startup.
+    // Generate | never automatically on startup.
     const preset = this.designPreset;
     const placeholder = {
       canvas: { width: preset.width, height: preset.height, background: "#F5F5F7" },
@@ -300,7 +300,7 @@ export class App {
       // private mode: sidebar simply starts open
     }
     document.getElementById("exit-preview")?.addEventListener("click", () => this.togglePreview(false));
-    this.assistant.pushAssistant("Select something, then describe a change. Offline? Add ?mock=1 to the URL.");
+    this.assistant.pushAssistant("Select a layer, then describe a change.");
     this._updateAssistantContext([]);
     let pending = "";
     try {
@@ -416,7 +416,7 @@ export class App {
 
   /**
    * Architected path: choose a template, show its regions immediately, then
-   * fill them one by one — DSL text/shapes through the existing pipeline,
+   * fill them one by one | DSL text/shapes through the existing pipeline,
    * photos through a prompt-grounded Unsplash search. Each component is its
    * own undo entry.
    */
@@ -614,7 +614,7 @@ export class App {
       //
       // The on-device model serves ONE generation at a time
       // (OLLAMA_NUM_PARALLEL=1). Fanning component calls out does not make
-      // them faster — Ollama just queues them, and while queued they receive
+      // them faster | Ollama just queues them, and while queued they receive
       // no bytes, so a queued request eventually dies on a client timeout
       // ("fetch failed") while the total wall clock stays the same. So run
       // them strictly serially: same speed, no queue-timeout failures.
@@ -857,7 +857,7 @@ export class App {
         //     not render what was asked: an empty reservation, or a missing
         //     planned region.
         //
-        // Deliberately absent: `thin-section` (a sparse box is a style — and
+        // Deliberately absent: `thin-section` (a sparse box is a style | and
         // this is what made elements vanish in a cycle on a real run: a region
         // that filled its box only partly was deleted and regenerated, up to
         // four times per build), plus `contrast` (L5 re-inks faded text
@@ -891,9 +891,9 @@ export class App {
 
       // Refinement is PER REGION, not a whole rebuild: complaints map back to
       // the regions that own the offending elements, and only those are
-      // regenerated — each in its own call, atomically. A region fix cannot
+      // regenerated | each in its own call, atomically. A region fix cannot
       // repair a template whose regions stack on top of each other (mass
-      // overlap), so that — and complaints with no owning region at all —
+      // overlap), so that | and complaints with no owning region at all |
       // re-tunes the SAME template instead of swapping in a different one.
       const overlapErrors = report.issues.filter((i) => i.severity === "error" && i.code === "overlap").length;
       const crowded = overlapErrors >= 5;
@@ -1211,7 +1211,7 @@ export class App {
         }
       }
 
-      // L5 — Color correction: re-ink text that fades into its backdrop and
+      // L5 | Color correction: re-ink text that fades into its backdrop and
       // snap off-palette fills back to the palette. Applied as one undo step.
       status("5/5 Correcting colors…");
       const colorFix = correctColors(this.editor.toDesign(), plan.palette);
@@ -1375,7 +1375,7 @@ export class App {
     }
     const query = candidates[0] || "";
     if (!query) {
-      console.warn(`[build] image ${component.id} has no image subject — failing region`);
+      console.warn(`[build] image ${component.id} has no image subject | failing region`);
       return null;
     }
 
@@ -1411,7 +1411,7 @@ export class App {
         console.warn(`[build] image ${component.id} search failed (${error.message})`);
       }
     }
-    console.warn(`[build] image ${component.id} found no usable Unsplash photo — failing region`);
+    console.warn(`[build] image ${component.id} found no usable Unsplash photo | failing region`);
     return null;
   }
 
@@ -1424,7 +1424,7 @@ export class App {
       const row = await projects.get(this.projectId);
       this.state.title = row.title || "Untitled design";
       this.topbar.setTitle(this.state.title);
-      document.title = `${this.state.title} · Oovi`;
+      document.title = `${this.state.title} | Oovi`;
       const design = row.design;
       if (design && Array.isArray(design.elements) && design.elements.length) {
         const check = validateDesign(design);
@@ -1518,15 +1518,18 @@ export class App {
 
   onTitle(title) {
     this.state.title = title;
-    document.title = `${title} · Oovi`;
+    document.title = `${title} | Oovi`;
     this.scheduleSave();
   }
 
   onTab(tab) {
-    if (tab === "pipeline") this.leftTabs?.set("pipeline");
-    else if (tab === "design") {
+    if (tab === "pipeline") {
+      this.leftTabs?.set("pipeline");
+      this._revealLeftPanel();
+    } else if (tab === "design") {
       this.leftTabs?.set("insert");
       this._closeDeveloper();
+      this._revealCanvas();
     } else if (tab === "code") this._openDeveloper();
   }
 
@@ -1914,7 +1917,7 @@ export class App {
   /**
    * "Save as template": turn the current canvas into a reusable layout.
    * The converter reads the RENDERED design and the result must clear the same
-   * quality gate the template tests use — a layout that would overflow, collide
+   * quality gate the template tests use | a layout that would overflow, collide
    * or fade is refused with the reasons rather than stored.
    */
   saveCurrentAsTemplate() {
@@ -1973,11 +1976,33 @@ export class App {
     else this._refreshContextBar();
   }
 
+  _stackedLayout() {
+    const grid = document.querySelector(".editor-grid");
+    return Boolean(grid) && getComputedStyle(grid).display === "flex";
+  }
+
+  _revealLeftPanel() {
+    const app = document.getElementById("app");
+    if (app?.classList.contains("side-collapsed")) this.setSidebar(true);
+    if (!this._stackedLayout()) return;
+    const left = document.querySelector(".editor-left");
+    requestAnimationFrame(() => left?.scrollIntoView({ behavior: "smooth", block: "center" }));
+  }
+
+  _revealCanvas() {
+    if (!this._stackedLayout()) return;
+    const center = document.querySelector(".editor-center");
+    requestAnimationFrame(() => center?.scrollIntoView({ behavior: "smooth", block: "start" }));
+  }
+
   _openDeveloper() {
     const dev = document.getElementById("developer");
     if (dev) {
       dev.open = true;
-      dev.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      dev.scrollIntoView({
+        behavior: "smooth",
+        block: this._stackedLayout() ? "center" : "nearest",
+      });
     }
   }
 
@@ -2079,7 +2104,7 @@ export class App {
   async persistNow() {
     if (!this.editor.canvas) return;
     if (this._persistLocked) {
-      console.log("[persist] skipped — generation is locked until its final gates pass");
+      console.log("[persist] skipped | generation is locked until its final gates pass");
       return;
     }
     this._syncDesignMemory();

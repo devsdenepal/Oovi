@@ -1,5 +1,5 @@
 /**
- * AssistantPanel — compact AI chat inside the sidebar AI tab (Goal 4).
+ * AssistantPanel | compact AI chat inside the sidebar AI tab (Goal 4).
  *
  * Selection-aware context chips + suggestions, message log, input, and
  * the proposal card (change list, Apply/Cancel, before/after toggle,
