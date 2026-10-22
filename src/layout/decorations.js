@@ -136,7 +136,7 @@ export const DECORATIONS_SCHEMA = {
   items: DECORATION_SPEC_SCHEMA,
 };
 
-const DENSITY = { sparse: 0.68, normal: 1, dense: 1.32 };
+const DENSITY = { sparse: 0.8, normal: 1.15, dense: 1.6 };
 const ALIASES = {
   circle: "circles",
   arc: "arcs",
@@ -258,7 +258,7 @@ export function defaultDecorationSpecs(component = {}) {
     {
       kind,
       variant: definition.variants[0],
-      density: small ? "sparse" : "normal",
+      density: small ? "normal" : "dense",
       color: "accent",
     },
   ];
@@ -343,7 +343,7 @@ function recommendedSpecs(list) {
     return {
       kind,
       variant: definition.variants.includes(variant) ? variant : definition.variants[0],
-      density: index === 0 ? "normal" : "sparse",
+      density: index === 0 ? "dense" : "normal",
       color: index === 0 ? "accent" : "secondary",
     };
   });
@@ -579,7 +579,7 @@ function sparkle(base, cx, cy, radius, stroke, width, add, opacity = 0.9) {
 function buildCircles({ spec, box, colors, add, base, limit }) {
   const area = pane(box, 0.06);
   const min = Math.min(area.w, area.h);
-  const count = clamp(Math.round(4 * DENSITY[spec.density]), 2, 6);
+  const count = clamp(Math.round(5 * DENSITY[spec.density]), 2, 8);
   const radius = clamp(min * (spec.variant === "halo" ? 0.3 : 0.2), 2, 58);
   const rng = seeded(`${base}:circles`);
 
@@ -679,7 +679,7 @@ function buildStars({ spec, box, colors, add, base, limit }) {
   // A four-point star reads as a star at decoration scale; four bare arms
   // read as a plus sign. Each star is a closed eight-segment polyline, so the
   // piece budget is spent on shape rather than on a dense field of ticks.
-  const count = clamp(Math.round(3 * DENSITY[spec.density]), 1, 5);
+  const count = clamp(Math.round(4 * DENSITY[spec.density]), 1, 7);
   for (let i = 0; i < count && add.count + 8 <= limit; i++) {
     const cx = area.x + area.w * (0.12 + rng() * 0.76);
     const cy = area.y + area.h * (0.14 + rng() * 0.72);
@@ -703,7 +703,7 @@ function buildDots({ spec, box, colors, add, base, limit }) {
   const spacing = clamp(Math.max(min * 0.18, 6), 6, 44);
   const radius = clamp(spacing * 0.12, 1.2, 5.2);
   const areaScale = clamp(Math.sqrt((area.w * area.h) / (420 * 260)), 0.8, 1.7);
-  const target = clamp(Math.round(10 * DENSITY[spec.density] * areaScale), 4, 20);
+  const target = clamp(Math.round(12 * DENSITY[spec.density] * areaScale), 5, 28);
   const rng = seeded(`${base}:dots`);
 
   if (spec.variant === "grid") {
@@ -779,7 +779,7 @@ function buildGrids({ spec, box, colors, add, base, limit }) {
 
 function buildSquiggles({ spec, box, colors, add, base, limit }) {
   const area = pane(box, 0.06);
-  const rows = spec.variant === "stack" ? clamp(Math.round(2 * DENSITY[spec.density]), 1, 3) : 1;
+  const rows = spec.variant === "stack" ? clamp(Math.round(3 * DENSITY[spec.density]), 1, 4) : 1;
   const amp = clamp(area.h * 0.16, 1.5, 12);
   const segments = clamp(Math.round(area.w / 38), 5, 12);
   const width = clamp(Math.min(area.w, area.h) * 0.03, 1.4, 4);
@@ -912,7 +912,7 @@ function buildRibbons({ spec, box, colors, add, base, limit }) {
 function buildPills({ spec, box, colors, add, base, limit }) {
   const area = pane(box, 0.05);
   const stack = spec.variant === "stack" || area.h > area.w * 1.8;
-  const count = clamp(Math.round(3 * DENSITY[spec.density]), 1, 4);
+  const count = clamp(Math.round(4 * DENSITY[spec.density]), 1, 5);
   const slotW = stack ? area.w : area.w / count;
   const slotH = stack ? area.h / count : area.h;
   for (let i = 0; i < count && add.count < limit; i++) {
@@ -938,7 +938,7 @@ function buildDividers({ spec, box, colors, add, base, limit }) {
   const middle = (left + right) / 2;
 
   if (spec.variant === "dots") {
-    const count = clamp(Math.round(5 * DENSITY[spec.density]), 3, 7);
+    const count = clamp(Math.round(6 * DENSITY[spec.density]), 3, 9);
     for (let i = 0; i < count && add.count < limit; i++) {
       const t = (i + 0.5) / count;
       add(circle(`${base}-dot-${i}`, left + (right - left) * t, y, i === Math.floor(count / 2) ? 3 : 1.7, colors.main, { opacity: 0.75 }));
@@ -1064,7 +1064,7 @@ function buildIcons({ spec, box, colors, add, base, limit }) {
   const area = pane(box, 0.08);
   const glyph = GLYPHS[spec.variant] ? spec.variant : "sparkle";
   const complex = glyph === "sun" || glyph === "star" || glyph === "flower";
-  const count = complex ? 1 : clamp(Math.round(2 * DENSITY[spec.density]), 1, 3);
+  const count = complex ? 1 : clamp(Math.round(3 * DENSITY[spec.density]), 1, 4);
   const slot = area.w / count;
   const radius = Math.max(1, Math.min(30, Math.min(slot * 0.34, area.h * 0.34)));
   for (let i = 0; i < count && add.count < limit; i++) {

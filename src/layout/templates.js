@@ -37,7 +37,7 @@ const GUTTER = 0.025;
 /** Decoration lives outside the frame so it can never sit under text. */
 const DECOR_H = 0.045;
 
-const DENSITY = { tight: 0.65, normal: 1, airy: 1.45 };
+const DENSITY = { tight: 0.42, dense: 0.6, normal: 0.82, airy: 1.2 };
 
 const rect = (x, y, w, h) => ({ x, y, w, h });
 
@@ -1354,7 +1354,7 @@ function tuningEntries(value, valueKeys) {
  * read from the model — only the bounded vocabulary below survives.
  */
 export function sanitizeTuning(raw, template) {
-  const out = { variant: template?.variants?.[0]?.id || "", density: "dense", hide: [], scale: {}, align: {}, images: {} };
+  const out = { variant: template?.variants?.[0]?.id || "", density: "tight", hide: [], scale: {}, align: {}, images: {} };
   if (!raw || typeof raw !== "object") return out;
   if (template) {
     const wanted = String(raw.variant ?? raw.variantId ?? "");

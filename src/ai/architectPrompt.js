@@ -124,7 +124,7 @@ export function buildComponentPrompt(component, canvas, plan, goal = null, rawPr
         "Decoration vocabulary — choose from these exact kind ids:",
         DECORATION_VOCABULARY,
         "Decoration rules:",
-        "- Pick 1-2 kinds that reinforce the design. Use the recommendation below as the starting point; prefer one main family plus one small accent.",
+        "- Pick 1-2 kinds that reinforce the design. Use the recommendation below as the starting point; prefer one main family plus one small accent. Default to `dense` density unless the box is tiny.",
         `- Recommended for this design: ${recommendedDecorations.map((item) => item.kind).join(", ") || "stars"}.`,
         "- `variant` is optional; use one of the listed variants for the chosen kind.",
         "- `density` is sparse, normal or dense. `color` is accent, ink, secondary or muted.",
@@ -157,13 +157,13 @@ export function buildComponentPrompt(component, canvas, plan, goal = null, rawPr
   // 700+ tokens. Density is bought with SIZE and grouping, not element count.
   const budget =
     isDecoration
-      ? "1-2 decoration specs; the renderer expands them into 6-24 editable shapes."
+      ? "1-2 decoration specs at dense density; the renderer expands them into 12-24 editable shapes."
       : component.role === "sections"
         ? /card|caption|item/i.test(component.id)
           ? "2-3 elements: one short label and one line of detail — this is a single card, not a section."
-          : "5-8 elements: a heading plus 3-4 grouped cards (icon + title + one-liner)."
+          : "6-10 elements: a heading plus 4-6 grouped cards (icon + title + one-liner), tightly packed."
         : component.role === "details"
-          ? "3-5 elements: one grouped row per fact, plus a supporting label."
+          ? "4-6 elements: one grouped row per fact, plus a supporting label or badge."
           : component.role === "header"
             ? "2-3 elements: a bar or badge plus one kicker line."
             : component.role === "headline"
@@ -174,7 +174,7 @@ export function buildComponentPrompt(component, canvas, plan, goal = null, rawPr
                   ? "2-4 elements: a label plus grouped entries."
                   : component.role === "footer"
                     ? "2-4 elements: grouped organizer/registration lines."
-                    : "3-6 elements.";
+                    : "4-8 elements, tightly packed.";
   // L4 shares the byte-identical DESIGN_CORE prefix with L1-L3. Everything
   // that varies lives in the [User] turn, ordered constant-within-design
   // first (canvas, palette, theme, brief) and region-specific last, so a
@@ -186,9 +186,9 @@ export function buildComponentPrompt(component, canvas, plan, goal = null, rawPr
     decorationBlock,
     "Region rules:",
     isDecoration
-      ? "- Fill the reserved box with a deliberate decoration layer; it sits behind the content."
-      : "- Fill the box deliberately; an empty-looking box is a failure. Every element stays fully inside this box AND inside the canvas.",
-    "- Visual coverage: aim to fill at least 60% of the reserved box. Layer shapes behind the text, add a side panel, small label or badge beside it, and use supporting details (thin rules, dots, chips) so no large area stays empty.",
+      ? "- Fill the reserved box with a deliberate decoration layer; layer shapes behind text and add a dense accent (dots, grids, stars, dividers)."
+      : "- Fill the box deliberately; no large empty zones. Layer decorative shapes (bars, dots, small grids, thin strips) behind the text, add a small label/badge beside it, keep content prominent, and add a supporting detail (divider, chip, pill) where space allows.",
+    "- Visual coverage: aim to fill at least 80% of the reserved box. Layer shapes behind the text, add a side panel, small label or badge beside it, and use supporting details (thin rules, dots, chips) so no large area stays empty.",
     "- The reserved box is authoritative: do not move or resize the region, and do not invent a different position for it.",
     isDecoration
       ? "- Match the box shape: thin strips want a few small marks; large boxes can carry a fuller pattern."
