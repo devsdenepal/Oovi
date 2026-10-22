@@ -187,7 +187,10 @@ export function buildTuningPrompt(template, goal, palette, canvas, correction = 
   const imageSlots = slots.filter((s) => s.kind === "image");
   const imageLine = imageSlots.length
     ? [
-        "Image regions — write one short Unsplash search query per image region, grounded in the brief (the SUBJECT of the picture, not the design style, not the template example):",
+        "Image regions — write one short Unsplash search query per image region.",
+        goal?.imageSubject
+          ? `The visual understanding for this design is: "${goal.imageSubject}". Search for that scene, not for the title, brand or layout words.`
+          : "Use the concrete scene implied by the brief, never the title or brand.",
         imageSlots.map((s) => `- ${s.id}: currently "${s.describe}"`).join("\n"),
         'The "images" array is REQUIRED and must contain one object for every image region above, using that region id.',
       ].join("\n")

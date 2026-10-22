@@ -9,9 +9,25 @@ import {
 } from "../ai/aiClient";
 import { evaluateDesign } from "../ai/quality";
 import { correctColors } from "../ai/colorCorrect";
-import { findCopyRepetitions } from "../ai/copySanitize";
+import {
+  collectTextElements,
+  findCopyRepetitions,
+  findTextRepetitionsForChanged,
+  normalizeCopyLines,
+  textElementsUnder,
+} from "../ai/copySanitize";
 import { FEATURES } from "../config/features";
-import { searchPhotos, triggerDownload } from "../ai/unsplash";
+import { searchPhotos, triggerDownload, orientationFor, choosePhoto } from "../ai/unsplash";
+import { imagePlaceholderDataUrl } from "../layout/imagePlaceholder";
+import { buildDensityRepair } from "../layout/densityRepair";
+import {
+  createDesignMemory,
+  emptyDesignMemory,
+  memoryPersistKey,
+  normalizeDesignMemory,
+  recordMemoryEdit,
+  syncMemoryCopy,
+} from "../memory/designMemory";
 import { isMockEnabled, mockAssetDataUrl } from "../ai/mockProvider";
 import { validateDesign } from "../design/designValidator";
 import { DEFAULT_PRESET_ID, DESIGN_PRESETS, getPreset } from "../design/presets";
@@ -106,6 +122,9 @@ export class App {
     this.projectId = opts.projectId || null;
     this.aiIds = new Set();
     this._preview = null;
+    this._persistLocked = false;
+    this._generationInvalid = false;
+    this.designMemory = emptyDesignMemory();
 
     this.referenceAnalysis = null;
     this.referenceInfluence = 0.8;
@@ -340,6 +359,8 @@ export class App {
   /** Direct whole-design path (reference mode + plan-fallback). Unchanged. */
   async onGenerateDirect(prompt) {
     this.state.generating = true;
+    this._persistLocked = true;
+    this._generationInvalid = false;
     this.generateButton.setLoading(true);
     this._clearPreviewUI();
 
@@ -359,6 +380,9 @@ export class App {
 
       this.state.design = check.design;
       this.editor.loadDesign(check.design);
+      this.designMemory = syncMemoryCopy(emptyDesignMemory(), check.design);
+      this._persistLocked = false;
+      this._generationInvalid = false;
       this.scheduleSave();
       this._refreshChrome();
       this._updateCanvasMeta(check.design.canvas);
@@ -380,6 +404,7 @@ export class App {
         notify(message, "success");
       }
     } catch (error) {
+      this._markGenerationInvalid();
       const message = `Generation failed: ${error.message}`;
       this.generateButton.setError(message);
       notify(message, "error");
@@ -399,6 +424,19 @@ export class App {
   async onGenerateArchitected(prompt) {
     const canvas = { width: this.designPreset.width, height: this.designPreset.height };
     this.state.generating = true;
+    // Lock the library while regions are being replaced piecemeal. A sample
+    // layout is on screen before the first model call; without this lock the
+    // debounced persist would upload that placeholder as if it were finished.
+    this._persistLocked = true;
+    this._generationInvalid = false;
+    if (this._persistTimer) {
+      window.clearTimeout(this._persistTimer);
+      this._persistTimer = null;
+    }
+    // Memory is read before the first model call. L1 decides whether this
+    // request is a revision of the saved design or a different brief; the
+    // pipeline never silently bolts old copy onto a new concept.
+    const priorMemory = normalizeDesignMemory(this.designMemory);
     this._clearPreviewUI();
     // A previous run's wireframe must never linger over a new one.
     this.editor.clearSkeletonGuides?.();
@@ -417,7 +455,7 @@ export class App {
       let goal;
       let plan;
       try {
-        goal = await refineGoal(prompt, canvas, live("1/5 goal"));
+        goal = await refineGoal(prompt, canvas, live("1/5 goal"), priorMemory);
         this.assistant.pushAssistant(`Goal: ${goal.summary}`);
         status("2/5 Choosing the palette…");
         const palette = await planPalette(goal, canvas, live("2/5 palette"));
@@ -432,6 +470,7 @@ export class App {
         );
       } catch (error) {
         console.error("[architect] template planning failed:", error);
+        this._markGenerationInvalid();
         this.assistant.pushAssistant(`Generation failed (${error.message}).`, "error");
         this.generateButton.setError(`Generation failed: ${error.message}`);
         this.state.generating = false;
@@ -520,7 +559,7 @@ export class App {
       }
       this._updateCanvasMeta(canvas);
       this._renderJsonPreview();
-      this.scheduleSave();
+      this.setSaveState("saving");
       this._refreshChrome();
       if (plan.warnings.length) {
         this.assistant.pushAssistant(`Plan notes: ${plan.warnings.join("; ")}`);
@@ -532,18 +571,23 @@ export class App {
       // region. The preview and the template choice are untouched by this call.
       status("3/5 Writing the copy…");
       const copyDeck = await planCopyDeck(plan.components, goal, canvas, prompt, live("3/5 copy"));
+      // The deck is the single source of approved copy. If a text region has no
+      // approved lines after the repair passes, stop before any region is
+      // rebuilt: letting L4 invent its own line here is how the same audience
+      // label and brand sentence ended up in three different regions.
+      const unresolved = Array.isArray(copyDeck.unresolved) ? copyDeck.unresolved : [];
+      if (copyDeck.source === "failed" || unresolved.length) {
+        const details = (unresolved.length ? unresolved : copyDeck.rejected || [])
+          .map((entry) => `${entry.id || entry.component?.id || "region"}: ${entry.reason || "no approved copy"}`)
+          .join("; ");
+        throw new Error(`Copy deck incomplete — ${details || "no approved copy for every text region"}`);
+      }
       plan = {
         ...plan,
         components: plan.components.map((component) => {
           const isText = component.kind !== "image" && component.role !== "decoration";
           const copy = Array.isArray(copyDeck.copies?.[component.id]) ? copyDeck.copies[component.id] : [];
           if (copy.length) return { ...component, copy, copySource: "deck" };
-          // No deterministic fallback copy. A rejected deck line used to be
-          // replaced with one grounded line from the brief and then locked in
-          // as "approved", so every uncovered region printed the same subject
-          // and refinement could only swap it around. The region now regenerates
-          // from the brief instead; if that fails, salvageElements() keeps the
-          // pieces that are valid on their own rather than forcing a line.
           return component;
         }),
         copySource: copyDeck.source,
@@ -558,9 +602,7 @@ export class App {
       );
       if (copyDeck.source !== "mock" && copyDeck.source !== "none") {
         this.assistant.pushAssistant(
-          copyDeck.source === "fallback"
-            ? "Copy deck unavailable — regions will regenerate from the brief."
-            : `Copy deck: ${copiedRegions.length}/${textRegions.length} text regions (${copyDeck.source}).`,
+          `Copy deck: ${copiedRegions.length}/${textRegions.length} text regions (${copyDeck.source}).`,
         );
       }
 
@@ -609,6 +651,7 @@ export class App {
         return { results, order };
       };
       const buildAll = async (activePlan) => {
+        const selectedImages = new Map();
         const out = { done: 0, failed: 0, appliedTotal: 0, renderedIds: [] };
         const n = activePlan.components.length;
         // Generation ORDER is independent of LAYER order. The headline and the
@@ -705,6 +748,16 @@ export class App {
                 out.renderedIds.push(component.id);
                 placed.push({ i, count: 1 });
                 note(component.id, 1);
+                selectedImages.set(component.id, {
+                  region: component.id,
+                  query:
+                    component.imageQueries?.[0] ||
+                    component.imageQuery ||
+                    goal?.imageSubject ||
+                    "",
+                  source: fetched.note || "",
+                  photographer: fetched.photographer || "",
+                });
                 const imagetag = isMockEnabled()
                   ? "mock"
                   : fetched.note || "";
@@ -712,9 +765,6 @@ export class App {
                 this.assistant.pushAssistant(
                   `+ ${component.id} (image${imagetag ? `, ${imagetag}` : ""})`,
                 );
-                if (fetched.note === "hotlinked" && !isMockEnabled()) {
-                  notify("Image hotlinked: PNG export may be blocked by the provider.", "error");
-                }
               } catch (error) {
                 out.failed += 1;
                 note(component.id, 0);
@@ -752,7 +802,7 @@ export class App {
             run: async () => {
               const t = Date.now();
               if (component.kind === "image") {
-                const fetched = await this._fetchImageComponent(component);
+                const fetched = await this._fetchImageComponent(component, activePlan);
                 console.log(`[build] fetched ${component.id} ${Date.now() - t}ms ${fetched ? fetched.note || "ok" : "FAILED"}`);
                 return { kind: "image", fetched };
               }
@@ -776,7 +826,7 @@ export class App {
           })),
           applyOne,
         );
-        return { ...out, regions };
+        return { ...out, regions, images: [...selectedImages.values()] };
       };
       const evalOpts = (activePlan, ids) => ({
         plannedIds: activePlan.components.map((c) => c.id),
@@ -856,20 +906,24 @@ export class App {
       // a failed deck pass, and word-level matching catches partial copies
       // such as "New AI Assistant" / "New AI Assistant Product Launch".
       const collectCopyRepetitions = () => {
-        const designTexts = new Map();
-        for (const el of this.editor.toDesign().elements || []) {
-          if (el.type === "text" && typeof el.content === "string") {
-            const text = el.content.trim();
-            if (text) designTexts.set(el.id, text);
-          }
-        }
+        const design = this.editor.toDesign();
+        const allTexts = collectTextElements(design.elements);
         const renderedRegions = [];
+        const owned = new Set();
         for (const [id, region] of result.regions) {
           const comp = plan.components.find((c) => c.id === id);
           if (!comp) continue;
-          const owned = (region.ids || []).map((x) => designTexts.get(x)).filter(Boolean);
-          if (!owned.length) continue;
-          renderedRegions.push({ id, text: owned.join(" ") });
+          const texts = textElementsUnder(design, region.ids || []);
+          if (!texts.length) continue;
+          for (const text of texts) owned.add(text.id);
+          renderedRegions.push({ id, text: texts.map((text) => text.text).join(" ") });
+        }
+        // Template samples, manual text and assistant-added text are rendered
+        // copy too. Treat each unowned element as its own region so no gate can
+        // miss a duplicate merely because it did not come from the plan.
+        for (const text of allTexts) {
+          if (owned.has(text.id)) continue;
+          renderedRegions.push({ id: `unowned-${text.id}`, text: text.text });
         }
         return findCopyRepetitions(renderedRegions, goal, prompt);
       };
@@ -921,13 +975,6 @@ export class App {
             template: plan.template,
             correction: why,
           });
-          plan2.components = plan2.components.map((component) => {
-            if (copies[component.id]) {
-              return { ...component, copy: copies[component.id], copySource: "reuse" };
-            }
-            return component;
-          });
-          plan2.copySource = "reuse";
           const knobs = (tuning) =>
             JSON.stringify({
               variant: tuning?.variant,
@@ -936,9 +983,53 @@ export class App {
               scale: tuning?.scale || {},
               align: tuning?.align || {},
             });
+          // Check this BEFORE writing a fresh copy deck: an unchanged tuning
+          // means the first pass is kept, so a deck call here is pure waste.
           if (knobs(plan2.tuning) === knobs(plan.tuning)) {
             this.assistant.pushAssistant("The template tuning did not change — keeping the first pass.");
             return;
+          }
+          plan2.components = plan2.components.map((component) => {
+            if (copies[component.id]) {
+              return { ...component, copy: copies[component.id], copySource: "reuse" };
+            }
+            return component;
+          });
+          // A re-tuned variant can expose regions that did not exist in the
+          // first pass. They must not fall through to model-invented copy:
+          // write a fresh deck for the new plan and use it for every text
+          // region, so repetition is checked against one authoritative deck.
+          const copyRegions = plan2.components.filter(
+            (component) => component.kind !== "image" && component.role !== "decoration",
+          );
+          const missingCopy = copyRegions.filter(
+            (component) => !Array.isArray(component.copy) || !component.copy.length,
+          );
+          if (missingCopy.length) {
+            this.assistant.pushAssistant(
+              `Refined template exposed ${missingCopy.length} region(s) without approved copy — writing a fresh deck…`,
+            );
+            const freshDeck = await planCopyDeck(plan2.components, goal, canvas, prompt, live("3/5 copy refine"));
+            const freshUnresolved = Array.isArray(freshDeck.unresolved) ? freshDeck.unresolved : [];
+            if (freshDeck.source === "failed" || freshUnresolved.length) {
+              throw new Error("refined template has no complete copy deck");
+            }
+            plan2.components = plan2.components.map((component) => {
+              const copy = freshDeck.copies?.[component.id];
+              return Array.isArray(copy) && copy.length
+                ? { ...component, copy, copySource: "deck" }
+                : component;
+            });
+            const stillMissing = plan2.components.filter(
+              (component) =>
+                component.kind !== "image" &&
+                component.role !== "decoration" &&
+                (!Array.isArray(component.copy) || !component.copy.length),
+            );
+            if (stillMissing.length) throw new Error("refined template copy deck is incomplete");
+            plan2.copySource = "deck";
+          } else {
+            plan2.copySource = "reuse";
           }
           if (showTemplateSample(plan2)) {
             this.assistant.pushAssistant(
@@ -1042,6 +1133,42 @@ export class App {
         }
       }
 
+      // Density is a hard product default, not a taste preference. A region
+      // that renders at 10% of its reserved box, or a layout with two lonely
+      // marks, is refined in place first; deterministic frames then close any
+      // remaining gap so the user never gets a hollow template.
+      const densityFindings = report.issues.filter(
+        (issue) => issue.code === "thin-section" || issue.code === "decoration-sparse",
+      );
+      if (FEATURES.layout.densityRepair && densityFindings.length) {
+        // Density is repaired deterministically inside the existing boxes.
+        // Re-tuning and rebuilding every region for a thin text box was both
+        // the largest optional cost and unable to fix the actual fill: the
+        // frame/rail/accent pass below does it without another model call.
+        renderedIds = [...result.regions.entries()]
+          .filter(([, region]) => region.count > 0)
+          .map(([id]) => id);
+        const densityReport = evaluateDesign(this.editor.toDesign(), evalOpts(plan, renderedIds));
+        const repair = buildDensityRepair(densityReport, plan, plan.palette, canvas, this.editor.toDesign());
+        if (repair.behind.length || repair.front.length) {
+          const ops = [
+            ...repair.behind.map((element) => ({ op: "add", element, at: 0 })),
+            ...repair.front.map((element) => ({ op: "add", element })),
+          ];
+          try {
+            this.editor.applyPatchOps(ops);
+            console.log(`[build] density repair: ${repair.notes.join("; ")}`);
+            this.assistant.pushAssistant(`Density repair: ${repair.notes.join("; ")}.`);
+            report = evaluateDesign(this.editor.toDesign(), evalOpts(plan, renderedIds));
+          } catch (error) {
+            console.warn(`[build] density repair failed: ${error.message}`);
+            report = densityReport;
+          }
+        } else {
+          report = densityReport;
+        }
+      }
+
       // Recount from per-region state so the summary reflects any refinement.
       {
         const applied = [...result.regions.entries()].filter(([, r]) => r.count > 0);
@@ -1090,6 +1217,60 @@ export class App {
         this.assistant.pushAssistant("Color correction: palette and contrast are clean.");
       }
 
+      // Final repetition gate: refinement may have left a collision (or a
+      // template sample may repeat deck words). No duplicate copy may ship, and
+      // no attempted repair is allowed to bypass this last check.
+      const finalRepeats = collectCopyRepetitions();
+      if (finalRepeats.size) {
+        const details = [...finalRepeats.entries()]
+          .map(([id, messages]) => `${id}: ${messages.join(" ")}`)
+          .join("; ");
+        this._markGenerationInvalid();
+        throw new Error(`Copy repetition remains — ${details}`);
+      }
+
+      // Completeness gate: every planned region must have rendered output.
+      // A region still showing its template sample is not this brief's design,
+      // so it is never captured into memory or written to the library.
+      const missingRegions = plan.components.filter(
+        (component) => (result.regions.get(component.id)?.count || 0) === 0,
+      );
+      if (missingRegions.length) {
+        const details = missingRegions.map((component) => component.id).join(", ");
+        this._markGenerationInvalid();
+        throw new Error(`Template regions failed and could not be regenerated — ${details}`);
+      }
+
+      // Copy completeness gate: approving a deck line is a promise to render
+      // it. A salvage pass may keep only part of a region, so compare the
+      // rendered lines with the approved deck instead of trusting a non-zero
+      // element count.
+      const designForCopy = this.editor.toDesign();
+      const incompleteCopy = [];
+      for (const component of plan.components) {
+        const approved = normalizeCopyLines(component.copy);
+        if (!approved.length) continue;
+        const region = result.regions.get(component.id);
+        const rendered = textElementsUnder(designForCopy, region?.ids || [])
+          .flatMap((text) => normalizeCopyLines(text.text.split(/\n+/)));
+        if (
+          rendered.length !== approved.length ||
+          rendered.some((line, index) => line !== approved[index])
+        ) {
+          incompleteCopy.push({ id: component.id, approved, rendered });
+        }
+      }
+      if (incompleteCopy.length) {
+        const details = incompleteCopy
+          .map(({ id, approved, rendered }) => {
+            const missing = approved.filter((line) => !rendered.includes(line));
+            return `${id}: missing ${missing.length ? missing.join(" / ") : "approved line order"}`;
+          })
+          .join("; ");
+        this._markGenerationInvalid();
+        throw new Error(`Approved copy was not rendered — ${details}`);
+      }
+
       this.state.design = this.editor.toDesign();
       this.debugTabs.set({
         design: this.state.design,
@@ -1118,6 +1299,7 @@ export class App {
       }
       const keptSample = plan.components.filter((c) => (placeholders.get(c.id) || []).length > 0).length;
       if (appliedTotal === 0) {
+        this._markGenerationInvalid();
         const message = keptSample
           ? `Kept the template sample for all ${done} regions — the model could not fill them (see the assistant log).`
           : `All ${done} components failed — see the assistant log for reasons.`;
@@ -1129,9 +1311,27 @@ export class App {
           `${keptSample ? `; ${keptSample} kept the template sample` : ""} — every element is editable.`;
         this.generateButton.setSuccess(message);
         notify(message, failed > 0 ? "info" : "success");
+        // Capture the design-scoped model context only after the hard gates.
+        // The memory is derived from what actually rendered; it cannot smuggle
+        // back a rejected deck line or a random image.
+        this.designMemory = createDesignMemory({
+          brief: prompt,
+          goal,
+          plan,
+          design: this.state.design,
+          regions: result.regions,
+          images: result.images || [],
+          quality: report,
+        });
+        // Only now, after the copy deck, rendered repetition and quality gates,
+        // may this design reach the library.
+        this._persistLocked = false;
+        this._generationInvalid = false;
+        this.scheduleSave();
+        await this.persistNow();
       }
-      this.scheduleSave();
     } catch (error) {
+      this._markGenerationInvalid();
       const message = `Generation failed: ${error.message}`;
       this.generateButton.setError(message);
       notify(message, "error");
@@ -1145,47 +1345,79 @@ export class App {
   }
 
   /**
-   * Fetch phase of an image component. The query comes from the tuning model
-   * (grounded in the brief), falling back to the template slot description.
-   * Pure network, no canvas mutation. Returns the asset spec (or a query
-   * placeholder on failure); the caller adds it in plan order.
+   * Fetch phase of an image component. The subject comes from L1 and is led by
+   * the tuning query only when L1 supplied none. Search goes through the local
+   * Unsplash proxy, picks the best aspect fit among relevance-ranked results,
+   * and inlines the image as a data URL. When no honest result arrives, the
+   * region gets deterministic palette artwork — never a random photo and never
+   * a hotlink that can break PNG export.
    */
-  async _fetchImageComponent(component) {
-    const box = component.box;
+  async _fetchImageComponent(component, plan = null) {
+    const box = component.box || {};
     const tStart = Date.now();
     if (isMockEnabled()) {
-      return { src: mockAssetDataUrl(component.describe, box), w: box.width, h: box.height, note: "mock" };
+      return { src: mockAssetDataUrl(component.describe, box), w: box.width, h: box.height, note: "mock", photographer: "" };
     }
-    const query = String(component.imageQuery || component.describe || "abstract design").trim();
-    // 1. Unsplash search: the brief/slot description is the query.
-    try {
-      const photos = await searchPhotos(query);
-      const photo = photos[0];
-      if (photo) {
-        triggerDownload(photo); // best-effort credit, never blocks
+
+    const candidates = [];
+    for (const raw of [...(component.imageQueries || []), component.imageQuery]) {
+      const query = String(raw || "").replace(/\s+/g, " ").trim();
+      if (query && !candidates.includes(query)) candidates.push(query);
+    }
+    const query = candidates[0] || "";
+    const localArtwork = (reason) => {
+      console.warn(
+        `[build] image ${component.id} ${reason}${query ? ` for "${query}"` : ""} — using local palette artwork`,
+      );
+      return {
+        src: imagePlaceholderDataUrl({
+          width: box.width,
+          height: box.height,
+          palette: plan?.palette || {},
+          query,
+          seed: component.id,
+        }),
+        w: box.width,
+        h: box.height,
+        note: "palette artwork",
+        photographer: "",
+      };
+    };
+    if (!query) return localArtwork("has no image subject");
+
+    const orientation = orientationFor(box);
+    for (const candidate of candidates.slice(0, 2)) {
+      try {
+        let photos = await searchPhotos(candidate, { orientation });
+        if (!photos.length) photos = await searchPhotos(candidate);
+        const photo = choosePhoto(photos, box);
+        if (!photo) {
+          console.warn(`[build] image ${component.id} no photo for "${candidate}"`);
+          continue;
+        }
         try {
           const src = await fetchImageAsDataUrl(photo.full);
           const dims = await probeImage(src).catch(() => ({ w: box.width, h: box.height }));
-          console.log(`[build] image ${component.id} unsplash ${Date.now() - tStart}ms by ${photo.photographer}`);
-          return { src, w: dims.w, h: dims.h, note: `unsplash: ${photo.photographer}` };
+          triggerDownload(photo); // best-effort, never blocks
+          console.log(
+            `[build] image ${component.id} unsplash ${Date.now() - tStart}ms ` +
+              `orientation=${orientation || "any"} by ${photo.photographer}`,
+          );
+          return {
+            src,
+            w: dims.w,
+            h: dims.h,
+            note: `unsplash: ${photo.photographer}`,
+            photographer: photo.photographer || "",
+          };
         } catch (error) {
-          console.warn(`[build] image ${component.id} unsplash fetch failed (${error.message}) — hotlinking`);
-          return { src: photo.full, w: box.width, h: box.height, note: "hotlinked" };
+          console.warn(`[build] image ${component.id} fetch failed (${error.message})`);
         }
+      } catch (error) {
+        console.warn(`[build] image ${component.id} search failed (${error.message})`);
       }
-      console.warn(`[build] image ${component.id} no Unsplash result for "${query}" — using query placeholder`);
-    } catch (error) {
-      console.warn(`[build] image ${component.id} Unsplash search failed (${error.message}) — using query placeholder`);
     }
-    // 2. Keyless Unsplash query image (still query-driven, never random).
-    const w = Math.max(1, Math.round(box.width));
-    const h = Math.max(1, Math.round(box.height));
-    return {
-      src: `https://unsplash.it/${w}/${h}?text=${encodeURIComponent(query)}`,
-      w: box.width,
-      h: box.height,
-      note: "unsplash query",
-    };
+    return localArtwork("found no usable photo");
   }
 
   onReferenceAnalysis(analysis) {
@@ -1208,9 +1440,13 @@ export class App {
         this._renderJsonPreview();
         this.debugTabs.set({ design: check.design, analysis: null, svg: "", semantic: null, warnings: [] });
       }
+      this.designMemory = normalizeDesignMemory(row.ai_memory);
+      this._syncDesignMemory();
       this.templatesPanel.refresh();
       this._lastPersisted = this.persistKey();
       this._dirtySincePersist = false;
+      this._persistLocked = false;
+      this._generationInvalid = false;
       this.setSaveState("saved");
     } catch (error) {
       notify(`Couldn't open project: ${error.message}`, "error");
@@ -1258,6 +1494,7 @@ export class App {
     if (!window.confirm("Clear the canvas? Everything is removed (one undo brings it back).")) return;
     this.editor.clear();
     this._clearPreviewUI();
+    this.designMemory = syncMemoryCopy(emptyDesignMemory(), this.editor.toDesign());
     this.generateButton.setStatus("Canvas cleared.", "");
     notify("Canvas cleared.", "info");
     this.scheduleSave();
@@ -1440,19 +1677,64 @@ export class App {
       const selectedIds = (this.editor.canvas?.getActiveObjects() || [])
         .map((o) => o.designId)
         .filter((id) => typeof id === "string");
-      const { ops, errors, note, source } = await generatePatch(text, { design, selectedIds });
+      const { ops, errors, note, source } = await generatePatch(text, {
+        design,
+        selectedIds,
+        memory: this.designMemory,
+      });
       if (!ops.length) {
         this.assistant.pushAssistant(note || errors.join("; ") || "No changes proposed.", errors.length ? "error" : "");
         if (errors.length) notify(`Assistant: ${errors[0]}`, "error");
         return;
       }
       const { applied, changedIds } = this.editor.applyPatchOps(ops);
+      // A follow-up edit must honor the same no-repeat invariant as a full
+      // generation. Check only the text this patch touched, against everything
+      // already rendered; if it collides, undo the whole patch atomically.
+      const touchedText = new Set();
+      for (const op of ops) {
+        if (op.op === "add" && op.element?.id) {
+          // A group add carries text children; the repetition gate expands a
+          // group id to the text it owns.
+          touchedText.add(op.element.id);
+        } else if (op.op === "update" && Object.prototype.hasOwnProperty.call(op.props || {}, "content")) {
+          touchedText.add(op.id);
+        }
+      }
+      if (touchedText.size) {
+        const repeats = findTextRepetitionsForChanged(this.editor.toDesign(), [...touchedText]);
+        if (repeats.size) {
+          const details = [...repeats.entries()]
+            .map(([id, messages]) => `${id}: ${messages.join("; ")}`)
+            .join(" | ");
+          try {
+            await this.editor.history.undo();
+          } catch (undoError) {
+            this._markGenerationInvalid();
+            console.error(`[assistant] could not undo repeated copy: ${undoError.message}`);
+          }
+          this._clearPreviewUI();
+          this._syncDesignMemory();
+          this._refreshChrome();
+          const message = `Patch rejected — it would repeat copy: ${details}`;
+          this.assistant.pushAssistant(message, "error");
+          notify(message, "error");
+          return;
+        }
+      }
       this._renderJsonPreview();
       this._refreshChrome();
       this.scheduleSave();
       this.aiIds = new Set(changedIds);
       this.layersPanel.refresh({ aiIds: this.aiIds });
-      this._preview = { active: true, showingAfter: true, clean: true };
+      this._preview = {
+        active: true,
+        showingAfter: true,
+        clean: true,
+        request: text,
+        source,
+        changedIds,
+      };
       this.assistant.showProposal({ lines: applied, errors, note, source });
       this._positionGhost(true);
       notify(`Assistant proposed ${applied.length} change(s).`, "info");
@@ -1468,7 +1750,15 @@ export class App {
 
   onApplyProposal() {
     if (!this._preview?.active) return;
+    const preview = { ...this._preview };
     this._clearPreviewUI();
+    this.designMemory = recordMemoryEdit(this.designMemory, {
+      request: preview.request,
+      source: preview.source,
+      changedIds: preview.changedIds,
+    });
+    this._syncDesignMemory();
+    this.scheduleSave();
     this.assistant.pushAssistant("Applied. Undo is available (Ctrl+Z).");
     notify("AI changes applied.", "success");
   }
@@ -1477,6 +1767,7 @@ export class App {
     if (!this._preview?.active) return;
     await this.editor.history.undo();
     this._clearPreviewUI();
+    this._syncDesignMemory();
     this.assistant.pushAssistant("Discarded.");
     this.scheduleSave();
     this._refreshChrome();
@@ -1606,6 +1897,9 @@ export class App {
     this._clearPreviewUI();
     this.state.design = check.design;
     this.editor.loadDesign(check.design);
+    this.designMemory = syncMemoryCopy(emptyDesignMemory(), check.design);
+    this._persistLocked = false;
+    this._generationInvalid = false;
     this._updateCanvasMeta(check.design.canvas);
     this._renderJsonPreview();
     this.debugTabs.set({
@@ -1663,16 +1957,7 @@ export class App {
     notify(`Fetching photo by ${photo.photographer || "Unknown"}…`, "info");
     try {
       triggerDownload(photo); // best-effort credit, never blocks
-      let src;
-      try {
-        src = await fetchAssetDataUrl(photo.full);
-      } catch (error) {
-        console.warn("[photos] direct fetch failed, hotlinking:", error.message);
-        this.editor.addImageElement(photo.full, 800, 600);
-        this.assistant.pushAssistant(`Photo by ${photo.photographer || "Unknown"} on Unsplash (hotlinked — export may warn).`);
-        notify("Photo hotlinked: PNG export may be blocked.", "error");
-        return;
-      }
+      const src = await fetchImageAsDataUrl(photo.full);
       const dims = await probeImage(src).catch(() => ({ w: 800, h: 600 }));
       this.editor.addImageElement(src, dims.w, dims.h);
       this.assistant.pushAssistant(`Photo by ${photo.photographer || "Unknown"} on Unsplash.`);
@@ -1743,7 +2028,42 @@ export class App {
     this.topbar.setSaveState(state);
   }
 
+  /**
+   * A generation that fails a hard gate must not be written to the library.
+   * The canvas may still show the template sample so the user can see what was
+   * attempted, but the debounced persist stays locked until a later run or a
+   * manual template choice replaces it.
+   */
+  _markGenerationInvalid() {
+    this._generationInvalid = true;
+    this._persistLocked = true;
+    if (this._persistTimer) {
+      window.clearTimeout(this._persistTimer);
+      this._persistTimer = null;
+    }
+    this.setSaveState("error");
+  }
+
+  /**
+   * Re-derive copy and used words from the rendered canvas. Safe to call on
+   * every save: it only advances the timestamp when the memory content really
+   * changed, so the durable store does not churn.
+   */
+  _syncDesignMemory() {
+    if (!this.editor?.canvas) return;
+    try {
+      this.designMemory = syncMemoryCopy(
+        this.designMemory || emptyDesignMemory(),
+        this.editor.toDesign(),
+      );
+    } catch (error) {
+      console.warn(`[memory] could not sync rendered copy: ${error.message}`);
+    }
+  }
+
   scheduleSave() {
+    if (this._persistLocked) return;
+    this._syncDesignMemory();
     this.setSaveState("unsaved");
     if (this._saveTimer) window.clearTimeout(this._saveTimer);
     this._saveTimer = window.setTimeout(() => this.saveDraftNow(), 800);
@@ -1755,7 +2075,7 @@ export class App {
 
   persistKey() {
     try {
-      return `${this.state.title}\n${JSON.stringify(this.editor.toDesign())}`;
+      return `${this.state.title}\n${JSON.stringify(this.editor.toDesign())}\n${memoryPersistKey(this.designMemory)}`;
     } catch {
       return "";
     }
@@ -1763,6 +2083,11 @@ export class App {
 
   async persistNow() {
     if (!this.editor.canvas) return;
+    if (this._persistLocked) {
+      console.log("[persist] skipped — generation is locked until its final gates pass");
+      return;
+    }
+    this._syncDesignMemory();
     const key = this.persistKey();
     if (!key || key === this._lastPersisted) return;
     try {
@@ -1774,7 +2099,11 @@ export class App {
         thumbnail = null;
       }
       if (!this.projectId) {
-        const row = await projects.create({ title: this.state.title, design });
+        const row = await projects.create({
+          title: this.state.title,
+          design,
+          memory: this.designMemory,
+        });
         this.projectId = row.id;
         try {
           window.history.replaceState(null, "", `#/design/${row.id}`);
@@ -1782,7 +2111,12 @@ export class App {
           // non-fatal: hash stays at /design/new
         }
       } else {
-        await projects.update(this.projectId, { title: this.state.title, design, thumbnail });
+        await projects.update(this.projectId, {
+          title: this.state.title,
+          design,
+          memory: this.designMemory,
+          thumbnail,
+        });
       }
       this._lastPersisted = key;
       this._dirtySincePersist = false;
@@ -1794,12 +2128,15 @@ export class App {
 
   saveDraftNow() {
     if (!this.editor.canvas) return;
+    if (this._persistLocked) return;
+    this._syncDesignMemory();
     this.setSaveState("saving");
     try {
       const payload = {
         title: this.state.title,
         savedAt: new Date().toISOString(),
         design: this.editor.toDesign(),
+        memory: this.designMemory,
       };
       window.localStorage.setItem("oovi.draft.v1", JSON.stringify(payload));
       this.setSaveState("saved");

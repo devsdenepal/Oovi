@@ -24,6 +24,7 @@ import {
   buildTuningPrompt,
 } from "../src/ai/templatePrompt";
 import { buildComponentPrompt } from "../src/ai/architectPrompt";
+import { buildPatchPrompt } from "../src/ai/patchPrompt";
 import { getTemplate, TEMPLATE_IDS } from "../src/layout/templates";
 import { derivePaletteRoles } from "../src/layout/paletteRoles";
 
@@ -31,6 +32,8 @@ const CANVAS = { width: 1200, height: 630 };
 const GOAL = {
   summary: "a hackathon launch event",
   subject: "hackathon",
+  brand: "DevFest",
+  imageSubject: "developers building hardware at a crowded hackathon table",
   audience: "developers",
   purpose: "announce",
   tone: "energetic",
@@ -179,13 +182,15 @@ test("L4 hands the model the semantic palette roles, not just three hexes", () =
 
 test("L1 asks for the scope fields L3 and L2 need", () => {
   const prompt = buildGoalPrompt("a product launch poster", CANVAS);
-  for (const word of ["designType", "industry", "keywords", "composition"]) {
+  for (const word of ["designType", "industry", "keywords", "composition", "brand", "imageSubject"]) {
     assert.ok(prompt.includes(word), `L1 prompt names ${word}`);
   }
   assert.ok(GOAL_SCHEMA.required.includes("designType"));
   assert.ok(GOAL_SCHEMA.required.includes("industry"));
   assert.ok(GOAL_SCHEMA.required.includes("keywords"));
   assert.ok(GOAL_SCHEMA.required.includes("composition"));
+  assert.ok(GOAL_SCHEMA.required.includes("brand"));
+  assert.ok(GOAL_SCHEMA.required.includes("imageSubject"));
 });
 
 test("L4 passes the raw request as the fact source, not a template example", () => {
@@ -222,4 +227,42 @@ test("L4 omits fixed-type lines when a region has no template type", () => {
   assert.ok(!/Copy limit/.test(prompt));
   assert.ok(!/Type: this region/.test(prompt));
   assert.ok(!/Copy example/.test(prompt));
+});
+
+test("L1 receives prior design memory but keeps the static prefix first", () => {
+  const memory = JSON.stringify({
+    brief: "A Diwali card from Graphilla Technology.",
+    goal: { summary: "A warm Diwali greeting.", brand: "Graphilla Technology" },
+    imageSubject: "diya lamps at dusk",
+  });
+  const prompt = buildGoalPrompt("make the greeting warmer", CANVAS, memory);
+  assert.ok(prompt.startsWith(`${DESIGN_CORE}\n\n`), "memory never precedes the static core");
+  assert.match(prompt, /Current design memory/);
+  assert.match(prompt, /revision of the same design/);
+  assert.match(prompt, /different brief, ignore the memory/);
+  assert.ok(prompt.indexOf("Current design memory") < prompt.indexOf("[User]"));
+  assert.ok(prompt.includes("diya lamps at dusk"));
+
+  const fresh = buildGoalPrompt("a new product poster", CANVAS);
+  assert.ok(!fresh.includes("Current design memory"));
+});
+
+test("assistant patches receive design memory only when it has content", () => {
+  const design = {
+    canvas: { width: 1200, height: 630 },
+    elements: [{ id: "headline", type: "text", content: "Happy Diwali", x: 40, y: 40, width: 500, height: 100, fontSize: 48, fill: "#FFFFFF" }],
+  };
+  const memory = {
+    brief: "A Diwali greeting for clients.",
+    goal: { summary: "A warm Diwali card.", brand: "Graphilla Technology" },
+    copy: { headline: ["Happy Diwali"] },
+    usedWords: ["happy", "diwali"],
+  };
+  const withMemory = buildPatchPrompt("make it warmer", design, [], memory);
+  assert.match(withMemory, /\[Design memory\]/);
+  assert.match(withMemory, /Do not introduce a content word/);
+  assert.ok(withMemory.includes("Graphilla Technology"));
+
+  const empty = buildPatchPrompt("make it warmer", design);
+  assert.ok(!empty.includes("[Design memory]"));
 });

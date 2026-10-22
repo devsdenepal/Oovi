@@ -38,10 +38,10 @@ export const projects = {
   },
 
   /** @returns {Promise<{id,title,created_at,updated_at}>} */
-  async create({ title, canvas, design } = {}) {
+  async create({ title, canvas, design, memory } = {}) {
     const data = await request("/api/designs", {
       method: "POST",
-      body: JSON.stringify({ title, canvas, design }),
+      body: JSON.stringify({ title, canvas, design, ai_memory: memory }),
     });
     if (!data?.design) throw new Error("create returned nothing");
     return data.design;
@@ -56,9 +56,14 @@ export const projects = {
 
   /** Partial update; returns {id,title,updated_at}. */
   async update(id, patch) {
+    const body = { ...(patch || {}) };
+    if ("memory" in body) {
+      body.ai_memory = body.memory;
+      delete body.memory;
+    }
     const data = await request(`/api/designs/${encodeURIComponent(id)}`, {
       method: "PUT",
-      body: JSON.stringify(patch || {}),
+      body: JSON.stringify(body),
     });
     if (!data?.design) throw new Error("update returned nothing");
     return data.design;

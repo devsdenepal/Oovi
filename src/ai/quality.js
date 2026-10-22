@@ -9,6 +9,8 @@
  * failing contrast are errors. Everything debatable is a warning.
  */
 
+import { FEATURES } from "../config/features";
+
 function clampNum(v, fallback = 0) {
   return typeof v === "number" && Number.isFinite(v) ? v : fallback;
 }
@@ -393,6 +395,7 @@ export function evaluateDesign(design, opts = {}) {
 
   // 8b. Planned boxes: under-filled sections, small heroes, role-fit.
   const comps = Array.isArray(opts.components) ? opts.components : [];
+  const regionFills = [];
   for (const c of comps) {
     if (!c || !c.box) continue;
     const b = c.box;
@@ -400,12 +403,14 @@ export function evaluateDesign(design, opts = {}) {
       warn("hero", `Hero "${c.id}" box covers under 15% of the canvas.`);
     }
     if (c.kind === "image") continue; // presence covered by hero/missing checks
+    if (c.role === "decoration") continue; // counted as a piece budget below
     const inside = boxes.filter((f) => {
       const cx = f.box.x + f.box.w / 2;
       const cy = f.box.y + f.box.h / 2;
       return cx >= b.x && cx <= b.x + b.width && cy >= b.y && cy <= b.y + b.height;
     });
     if (!inside.length) {
+      regionFills.push({ id: c.id, role: c.role, fill: 0 });
       // A hero is the focal point: an empty one is a failed composition, not a
       // cosmetic warning. Every other empty region stays a warning so a sparse
       // brief does not trigger regeneration.
@@ -417,8 +422,15 @@ export function evaluateDesign(design, opts = {}) {
       continue;
     }
     const area = inside.reduce((s, f) => s + f.box.w * f.box.h, 0);
-    if (b.width > 0 && b.height > 0 && area / (b.width * b.height) < 0.15) {
-      warn("thin-section", `Planned section "${c.id}" looks nearly empty inside its box.`);
+    const fill = b.width > 0 && b.height > 0 ? area / (b.width * b.height) : 0;
+    regionFills.push({ id: c.id, role: c.role, fill });
+    const minFill = FEATURES.layout.regionFill[c.role] ?? FEATURES.layout.regionFill.default;
+    if (fill < minFill) {
+      warn(
+        "thin-section",
+        `Planned section "${c.id}" fills ${Math.round(fill * 100)}% of its box ` +
+          `(${Math.round(minFill * 100)}% expected) — it reads nearly empty.`,
+      );
     }
     // Role fit: the region must hold the KIND of content its role promises.
     if (c.role === "sections") {
@@ -433,6 +445,15 @@ export function evaluateDesign(design, opts = {}) {
         warn("copy-length", `Region "${c.id}" holds ${chars} characters against a ${c.maxChars} limit — the copy is not fitting its slot.`);
       }
     }
+  }
+
+  const decorationPieces = boxes.filter((b) => b.role === "decoration").length;
+  if (decorationPieces < FEATURES.decoration.minPieces) {
+    warn(
+      "decoration-sparse",
+      `Only ${decorationPieces} decoration piece${decorationPieces === 1 ? "" : "s"} rendered ` +
+        `(${FEATURES.decoration.minPieces} expected) — the layout reads bare.`,
+    );
   }
 
   // 8c. Supporting copy. A headline alone in a field of containers is the
@@ -475,5 +496,9 @@ export function evaluateDesign(design, opts = {}) {
 
   const errors = issues.filter((i) => i.severity === "error").length;
   const warns = issues.filter((i) => i.severity === "warn").length;
-  return { score: Math.max(0, 100 - errors * 12 - warns * 4), issues };
+  return {
+    score: Math.max(0, 100 - errors * 12 - warns * 4),
+    issues,
+    metrics: { coverage, regionFills, decorationPieces },
+  };
 }

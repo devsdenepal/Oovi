@@ -118,11 +118,14 @@ function barColor(role, roles) {
   return roles.textPrimary;
 }
 
-function unsplashQueryUrl(width, height, query) {
-  const w = Math.max(1, Math.round(width));
-  const h = Math.max(1, Math.round(height));
-  const q = encodeURIComponent(String(query || "").trim()) || "design";
-  return `https://unsplash.it/${w}/${h}?text=${q}`;
+function photoPreview(roles) {
+  const accent = rgba(roles.accent, 0.42);
+  const secondary = rgba(roles.textSecondary, 0.28);
+  return (
+    `radial-gradient(circle at 30% 28%, ${accent}, transparent 42%),` +
+    `radial-gradient(circle at 72% 74%, ${secondary}, transparent 46%),` +
+    `linear-gradient(145deg, ${roles.surface}, ${roles.background} 58%, ${roles.background})`
+  );
 }
 
 function thumbnail(template, palette) {
@@ -141,12 +144,9 @@ function thumbnail(template, palette) {
       const box = slot.box || {};
       const style = boxStyle(box);
       if (slot.kind === "image") {
-        const query = template.description || template.label || "design";
-        return `<span class="tpl-thumb-photo" style="${style}background-image:url(${unsplashQueryUrl(
-          box.w,
-          box.h,
-          query,
-        )});color:${roles.textPrimary}">${PHOTO_ICON}</span>`;
+        return `<span class="tpl-thumb-photo" style="${style}background-image:${photoPreview(
+          roles,
+        )};color:${roles.textPrimary}">${PHOTO_ICON}</span>`;
       }
       if (slot.role === "decoration") {
         return `<span class="tpl-thumb-deco" style="${style}"><span style="background:${roles.accent}"></span></span>`;

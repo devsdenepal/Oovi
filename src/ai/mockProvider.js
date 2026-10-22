@@ -181,6 +181,7 @@ export function mockGoal(prompt, canvas) {
   return {
     summary: `A designed layout about: ${text}`,
     subject: text,
+    brand: "",
     audience: "general audience",
     purpose: "present the subject clearly and attractively",
     tone: "clean and confident",
@@ -190,6 +191,7 @@ export function mockGoal(prompt, canvas) {
     industry: "general",
     keywords: text.toLowerCase().split(/\s+/).filter((w) => w.length > 3).slice(0, 6),
     composition: "split",
+    imageSubject: "",
     mustInclude: ["title", "supporting line", "key details", "footer"],
     avoid: ["invented facts", "low-contrast text"],
     style: "clean modern, generous whitespace",

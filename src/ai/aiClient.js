@@ -29,8 +29,27 @@ import { validatePatch } from "./patch";
 import { contrastRatio } from "./quality";
 import { fitRegion } from "../layout/regionFit";
 import { FEATURES } from "../config/features";
-import { sanitizeRegionCopy, copyProblem, normalizeCopyLines, regionCopyProblems, repeatedContentWords, repeatableWords, distinctiveWords } from "./copySanitize";
-import { buildCopyPrompt, buildCopyRepairPrompt, copyDeckSchema, copyLineLimit, isCopyRegion } from "./copyPrompt";
+import {
+  sanitizeRegionCopy,
+  copyProblem,
+  normalizeCopyLines,
+  regionCopyProblems,
+  repeatedContentWords,
+  repeatableWords,
+  distinctiveWords,
+  extractBrand,
+  isBrandComponent,
+} from "./copySanitize";
+import {
+  buildCopyPrompt,
+  buildCopyRepairPrompt,
+  copyDeckSchema,
+  copyLineLimit,
+  isCopyRegion,
+  repairLineLimit,
+} from "./copyPrompt";
+import { imageQueryCandidates } from "./imageSubject";
+import { hasDesignMemory, memoryForPrompt } from "../memory/designMemory";
 import { normalizeElementRoles } from "./elementRoles";
 import {
   isMockEnabled,
@@ -72,7 +91,7 @@ import {
  */
 
 // How many times we ask the model to fix an invalid design before giving up.
-const MAX_ATTEMPTS = 3;
+const MAX_ATTEMPTS = FEATURES.ai.maxAttempts;
 
 /**
  * Pass 1 fallback: regex-based JSON recovery.
@@ -591,7 +610,7 @@ export async function generateDesign(userPrompt, options = {}) {
  * @returns {Promise<{ops: Array, errors: string[], note: string, source: "mock"|"ai"}>}
  */
 export async function generatePatch(message, context) {
-  const { design, selectedIds = [] } = context;
+  const { design, selectedIds = [], memory = null } = context;
   if (!message || !message.trim()) throw new Error("Describe the change first.");
   if (!design) throw new Error("Generate or open a design first.");
 
@@ -601,7 +620,7 @@ export async function generatePatch(message, context) {
     return { ops: valid, errors, note, source: "mock" };
   }
 
-  const text = await fetchAiChat(buildPatchPrompt(message, design, selectedIds));
+  const text = await fetchAiChat(buildPatchPrompt(message, design, selectedIds, memory));
   const parsed = regexRepairJson(text);
   if (parsed === null) {
     throw new Error("AI response was not recoverable JSON. Ask again, more specifically.");
@@ -797,6 +816,7 @@ function sanitizeGoal(raw) {
   return {
     summary,
     subject: asText(raw?.subject, asText(raw?.summary, "Design")),
+    brand: asText(raw?.brand, ""),
     audience: asText(raw?.audience, "general audience"),
     purpose: asText(raw?.purpose, "present the subject clearly"),
     tone: asText(raw?.tone, "clean and confident"),
@@ -807,6 +827,7 @@ function sanitizeGoal(raw) {
     industry: asText(raw?.industry, "general"),
     keywords: list(raw?.keywords, 8),
     composition: pickVocab(raw?.composition, COMPOSITIONS, COMPOSITION_ALIASES, ""),
+    imageSubject: asText(raw?.imageSubject, ""),
     mustInclude: list(raw?.mustInclude),
     avoid: list(raw?.avoid),
     style: asText(raw?.style, "clean modern"),
@@ -866,12 +887,17 @@ function sanitizePalette(raw, styleFallback) {
  * model cannot answer, the raw prompt itself becomes the brief, so the
  * cascade never dies at the cheap first step.
  */
-export async function refineGoal(userPrompt, canvas, onProgress = null) {
+export async function refineGoal(userPrompt, canvas, onProgress = null, memory = null) {
   if (isMockEnabled()) return { ...mockGoal(userPrompt, canvas), source: "mock" };
   const tStart = Date.now();
-  console.log(`[ai] goal start promptChars=${userPrompt.length}`);
+  const priorMemory = hasDesignMemory(memory)
+    ? memoryForPrompt(memory, FEATURES.memory.goalMemoryChars)
+    : "";
+  console.log(
+    `[ai] goal start promptChars=${userPrompt.length} memoryChars=${priorMemory.length}`,
+  );
   try {
-    const text = await fetchAiChat(buildGoalPrompt(userPrompt, canvas), {
+    const text = await fetchAiChat(buildGoalPrompt(userPrompt, canvas, priorMemory), {
       schema: GOAL_SCHEMA,
       name: "oovi_goal",
       maxTokens: 600,
@@ -1116,96 +1142,166 @@ export async function planTemplateTuning(template, goal, palette, canvas, onProg
  * The per-region L4 call is deliberately good at geometry, colour and fit; it
  * is not a reliable copywriter at 270m. This pass writes all the words while
  * the template sample is already on screen, then L4 receives exact lines.
- * Validation is deterministic and shared with the final region guard; one
- * focused repair call handles rejected lines. If the call fails entirely the
- * pipeline continues (regions write their own copy) and the final sanitizer
- * still has the last word.
+ * Validation is deterministic and shared with the final region guard; one or
+ * more focused repair calls rewrite only rejected regions. If unique, grounded
+ * copy still cannot be produced, the deck is marked unresolved and the caller
+ * blocks the build. It never falls back to independent L4 copy: that is how
+ * the same audience label and brand sentence ended up in several regions.
  */
 export async function planCopyDeck(components, goal, canvas, rawPrompt = "", onProgress = null) {
-  const regions = (components || []).filter(isCopyRegion);
-  const emptyStats = { regions: regions.length, lines: 0, rejected: 0, unresolved: 0 };
-  if (!regions.length) return { copies: {}, source: "none", stats: emptyStats, rejected: [] };
-  if (isMockEnabled()) return { copies: {}, source: "mock", stats: emptyStats, rejected: [] };
+  const allRegions = (components || []).filter(isCopyRegion);
+  const seeds = factualCopySeeds(allRegions, goal, rawPrompt);
+  const regions = allRegions.filter((component) => !seeds[component.id]);
+  const emptyStats = {
+    regions: allRegions.length,
+    lines: 0,
+    rejected: 0,
+    unresolved: 0,
+    attempts: 0,
+  };
+  if (!allRegions.length) {
+    return { copies: {}, source: "none", stats: emptyStats, rejected: [], unresolved: [] };
+  }
+  if (isMockEnabled()) {
+    return { copies: { ...seeds }, source: "mock", stats: emptyStats, rejected: [], unresolved: [] };
+  }
 
   const tStart = Date.now();
-  console.log(`[ai] copy-deck start regions=${regions.map((component) => component.id).join(",")}`);
+  console.log(
+    `[ai] copy-deck start regions=${allRegions.map((component) => component.id).join(",")}` +
+      `${regions.length ? "" : " (all seeded)"}`,
+  );
   try {
-    const text = await fetchAiChat(buildCopyPrompt(regions, goal, rawPrompt, canvas), {
-      schema: copyDeckSchema(regions),
-      name: "oovi_copydeck",
-      maxTokens: 500,
-      effort: "low",
-      onProgress,
-    });
-    const parsed = regexRepairJson(text);
-    if (!parsed) throw new Error("unrecoverable JSON");
-    let copies = normalizeCopyDeck(parsed, regions);
-    let rejected = validateCopyDeck(copies, regions, goal, rawPrompt);
+    const copies = { ...seeds };
+    if (regions.length) {
+      const text = await fetchAiChat(buildCopyPrompt(regions, goal, rawPrompt, canvas, allRegions), {
+        schema: copyDeckSchema(regions),
+        name: "oovi_copydeck",
+        maxTokens: 500,
+        effort: "low",
+        onProgress,
+      });
+      const parsed = regexRepairJson(text);
+      if (!parsed) throw new Error("unrecoverable JSON");
+      Object.assign(copies, normalizeCopyDeck(parsed, regions));
+    }
+    let rejected = validateCopyDeck(copies, allRegions, goal, rawPrompt);
     const initialRejected = rejected.length;
-    let source = rejected.length ? "rewrite" : "ai";
+    let attempts = 0;
     if (rejected.length) {
       console.warn(
         `[ai] copy-deck rejected ${rejected
           .map((entry) => `${entry.component.id}: ${entry.reason} — ${JSON.stringify(entry.lines)}`)
           .join("; ")}`,
       );
-      try {
-        const repairText = await fetchAiChat(
-          buildCopyRepairPrompt(
-            rejected.map((entry) => entry.component),
-            goal,
-            rawPrompt,
-            rejected,
-            canvas,
-            copies,
-          ),
-          {
-            schema: copyDeckSchema(rejected.map((entry) => entry.component)),
-            name: "oovi_copydeck",
-            maxTokens: 420,
-            effort: "low",
-            onProgress,
-          },
+      while (rejected.length && attempts < FEATURES.copy.repairPasses) {
+        attempts += 1;
+        const repairComponents = rejected.map((entry) => entry.component);
+        const repairLimits = Object.fromEntries(
+          rejected.map((entry) => [entry.component.id, repairLineLimit(entry)]),
         );
-        const repairParsed = regexRepairJson(repairText);
-        if (repairParsed) {
-          const repaired = normalizeCopyDeck(repairParsed, rejected.map((entry) => entry.component));
-          console.log(`[ai] copy-deck repair ${JSON.stringify(repaired)}`);
-          for (const entry of rejected) {
-            if (repaired[entry.component.id]?.length) copies[entry.component.id] = repaired[entry.component.id];
+        try {
+          const repairText = await fetchAiChat(
+            buildCopyRepairPrompt(
+              repairComponents,
+              goal,
+              rawPrompt,
+              rejected,
+              canvas,
+              copies,
+            ),
+            {
+              schema: copyDeckSchema(repairComponents, repairLimits),
+              name: "oovi_copydeck",
+              maxTokens: 420,
+              effort: "low",
+              onProgress,
+            },
+          );
+          const repairParsed = regexRepairJson(repairText);
+          if (repairParsed) {
+            const repaired = normalizeCopyDeck(repairParsed, repairComponents);
+            console.log(`[ai] copy-deck repair ${attempts} ${JSON.stringify(repaired)}`);
+            for (const entry of rejected) {
+              if (repaired[entry.component.id]?.length) copies[entry.component.id] = repaired[entry.component.id];
+            }
           }
+        } catch (error) {
+          console.warn(`[ai] copy-deck repair ${attempts} failed (${error.message})`);
         }
-      } catch (error) {
-        console.warn(`[ai] copy-deck repair failed (${error.message})`);
+        rejected = validateCopyDeck(copies, allRegions, goal, rawPrompt);
       }
-      rejected = validateCopyDeck(copies, regions, goal, rawPrompt);
-      if (rejected.length) {
-        console.warn(
-          `[ai] copy-deck unresolved ${rejected
-            .map((entry) => `${entry.component.id}: ${entry.reason} — ${JSON.stringify(entry.lines)}`)
-            .join("; ")}`,
-        );
-      }
-      source = rejected.length ? "mixed" : "rewrite";
     }
     // Never pass a rejected line to L4 as "approved copy"; the final region
     // guard would only have to replace it again.
     for (const entry of rejected) delete copies[entry.component.id];
+    const unresolved = rejected.map((entry) => ({
+      id: entry.component.id,
+      reason: entry.reason,
+      lines: entry.lines,
+    }));
+    if (unresolved.length) {
+      console.warn(
+        `[ai] copy-deck unresolved ${unresolved
+          .map((entry) => `${entry.id}: ${entry.reason}`)
+          .join("; ")}`,
+      );
+    }
+    const source = unresolved.length
+      ? "unresolved"
+      : !regions.length
+        ? "seeded"
+        : initialRejected
+          ? "rewrite"
+          : "ai";
     const stats = {
-      regions: regions.length,
+      regions: allRegions.length,
       lines: Object.values(copies).reduce((sum, lines) => sum + lines.length, 0),
       rejected: initialRejected,
-      unresolved: rejected.length,
+      unresolved: unresolved.length,
+      attempts,
     };
     console.log(
       `[ai] copy-deck ok ${Date.now() - tStart}ms source=${source} regions=${stats.regions} ` +
-        `lines=${stats.lines} unresolved=${stats.unresolved}`,
+        `lines=${stats.lines} unresolved=${stats.unresolved} repairs=${stats.attempts}`,
     );
-    return { copies, source, stats, rejected };
+    return { copies, source, stats, rejected, unresolved };
   } catch (error) {
-    console.warn(`[ai] copy-deck failed (${error.message}) — regions will write their own copy`);
-    return { copies: {}, source: "fallback", stats: emptyStats, rejected: [] };
+    console.warn(`[ai] copy-deck failed (${error.message}) — blocking the build`);
+    const rejected = regions.map((component) => ({
+      component,
+      lines: [],
+      reason: `copy deck failed: ${error.message}`,
+    }));
+    return {
+      copies: { ...seeds },
+      source: "failed",
+      stats: { ...emptyStats, rejected: regions.length, unresolved: regions.length },
+      rejected,
+      unresolved: rejected.map((entry) => ({
+        id: entry.component.id,
+        reason: entry.reason,
+        lines: [],
+      })),
+    };
   }
+}
+
+/**
+ * Factual seed: a brand/identity region is not creative copy. If L1 named the
+ * brand and the template has a matching region, use the exact brief string.
+ * This removes a whole class of placeholder/invented-brand output without
+ * weakening any validation; the seeded line still goes through the same
+ * copy validator and repetition ledger.
+ */
+function factualCopySeeds(components, goal, rawPrompt) {
+  const brand = extractBrand(goal);
+  if (!brand) return {};
+  const component = components.find(isBrandComponent);
+  if (!component) return {};
+  if (copyProblem([brand], component, goal, rawPrompt)) return {};
+  console.log(`[ai] copy-deck seed brand id=${component.id}`);
+  return { [component.id]: [brand] };
 }
 
 function normalizeCopyDeck(parsed, components) {
@@ -1308,28 +1404,18 @@ export async function planTemplate(goal, palette, canvas, onProgress = null, opt
       console.warn(`[ai] template ${template.id} unusable (${built.reason}) — trying next template`);
       continue;
     }
-    // Each image region gets a prompt-grounded Unsplash query: the tuning
-    // model may supply one, otherwise the brief's subject anchors it. Tiny
-    // models sometimes echo the prompt's placeholder ("2-5 word Unsplash
-    // subject"), so only accept something that looks like a real query.
-    const usableImageQuery = (value) => {
-      const q = String(value || "").replace(/\s+/g, " ").trim();
-      if (q.length < 3 || q.length > 64) return "";
-      if (/\bunsplash\b|\bsearch terms?\b|\bword\b|<|>/i.test(q)) return "";
-      const words = q.split(" ").filter(Boolean);
-      if (!words.length || words.length > 8) return "";
-      return q;
-    };
-    const subject = asText(goal?.subject);
-    const extraKeyword = (Array.isArray(goal?.keywords) ? goal.keywords : []).find(
-      (keyword) => keyword && !subject.toLowerCase().includes(String(keyword).toLowerCase()),
-    );
-    const briefSubject = [subject, extraKeyword].filter(Boolean).join(" ").trim();
+    // The visual brief is L1's `imageSubject` (a scene), not the page title.
+    // L3 tuning may add a query, but it is secondary: a title-shaped query is
+    // what produced a stock photo of the words on the poster.
     const components = built.components.map((c) => {
       if (c.kind !== "image") return c;
-      const query = usableImageQuery(built.tuning.images?.[c.id]) || briefSubject || c.describe;
-      console.log(`[ai] template image ${template.id}/${c.id} query="${query}"`);
-      return { ...c, imageQuery: query };
+      const queries = imageQueryCandidates(goal, built.tuning.images?.[c.id]);
+      const query = queries[0] || "";
+      console.log(
+        `[ai] template image ${template.id}/${c.id} subject="${query}"` +
+          `${queries.length > 1 ? ` alternatives=${queries.length - 1}` : ""}`,
+      );
+      return { ...c, imageQuery: query, imageQueries: queries };
     });
     console.log(
       `[ai] template plan ok ${Date.now() - tStart}ms template=${template.id} variant=${built.tuning.variant} ` +
@@ -1553,7 +1639,15 @@ export async function componentDesign(component, canvas, plan, goal = null, opts
           : null,
       });
     } catch (error) {
-      throw new Error(`Component "${component.id}" failed: ${error.message}`);
+      // A local model can drop a request (Ollama restart, timeout). That is a
+      // call failure too, so use the same three-call budget rather than
+      // treating transient transport errors differently from bad JSON.
+      errors = [`call failed — ${error.message}`];
+      console.warn(`[ai] component retry ${component.id} attempt=${attempt} errors=${errors[0]}`);
+      if (attempt >= MAX_ATTEMPTS) {
+        throw new Error(`Component "${component.id}" failed after ${MAX_ATTEMPTS} calls: ${error.message}`);
+      }
+      continue;
     }
     const parsed = regexRepairJson(text);
     const parsedElements = Array.isArray(parsed?.elements) ? parsed.elements : [];
@@ -1639,11 +1733,15 @@ export async function componentDesign(component, canvas, plan, goal = null, opts
           .map((issue) => `text element ${issue.index + 1} "${issue.content}": ${issue.reason}`)
           .join("; ");
         console.warn(`[ai] component copy retry ${component.id} attempt=${attempt} summary=${summary}`);
-        if (FEATURES.copy.regenerateBadCopy && attempt < MAX_ATTEMPTS) {
+        if (attempt < MAX_ATTEMPTS && FEATURES.copy.regenerateBadCopy) {
           errors = [`copy failed — ${summary}`];
           lastParsed = { ...parsed, elements: prepared };
           continue;
         }
+        // Never return a region whose copy still fails the gate. The caller
+        // will mark the region failed and block persistence after the third
+        // call instead of letting the sanitizer drop a line silently.
+        throw new Error(`Component "${component.id}" failed: copy — ${summary}`);
       }
       const finished = finishRegion(usable, component, plan, goal, rawPrompt);
       console.log(

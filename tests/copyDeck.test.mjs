@@ -3,18 +3,29 @@ import assert from "node:assert/strict";
 
 import {
   COPY_RULES,
+  COPY_REPAIR_RULES,
   buildCopyPrompt,
   buildCopyRepairPrompt,
   copyDeckSchema,
   copyLineLimit,
 } from "../src/ai/copyPrompt";
-import { copyProblem, extractGreeting, extractOccasionTagline, findCopyRepetitions } from "../src/ai/copySanitize";
-import { validateCopyDeck } from "../src/ai/aiClient";
+import {
+  collectTextElements,
+  copyProblem,
+  extractGreeting,
+  extractOccasionTagline,
+  findCopyRepetitions,
+  findTextRepetitionsForChanged,
+  textElementsUnder,
+} from "../src/ai/copySanitize";
+import { planCopyDeck, validateCopyDeck } from "../src/ai/aiClient";
 import { normalizeElementRole, normalizeElementRoles } from "../src/ai/elementRoles";
 
 const GOAL = {
   summary: "A festive greeting card wishing a Happy Diwali from Graphilla Technology.",
   subject: "Diwali greeting",
+  brand: "Graphilla Technology",
+  imageSubject: "diya lamps glowing on a rangoli at dusk",
   designType: "poster",
   tone: ["warm", "elegant", "celebratory"],
   keywords: ["Diwali", "festive", "clients", "community"],
@@ -80,7 +91,8 @@ test("the repair prompt repeats only the rejected regions", () => {
     },
   ];
   const prompt = buildCopyRepairPrompt([REGIONS[2]], GOAL, "A Diwali card.", rejected, CANVAS);
-  assert.ok(prompt.startsWith(COPY_RULES));
+  assert.ok(prompt.startsWith(COPY_REPAIR_RULES));
+  assert.ok(COPY_REPAIR_RULES.length < COPY_RULES.length);
   assert.match(prompt, /footer-registration/);
   assert.match(prompt, /claims availability/);
   assert.match(prompt, /Occasion: Happy Diwali/);
@@ -97,10 +109,22 @@ test("strict repetition guard flags partial copies, not just exact duplicates", 
     "",
   );
   assert.deepEqual([...repeats.keys()].sort(), ["headline-main", "tagline-line"]);
-  assert.match(repeats.get("tagline-line")[0], /"assistant" from region "headline-main"/);
+  assert.match(repeats.get("tagline-line")[0], /assistant/);
 });
 
-test("strict repetition guard allows stopwords and the greeting sign-off", () => {
+test("strict repetition guard still allows grammatical stopwords", () => {
+  const repeats = findCopyRepetitions(
+    [
+      { id: "headline-main", text: "The launch is here" },
+      { id: "tagline-line", text: "The team is ready" },
+    ],
+    GOAL,
+    "",
+  );
+  assert.equal(repeats.size, 0);
+});
+
+test("strict repetition guard rejects a repeated greeting", () => {
   const repeats = findCopyRepetitions(
     [
       { id: "headline-main", text: "Happy Diwali" },
@@ -109,7 +133,21 @@ test("strict repetition guard allows stopwords and the greeting sign-off", () =>
     GOAL,
     "",
   );
-  assert.equal(repeats.size, 0);
+  assert.deepEqual([...repeats.keys()].sort(), ["footer-registration", "headline-main"]);
+  assert.match(repeats.get("footer-registration")[0], /repeats .* from region "headline-main"/);
+});
+
+test("strict repetition guard rejects the same brand in two regions", () => {
+  const repeats = findCopyRepetitions(
+    [
+      { id: "header-branding", text: "AS Power Solution" },
+      { id: "headline-main", text: "Careers at AS Power Solution" },
+    ],
+    { summary: "A hiring notice.", brand: "AS Power Solution" },
+    "",
+  );
+  assert.deepEqual([...repeats.keys()].sort(), ["header-branding", "headline-main"]);
+  assert.match(repeats.get("header-branding")[0], /"power"|"solution"/);
 });
 
 test("copy-deck validation rejects a region that reuses another region's words", () => {
@@ -128,10 +166,10 @@ test("copy-deck validation rejects a region that reuses another region's words",
   );
   assert.equal(rejected.length, 1);
   assert.equal(rejected[0].component.id, "tagline-line");
-  assert.match(rejected[0].reason, /repeats "assistant"/);
+  assert.match(rejected[0].reason, /assistant/);
 });
 
-test("copy-deck validation keeps a repeated greeting in the footer sign-off", () => {
+test("copy-deck validation rejects a repeated greeting in the footer sign-off", () => {
   const components = [
     { id: "headline-main", role: "headline", kind: "dsl", describe: "title", maxChars: 40 },
     { id: "footer-registration", role: "footer", kind: "dsl", describe: "sign-off", maxChars: 70 },
@@ -145,7 +183,9 @@ test("copy-deck validation keeps a repeated greeting in the footer sign-off", ()
     GOAL,
     "",
   );
-  assert.equal(rejected.length, 0);
+  assert.equal(rejected.length, 1);
+  assert.equal(rejected[0].component.id, "footer-registration");
+  assert.match(rejected[0].reason, /repeats/);
 });
 
 test("the repair prompt names accepted copy so the rewrite differs", () => {
@@ -361,4 +401,239 @@ test("role normalisation walks group children", () => {
   const out = normalizeElementRoles(elements, "footer");
   assert.equal(out[0].children[0].role, "footer");
   assert.equal(out[0].children[1].role, "label");
+});
+
+test("assistant edits are checked against every other rendered text", () => {
+  const design = {
+    elements: [
+      { id: "headline", type: "text", content: "Happy Diwali" },
+      { id: "footer", type: "text", content: "Happy Diwali from Graphilla" },
+    ],
+  };
+  const changed = findTextRepetitionsForChanged(design, ["footer"]);
+  assert.equal(changed.size, 2);
+  assert.match(changed.get("footer")[0], /happy|diwali/i);
+});
+
+test("assistant repetition ignores untouched legacy duplicates", () => {
+  const design = {
+    elements: [
+      { id: "headline", type: "text", content: "Happy Diwali" },
+      { id: "tagline", type: "text", content: "Happy Diwali" },
+      { id: "cta", type: "text", content: "Join the celebration" },
+    ],
+  };
+  assert.equal(findTextRepetitionsForChanged(design, ["cta"]).size, 0);
+  assert.ok(findTextRepetitionsForChanged(design, ["tagline"]).size > 0);
+});
+
+test("assistant repetition walks group children", () => {
+  const design = {
+    elements: [
+      { id: "headline", type: "text", content: "Graphilla Technology" },
+      {
+        id: "footer-group",
+        type: "group",
+        children: [{ id: "footer-text", type: "text", content: "Graphilla Technology" }],
+      },
+    ],
+  };
+  const changed = findTextRepetitionsForChanged(design, ["footer-group"]);
+  assert.equal(changed.size, 2);
+  assert.ok(changed.has("footer-text"));
+});
+
+test("region ownership and text collection see nested groups", () => {
+  const design = {
+    elements: [
+      { id: "headline", type: "text", content: "Happy Diwali" },
+      {
+        id: "details-group",
+        type: "group",
+        children: [
+          { id: "details-a", type: "text", content: "Lights and joy" },
+          {
+            id: "details-inner",
+            type: "group",
+            children: [{ id: "details-b", type: "text", content: "Warm wishes" }],
+          },
+        ],
+      },
+    ],
+  };
+  const all = collectTextElements(design.elements);
+  assert.deepEqual(all.map((entry) => entry.id), ["headline", "details-a", "details-b"]);
+  const details = textElementsUnder(design, ["details-group"]);
+  assert.deepEqual(details.map((entry) => entry.id), ["details-a", "details-b"]);
+});
+
+test("content adjectives are part of the repetition ledger", () => {
+  const repeats = findCopyRepetitions(
+    [
+      { id: "headline", text: "New AI assistant" },
+      { id: "tagline", text: "New workflow tool" },
+    ],
+    GOAL,
+    "",
+  );
+  assert.deepEqual([...repeats.keys()].sort(), ["headline", "tagline"]);
+  assert.match(repeats.get("headline")[0], /"new"/);
+});
+
+test("ordinary title-case hiring copy is not treated as an invented name", () => {
+  const tagline = {
+    id: "announcement-label",
+    role: "tagline",
+    kind: "dsl",
+    describe: "Announcement category",
+    maxChars: 35,
+  };
+  const goal = {
+    summary: "A hiring notice from a power company.",
+    brand: "Northwind Power",
+    designType: "poster",
+    mustInclude: ["company name", "hiring headline", "apply action"],
+  };
+  assert.equal(copyProblem(["New Team Members Wanted"], tagline, goal, ""), "");
+  assert.equal(copyProblem(["Hiring Now"], tagline, goal, ""), "");
+});
+
+test("CTA validation accepts apply as an action verb", () => {
+  const cta = {
+    id: "cta",
+    role: "cta",
+    kind: "dsl",
+    describe: "Action relevant to the announcement",
+    maxChars: 45,
+  };
+  assert.equal(copyProblem(["Apply Now"], cta, { summary: "A hiring notice." }, ""), "");
+});
+
+test("copy prompt derives reserved brand words from the goal, not a hardcoded brand", () => {
+  const components = [
+    { id: "brand", role: "header", kind: "dsl", describe: "Company identity", maxChars: 45 },
+    { id: "headline", role: "headline", kind: "dsl", describe: "Main announcement", maxChars: 55 },
+  ];
+  const one = buildCopyPrompt(
+    components,
+    { summary: "A hiring notice.", brand: "Northwind Labs", designType: "poster" },
+    "",
+    CANVAS,
+  );
+  const two = buildCopyPrompt(
+    components,
+    { summary: "A hiring notice.", brand: "Contoso Health", designType: "poster" },
+    "",
+    CANVAS,
+  );
+  assert.match(one, /Reserved brand words/);
+  assert.match(one, /"northwind"/);
+  assert.match(one, /"labs"/);
+  assert.doesNotMatch(one, /contoso/);
+  assert.match(two, /"contoso"/);
+  assert.doesNotMatch(two, /northwind/);
+});
+
+test("a complete hiring deck passes without weakening repetition or facts", () => {
+  const components = [
+    { id: "brand", role: "header", kind: "dsl", describe: "Company identity", maxChars: 45 },
+    { id: "announcement-label", role: "tagline", kind: "dsl", describe: "Announcement category", maxChars: 35 },
+    { id: "headline", role: "headline", kind: "dsl", describe: "Main announcement", maxChars: 55 },
+    { id: "supporting-copy", role: "details", kind: "dsl", describe: "Short explanatory message", maxChars: 100 },
+    { id: "cta", role: "cta", kind: "dsl", describe: "Action relevant to the announcement", maxChars: 45 },
+    { id: "contact-footer", role: "footer", kind: "dsl", describe: "Website and social media details", maxChars: 100 },
+  ];
+  const goal = {
+    summary: "A hiring notice from Northwind Labs.",
+    brand: "Northwind Labs",
+    designType: "poster",
+    mustInclude: ["company name", "hiring headline", "apply action"],
+  };
+  const copies = {
+    brand: ["Northwind Labs"],
+    "announcement-label": ["Hiring Now"],
+    headline: ["Join Our Team"],
+    "supporting-copy": ["Build a brighter future"],
+    cta: ["Apply Today"],
+    "contact-footer": ["Visit our website"],
+  };
+  assert.deepEqual(validateCopyDeck(copies, components, goal, ""), []);
+});
+
+test("the schema can cap a repair to the rejected line count", () => {
+  const schema = copyDeckSchema([REGIONS[0]], { "headline-quote": 1 });
+  assert.equal(schema.properties["headline-quote"].maxItems, 1);
+  assert.equal(schema.properties["headline-quote"].items.maxLength, 72);
+  assert.equal(copyLineLimit({ ...REGIONS[0], maxChars: 33 }), 1);
+  assert.equal(copyLineLimit({ ...REGIONS[0], role: "details", maxChars: 100 }), 1);
+  assert.equal(copyLineLimit({ ...REGIONS[0], role: "details", maxChars: 220 }), 3);
+  assert.equal(copyLineLimit({ ...REGIONS[0], role: "details", maxChars: 420 }), 4);
+});
+
+test("repair prompts keep line count, total budget and accepted words explicit", () => {
+  const region = {
+    id: "supporting-copy",
+    role: "details",
+    kind: "dsl",
+    describe: "Short explanatory message",
+    maxChars: 100,
+  };
+  const rejected = [
+    { component: region, lines: ["Northwind Power is hiring", "Join our team"], reason: "repeats brand words" },
+  ];
+  const prompt = buildCopyRepairPrompt(
+    [region],
+    { summary: "A hiring notice from Northwind Power.", brand: "Northwind Power" },
+    "",
+    rejected,
+    CANVAS,
+    { brand: ["Northwind Power"], headline: ["Build reliable energy"] },
+  );
+  assert.match(prompt, /at most 1 line\b/);
+  assert.match(prompt, /100 characters total across all lines/);
+  assert.match(prompt, /HARD: none of these words may appear/);
+  assert.match(prompt, /northwind/);
+});
+
+test("planCopyDeck seeds the brand region from the brief, not the model", async () => {
+  const brand = {
+    id: "header-branding",
+    role: "header",
+    kind: "dsl",
+    describe: "organizer or event kicker, one short line",
+    maxChars: 45,
+  };
+  const headline = {
+    id: "headline",
+    role: "headline",
+    kind: "dsl",
+    describe: "Main announcement",
+    maxChars: 55,
+  };
+  const originalFetch = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (url, init) => {
+    calls.push(JSON.parse(init.body));
+    const text = JSON.stringify({ headline: ["Join our team"] });
+    return new Response(`${JSON.stringify({ t: "done", text, provider: "test" })}\n`, {
+      status: 200,
+      headers: { "Content-Type": "application/x-ndjson" },
+    });
+  };
+  try {
+    const result = await planCopyDeck(
+      [brand, headline],
+      { summary: "A hiring notice from Northwind Labs.", brand: "Northwind Labs", designType: "poster" },
+      CANVAS,
+      "A hiring notice from Northwind Labs.",
+    );
+    assert.equal(calls.length, 1);
+    assert.deepEqual(calls[0].schema.required, ["headline"]);
+    assert.deepEqual(result.copies["header-branding"], ["Northwind Labs"]);
+    assert.deepEqual(result.copies.headline, ["Join our team"]);
+    assert.equal(result.source, "ai");
+    assert.equal(result.unresolved.length, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });

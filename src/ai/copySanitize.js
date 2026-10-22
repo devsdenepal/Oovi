@@ -69,7 +69,8 @@ const META_COPY_PATTERNS = [
 const STYLE_DESCRIPTION =
   /\b(?:dark|confident|modern|clean|bold|cinematic|minimal|elegant|futuristic|vibrant|moody|editorial|playful|warm)\b[^.!?]{0,40}\b(?:announcement|launch|design|poster|experience|composition|brief)\b/i;
 
-const GENERIC_BRAND = /\b(team members|our team|audience|brand name|your brand|placeholder)\b/i;
+const GENERIC_BRAND =
+  /^(?:team members|our team|audience|brand name|your brand|placeholder)[.!]?$/i;
 const PLACEHOLDER_PATTERNS = [
   /\b(?:client|customer|recipient|guest|attendee|speaker|artist|name)\s+(?:[A-Z]|one|two|three|\d+)\b/i,
   /\b(?:tbd|tba|placeholder|sample name|your name)\b/i,
@@ -80,22 +81,15 @@ const YEAR = /\b(?:19|20)\d{2}\b/g;
 const TIME = /\b\d{1,2}(?::\d{2})?\s*(?:am|pm)\b/gi;
 const GREETING_FORBIDDEN =
   /\b(?:award|awarded|awarding|certificate|citation|recipient|signatory|signature|honou?r|achiev|recogni[sz]|diploma|graduation)\b/i;
-const COMMON_TITLE_WORDS = new Set([
-  "The", "This", "That", "These", "Those", "A", "An", "And", "Or", "But", "For",
-  "From", "To", "With", "Without", "Our", "Your", "Their", "We", "You", "They",
-  "It", "Its", "Join", "Get", "Learn", "Discover", "Start", "Try", "Book",
-  "Register", "Download", "Explore", "Meet", "See", "Claim", "Reserve", "Shop",
-  "Watch", "Read", "Visit", "Reply", "Order", "Buy", "Happy", "Merry", "Wishing",
-  "Wish", "Wishes", "May", "Celebrate", "Celebration", "Season", "Seasons",
-  "Festival", "Festivals", "Light", "Lights", "Joy", "Joyful", "Warm", "Warmest",
-  "Best", "Greetings", "Dear", "Hello", "Hi", "Welcome", "Together", "Today",
-  "Tonight", "Now", "New", "Year", "Years", "Day", "Days", "Night", "Evening",
-  "Morning", "Diwali", "Christmas", "Eid", "Hanukkah", "Thanksgiving", "Birthday",
-  "Anniversary", "Valentine's", "Valentines", "Mother's", "Father's", "Holiday",
-  "Holidays",
-]);
+const LINK = /\b(?:https?:\/\/|www\.)\S+|\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b/gi;
+const NUMBER = /\b\d[\d,.]*\b/g;
+const NAME_INTRO =
+  /\b(?:by|from|featuring|speaker|hosted\s+by|host|presenter|author|artist|contact)\s+([A-Z][a-z][A-Za-z'-]*(?:\s+[A-Z][a-z][A-Za-z'-]*)+)/g;
+const NAME_PAIR = /\b[A-Z][a-z][A-Za-z'-]*(?:\s+[A-Z][a-z][A-Za-z'-]*)+/g;
+const FACT_REGION =
+  /\b(?:date|time|when|deadline|venue|location|address|name|speaker|host|presenter|author|artist|attribution|recipient|contact\s+person)\b/i;
 const ACTION_WORD =
-  /\b(get|join|learn|discover|start|try|book|register|download|explore|meet|see|claim|reserve|shop|watch|read|visit|rsvp|reply|order|buy)\b/i;
+  /\b(get|join|learn|discover|start|try|book|register|download|explore|meet|see|claim|reserve|shop|watch|read|visit|rsvp|reply|order|buy|apply|send|share|celebrate|greet|call|contact|email|message|follow|subscribe|enquire|inquire|request|donate|nominate|vote|comment)\b/i;
 const FOOTER_FACT =
   /(https?:\/\/|www\.|@|©|\b(?:19|20)\d{2}\b|\b(?:available|coming|launch|now|today|register|book|reserve|tba|details|learn|rsvp|join|discover|visit|see)\b)/i;
 const AVAILABILITY_CLAIM = /\b(available now|out now|on sale|buy now|order now|in stores|coming soon)\b/i;
@@ -160,7 +154,7 @@ const COPY_STOPWORDS = new Set([
   "being", "it", "its", "this", "that", "these", "those", "you", "your",
   "we", "our", "us", "they", "their", "them", "i", "me", "my", "he", "she",
   "his", "her", "not", "no", "so", "if", "then", "than", "too", "very",
-  "can", "will", "just", "now", "new", "more", "most", "all", "any", "each",
+  "can", "will", "just", "more", "most", "all", "any", "each",
   "every", "into", "over", "under", "about", "after", "before", "up", "down",
   "out", "off", "again", "also", "only", "own", "same", "such", "via", "per",
   "one", "two", "three", "four", "five", "six", "seven", "eight", "nine",
@@ -188,25 +182,22 @@ export function distinctiveWords(value, allowed = null) {
 }
 
 /**
- * Content words shared with an existing used-word set. Stopwords, numbers and
- * greeting/brand vocabulary are allowed to repeat; everything else is a
- * duplicate of copy already shipped in another region.
+ * Content words shared with an existing used-word set. Stopwords and numbers
+ * are ignored by distinctiveWords(); every other word is unique to one region.
  */
 export function repeatedContentWords(value, usedWords, allowed = null) {
   const seen = usedWords instanceof Set ? usedWords : new Set(usedWords || []);
   return distinctiveWords(value, allowed).filter((word) => seen.has(word));
 }
 
-/** Occasion and brand vocabulary is a sign-off, not a duplicate message. */
-export function repeatableWords(goal, rawPrompt = "") {
-  const shared = [
-    extractGreeting(goal, rawPrompt),
-    extractOccasionTagline(goal, rawPrompt),
-    extractBrand(goal, rawPrompt),
-  ]
-    .filter(Boolean)
-    .join(" ");
-  return new Set(contentWords(shared).filter((word) => word.length >= 3));
+/**
+ * No content word is repeatable. The brand, the occasion and the greeting are
+ * all ordinary copy: if they appear in one region they may not appear in
+ * another. Stopwords and numbers are filtered earlier, so grammar still works;
+ * everything else must be unique across the deck.
+ */
+export function repeatableWords() {
+  return new Set();
 }
 
 /**
@@ -242,6 +233,93 @@ export function findCopyRepetitions(regions, goal = null, rawPrompt = "") {
   return reported;
 }
 
+export function collectTextElements(elements, out = []) {
+  for (const element of elements || []) {
+    if (!element || typeof element !== "object") continue;
+    if (element.type === "text" && typeof element.content === "string" && element.content.trim()) {
+      out.push({ id: String(element.id || ""), text: element.content.trim() });
+    }
+    if (element.type === "group" && Array.isArray(element.children)) {
+      collectTextElements(element.children, out);
+    }
+  }
+  return out;
+}
+
+/**
+ * Text owned by a region. Region ids are top-level element ids returned by the
+ * editor; a region may own a group, so keep walking children here rather than
+ * assuming every text element is flat on the canvas.
+ */
+export function textElementsUnder(design, ids) {
+  const byId = new Map();
+  const index = (elements) => {
+    for (const element of elements || []) {
+      if (!element || typeof element !== "object") continue;
+      if (typeof element.id === "string") byId.set(element.id, element);
+      if (element.type === "group" && Array.isArray(element.children)) index(element.children);
+    }
+  };
+  index(design?.elements);
+  const out = [];
+  const seen = new Set();
+  const walk = (element) => {
+    if (!element || typeof element !== "object") return;
+    if (
+      element.type === "text" &&
+      typeof element.content === "string" &&
+      element.content.trim() &&
+      !seen.has(element.id)
+    ) {
+      seen.add(element.id);
+      out.push({ id: String(element.id || ""), text: element.content.trim() });
+    }
+    if (element.type === "group" && Array.isArray(element.children)) {
+      for (const child of element.children) walk(child);
+    }
+  };
+  for (const id of ids || []) walk(byId.get(String(id)));
+  return out;
+}
+
+/**
+ * Assistant patch gate. Only changed/added text is checked, against every other
+ * rendered text element. This catches a follow-up edit that reintroduces a word
+ * already used elsewhere without rescanning (or rejecting) unrelated legacy
+ * duplication the user did not touch.
+ *
+ * @returns {Map<string,string[]>} element id -> repetition messages
+ */
+export function findTextRepetitionsForChanged(design, changedIds) {
+  if (!FEATURES.copy.strictRepetition) return new Map();
+  const changed = new Set((changedIds || []).filter((id) => typeof id === "string"));
+  if (!changed.size) return new Map();
+  // A patch may target a group id. Expand it to the text children that were
+  // actually changed instead of silently skipping the whole subtree.
+  for (const entry of textElementsUnder(design, [...changed])) changed.add(entry.id);
+  const texts = collectTextElements(design?.elements);
+  const words = new Map(texts.map((entry) => [entry.id, distinctiveWords(entry.text)]));
+  const reported = new Map();
+  const flag = (id, message) => {
+    const list = reported.get(id) || [];
+    if (!list.includes(message)) list.push(message);
+    reported.set(id, list);
+  };
+  for (const entry of texts) {
+    if (!changed.has(entry.id)) continue;
+    const own = words.get(entry.id) || [];
+    for (const other of texts) {
+      if (other.id === entry.id) continue;
+      const shared = own.filter((word) => (words.get(other.id) || []).includes(word));
+      if (!shared.length) continue;
+      const message = `repeats ${shared.map((word) => `"${word}"`).join(", ")} from "${other.id}"`;
+      flag(entry.id, message);
+      flag(other.id, message);
+    }
+  }
+  return reported;
+}
+
 
 
 /** One string or an array of strings -> a clean array of copy lines. */
@@ -263,6 +341,7 @@ export function briefText(goal, rawPrompt = "") {
   return [
     goal?.summary,
     goal?.subject,
+    goal?.brand,
     goal?.purpose,
     goal?.tone,
     goal?.style,
@@ -308,18 +387,10 @@ export function isGreetingContext(goal, rawPrompt = "") {
   );
 }
 
-export function extractBrand(goal, rawPrompt = "") {
-  const text = briefText(goal, rawPrompt);
-  const stop = new Set(["For", "The", "And", "With", "At", "On", "In", "To", "Of"]);
-  const values = [...text.matchAll(/\bfrom\s+([A-Z][A-Za-z0-9&'-]*(?:\s+[A-Z][A-Za-z0-9&'-]*){0,3})/g)]
-    .map((match) => {
-      const words = match[1].replace(/[.,;:]+$/, "").trim().split(/\s+/);
-      while (words.length && stop.has(words[words.length - 1])) words.pop();
-      return words.join(" ");
-    })
-    .filter(Boolean);
-  if (!values.length) return "";
-  return values.sort((a, b) => b.length - a.length)[0];
+export function extractBrand(goal) {
+  // Brand identity is a semantic reading of the brief, not a regex shape.
+  // L1 returns it; every later layer consumes that same answer.
+  return normalize(goal?.brand || goal?.organizer || "");
 }
 
 function isMetaCopy(text) {
@@ -339,12 +410,25 @@ function compact(value) {
 }
 
 /**
- * The tiny model invents plausible-looking facts: "January 1st, 2024",
- * "Alex Johnson", "Client X". They are worse than a missing line because the
- * design now claims something the brief never said. This check only rejects
- * concrete tokens that are absent from the brief; it never rewrites prose.
+ * Ground a title-case phrase against the brief. This is deliberately
+ * vocabulary-agnostic: every word must either be a grammar word or appear in
+ * the brief. No brand, industry or example words are hardcoded here.
  */
-function factProblem(text, brief) {
+function groundedName(phrase, compactBrief) {
+  const words = String(phrase).toLowerCase().match(/[a-z0-9]+(?:['’-][a-z0-9]+)*/g) || [];
+  return (
+    words.length > 0 &&
+    words.every((word) => COPY_STOPWORDS.has(word) || compactBrief.includes(word))
+  );
+}
+
+/**
+ * Concrete-fact guard. It rejects only tokens that can be verified against the
+ * brief: placeholders, dates, times, numbers, links, and names in regions that
+ * explicitly ask for a name/date/venue (or copy that introduces a name with a
+ * role marker). Ordinary title-case marketing copy is not treated as a name.
+ */
+function factProblem(text, brief, component) {
   if (PLACEHOLDER_PATTERNS.some((pattern) => pattern.test(text))) return "placeholder name or date";
   const compactBrief = compact(brief);
   const dates = text.match(DATE_WORD) || [];
@@ -353,12 +437,26 @@ function factProblem(text, brief) {
   if (years.some((year) => !compactBrief.includes(year))) return "date not stated in the brief";
   const times = text.match(TIME) || [];
   if (times.some((time) => !compactBrief.includes(compact(time)))) return "time not stated in the brief";
-  const names = text.match(/\b[A-Z][a-z][A-Za-z'-]+\b/g) || [];
-  for (const name of names) {
-    const base = name.replace(/'s$/i, "");
-    if (COMMON_TITLE_WORDS.has(name) || COMMON_TITLE_WORDS.has(base)) continue;
-    if (compactBrief.includes(base.toLowerCase())) continue;
-    return `invented name "${name}"`;
+  const links = text.match(LINK) || [];
+  if (links.some((link) => !compactBrief.includes(compact(link)))) return "link not stated in the brief";
+  const numbers = text.match(NUMBER) || [];
+  if (numbers.some((number) => !compactBrief.includes(compact(number)))) {
+    return "number not stated in the brief";
+  }
+
+  for (const match of text.matchAll(NAME_INTRO)) {
+    const name = match[1];
+    if (!groundedName(name, compactBrief)) return `invented name "${name}"`;
+  }
+  // A date/venue/name slot containing a name-shaped phrase is a fact error,
+  // even when the phrase is title-case like the rest of the design. This is
+  // semantic context, not a list of "safe" nouns.
+  if (FACT_REGION.test(`${component?.id || ""} ${component?.describe || ""}`)) {
+    const pairs = text.match(NAME_PAIR) || [];
+    for (const pair of pairs) {
+      const name = pair.replace(/'s$/i, "");
+      if (!groundedName(name, compactBrief)) return `invented name "${name}"`;
+    }
   }
   return "";
 }
@@ -366,6 +464,14 @@ function factProblem(text, brief) {
 function isAttributionComponent(component) {
   return /attribution|who said|credit|attributed to/i.test(
     `${component?.id || ""} ${component?.describe || ""}`,
+  );
+}
+
+export function isBrandComponent(component) {
+  const text = `${component?.id || ""} ${component?.describe || ""}`;
+  return (
+    /\b(?:brand(?:ing)?|logo)\b/i.test(text) ||
+    /\b(?:company|organi[sz]ation)\s+(?:name|identity)\b/i.test(text)
   );
 }
 
@@ -554,7 +660,7 @@ export function copyProblem(value, component, goal, rawPrompt = "") {
   if (designLabelProblem(text, component)) return "repeats the design type";
   const toneTail = toneTailProblem(text, goal);
   if (toneTail) return toneTail;
-  const invented = factProblem(text, brief);
+  const invented = factProblem(text, brief, component);
   if (invented) return invented;
   if (component?.role === "tagline" && keywordJoinProblem(text, goal)) {
     return "tagline is a keyword list";

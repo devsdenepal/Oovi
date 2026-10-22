@@ -4,7 +4,8 @@
  * The access key lives ONLY in UNSPLASH_ACCESS_KEY server env — the
  * browser never holds it (api/asset.js pattern for Pollinations).
  *
- *   GET  /api/photos?q=mountains&page=1  → { photos: [...] }
+ *   GET  /api/photos?q=mountains&page=1&orientation=landscape
+ *                                        → { photos: [...] }
  *   POST /api/photos  { download }       → fires download tracking
  *                                            (API terms, best-effort)
  */
@@ -23,6 +24,8 @@ function slim(p) {
     full: p.urls?.regular || p.urls?.full || "",
     alt: p.alt_description || p.description || "Unsplash photo",
     photographer: p.user?.name || "Unknown",
+    width: Number(p.width) || 0,
+    height: Number(p.height) || 0,
   };
 }
 
@@ -39,9 +42,19 @@ export default async function handler(req, res) {
       res.status(200).json({ photos: [] });
       return;
     }
+    const orientation = String(req.query?.orientation || "").toLowerCase();
+    const page = Math.max(1, Number(req.query?.page) || 1);
     try {
-      const url =
-        `${SEARCH_ENDPOINT}?${new URLSearchParams({ query: q, per_page: String(PER_PAGE), client_id: k })}`;
+      const params = new URLSearchParams({
+        query: q,
+        per_page: String(PER_PAGE),
+        page: String(page),
+        client_id: k,
+      });
+      if (["landscape", "portrait", "squarish"].includes(orientation)) {
+        params.set("orientation", orientation);
+      }
+      const url = `${SEARCH_ENDPOINT}?${params}`;
       const upstream = await fetch(url);
       if (upstream.status === 401) {
         res.status(502).json({ error: "photo provider rejected the server key" });
@@ -59,7 +72,9 @@ export default async function handler(req, res) {
       const photos = (data?.results || [])
         .map((p) => ({ ...slim(p), download: p.links?.download_location || "" }))
         .filter((p) => p.thumb && p.full);
-      console.log(`[photos] q="${q}" results=${photos.length}`);
+      console.log(
+        `[photos] q="${q}" orientation=${orientation || "any"} page=${page} results=${photos.length}`,
+      );
       res.status(200).json({ photos });
     } catch (error) {
       console.error(`[photos] search failed: ${error.message}`);

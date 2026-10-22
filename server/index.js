@@ -26,6 +26,7 @@ const SCHEMA = `
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     title TEXT NOT NULL DEFAULT 'Untitled design',
     design JSONB NOT NULL DEFAULT '{"canvas":null,"elements":[]}',
+    ai_memory JSONB NOT NULL DEFAULT '{}'::jsonb,
     thumbnail TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -33,6 +34,7 @@ const SCHEMA = `
   CREATE INDEX IF NOT EXISTS designs_updated_idx ON designs (updated_at DESC);
   ALTER TABLE designs ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
   CREATE INDEX IF NOT EXISTS designs_deleted_idx ON designs (deleted_at);
+  ALTER TABLE designs ADD COLUMN IF NOT EXISTS ai_memory JSONB NOT NULL DEFAULT '{}'::jsonb;
 `;
 
 let dbReady = false;
@@ -163,9 +165,10 @@ const server = http.createServer(async (req, res) => {
       const body = (await readBody(req)) || {};
       const title = String(body.title || 'Untitled design').slice(0, 120);
       const design = body.design || { canvas: body.canvas || null, elements: [] };
+      const aiMemory = body.ai_memory && typeof body.ai_memory === 'object' ? body.ai_memory : {};
       const { rows } = await pool.query(
-        'INSERT INTO designs (title, design) VALUES ($1, $2) RETURNING id, title, created_at, updated_at',
-        [title, design],
+        'INSERT INTO designs (title, design, ai_memory) VALUES ($1, $2, $3) RETURNING id, title, created_at, updated_at',
+        [title, design, aiMemory],
       );
       console.log(`[designs] created ${rows[0].id} "${title}"`);
       return finish(201, { design: rows[0] });
@@ -183,11 +186,12 @@ const server = http.createServer(async (req, res) => {
         `UPDATE designs SET
            title = COALESCE($2, title),
            design = COALESCE($3, design),
-           thumbnail = COALESCE($4, thumbnail),
+           ai_memory = COALESCE($4, ai_memory),
+           thumbnail = COALESCE($5, thumbnail),
            updated_at = now()
          WHERE id = $1
          RETURNING id, title, updated_at`,
-        [idMatch[1], body.title ?? null, body.design ?? null, body.thumbnail ?? null],
+        [idMatch[1], body.title ?? null, body.design ?? null, body.ai_memory ?? null, body.thumbnail ?? null],
       );
       if (!rows.length) return finish(404, { error: 'not found' });
       return finish(200, { design: rows[0] });
@@ -201,8 +205,8 @@ const server = http.createServer(async (req, res) => {
 
     if (idMatch && req.method === 'POST' && idMatch[2] === '/duplicate') {
       const { rows } = await pool.query(
-        `INSERT INTO designs (title, design, thumbnail)
-         SELECT title || ' copy', design, thumbnail FROM designs WHERE id = $1 AND deleted_at IS NULL
+        `INSERT INTO designs (title, design, ai_memory, thumbnail)
+         SELECT title || ' copy', design, ai_memory, thumbnail FROM designs WHERE id = $1 AND deleted_at IS NULL
          RETURNING id, title, thumbnail, created_at, updated_at`,
         [idMatch[1]],
       );

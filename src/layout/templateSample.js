@@ -16,6 +16,7 @@
 import { instantiateTemplate, templateExample } from "./templates";
 import { ensurePaletteRoles } from "./paletteRoles";
 import { PALETTES } from "./palettes";
+import { imagePlaceholderDataUrl } from "./imagePlaceholder";
 import { buildDecorations, defaultDecorationSpecs, recommendDecorationSpecs } from "./decorations";
 
 /** Palette used when a template's type has no more specific mapping. */
@@ -105,12 +106,14 @@ function rgba(hex, alpha) {
   return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
 
-function photoPlaceholder(width, height, palette, query) {
-  const w = Math.max(1, Math.round(width));
-  const h = Math.max(1, Math.round(height));
-  // Use Unsplash public source with optional query
-  const queryStr = query ? `?query=${encodeURIComponent(query)}` : `?random`;
-  return `https://unsplash.it/${w}/${h}${queryStr}`;
+function photoPlaceholder(width, height, palette, query, seed = "") {
+  return imagePlaceholderDataUrl({
+    width,
+    height,
+    palette,
+    query: query ? String(query) : "",
+    seed,
+  });
 }
 
 function fitCopy(value, maxChars) {
@@ -237,6 +240,7 @@ export function sampleDesignForTemplate(
               box.height,
               palette,
               imageQueries[component.id] || component.describe,
+              component.id,
             ),
       });
       continue;
