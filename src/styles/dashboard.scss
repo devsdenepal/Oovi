@@ -1,0 +1,13 @@
+// Dashboard entry point.
+//
+// Layer order matters:
+//   1. tokens      — CSS custom properties from the shared config
+//   2. base        — shell, reset, focus behavior
+//   3. layout      — pages, navigation, hero, library frames
+//   4. components  — controls, cards, empty states
+//   5. responsive  — breakpoint overrides (loaded last)
+@use "dashboard/tokens";
+@use "dashboard/base";
+@use "dashboard/layout";
+@use "dashboard/components";
+@use "dashboard/responsive";

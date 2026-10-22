@@ -1,0 +1,37 @@
+@use "config" as *;
+
+// Responsive breakpoints are defined once in _config.scss.
+@mixin below($name) {
+  @media (max-width: bp($name)) {
+    @content;
+  }
+}
+
+@mixin above($name) {
+  @media (min-width: bp($name) + 1px) {
+    @content;
+  }
+}
+
+@mixin at-least($name) {
+  @media (min-width: bp($name)) {
+    @content;
+  }
+}
+
+@mixin hover-none {
+  @media (hover: none) {
+    @content;
+  }
+}
+
+@mixin reduced-motion {
+  @media (prefers-reduced-motion: reduce) {
+    @content;
+  }
+}
+
+@mixin focus-ring {
+  outline: 2px solid var(--dash-teal);
+  outline-offset: 2px;
+}

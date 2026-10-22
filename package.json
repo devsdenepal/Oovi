@@ -24,6 +24,7 @@
   },
   "devDependencies": {
     "playwright": "^1.64.0",
+    "sass": "^1.106.1",
     "vite": "^6.3.5"
   }
 }

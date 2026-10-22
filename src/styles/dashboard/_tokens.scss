@@ -1,0 +1,22 @@
+@use "config" as *;
+
+// Runtime design tokens. Palette, radii, motion, and layering are
+// emitted from the maps in _config.scss so they can be read or
+// overridden from any scoped dashboard theme.
+.dash {
+  @each $name, $value in $dash-colors {
+    --dash-#{$name}: #{$value};
+  }
+
+  @each $name, $value in $dash-radii {
+    --dash-radius-#{$name}: #{$value};
+  }
+
+  @each $name, $value in $dash-motion {
+    --dash-#{$name}: #{$value};
+  }
+
+  @each $name, $value in $dash-z {
+    --dash-z-#{$name}: #{$value};
+  }
+}

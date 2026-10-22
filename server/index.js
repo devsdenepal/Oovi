@@ -152,10 +152,18 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === 'GET' && path === '/api/designs') {
       const trashed = query.deleted === '1';
+      // Cards need the canvas dimensions to label the saved format. Read them
+      // from the stored design without loading full image payloads.
       const { rows } = await pool.query(
-        trashed
-          ? 'SELECT id, title, thumbnail, created_at, updated_at FROM designs WHERE deleted_at IS NOT NULL ORDER BY updated_at DESC LIMIT 100'
-          : 'SELECT id, title, thumbnail, created_at, updated_at FROM designs WHERE deleted_at IS NULL ORDER BY updated_at DESC LIMIT 100',
+        `SELECT d.id, d.title, d.thumbnail, d.created_at, d.updated_at,
+                CASE WHEN d.design->'canvas'->>'width' ~ '^[0-9]+([.][0-9]+)?$'
+                     THEN (d.design->'canvas'->>'width')::numeric::int END AS canvas_width,
+                CASE WHEN d.design->'canvas'->>'height' ~ '^[0-9]+([.][0-9]+)?$'
+                     THEN (d.design->'canvas'->>'height')::numeric::int END AS canvas_height
+         FROM designs d
+         WHERE ${trashed ? 'd.deleted_at IS NOT NULL' : 'd.deleted_at IS NULL'}
+         ORDER BY d.updated_at DESC
+         LIMIT 100`,
       );
       console.log(`[designs] list rows=${rows.length} trashed=${trashed}`);
       return finish(200, { designs: rows });

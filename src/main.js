@@ -1,7 +1,7 @@
 import "bootstrap/dist/css/bootstrap.min.css";
 import "./ui/tokens.css";
 import "./style.css";
-import "./dashboard.css";
+import "./styles/dashboard.scss";
 import { App } from "./app/App";
 import { Dashboard } from "./components/Dashboard";
 import { initLeftTabs } from "./ui/leftTabs";

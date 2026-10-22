@@ -1,0 +1,34 @@
+@use "config" as *;
+@use "mixins" as *;
+
+// ── Shell and reset ────────────────────────────────────────────────
+.dash {
+  height: 100vh;
+  height: 100dvh;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: layout("sidebar") minmax(0, 1fr);
+  overflow: hidden;
+  background: var(--dash-paper);
+  color: var(--dash-ink);
+  font-family: var(--oovi-font-ui);
+  transition: grid-template-columns var(--dash-ease);
+}
+
+.dash *,
+.dash *::before,
+.dash *::after {
+  box-sizing: border-box;
+}
+
+.dash :where(button, input, textarea, select) {
+  font: inherit;
+}
+
+.dash button {
+  cursor: pointer;
+}
+
+.dash :focus-visible {
+  @include focus-ring;
+}
