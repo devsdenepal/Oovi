@@ -18,7 +18,6 @@ import {
 } from "../ai/copySanitize";
 import { FEATURES } from "../config/features";
 import { searchPhotos, triggerDownload, orientationFor, choosePhoto } from "../ai/unsplash";
-import { imagePlaceholderDataUrl } from "../layout/imagePlaceholder";
 import { buildDensityRepair } from "../layout/densityRepair";
 import {
   createDesignMemory,
@@ -802,7 +801,7 @@ export class App {
             run: async () => {
               const t = Date.now();
               if (component.kind === "image") {
-                const fetched = await this._fetchImageComponent(component, activePlan);
+                const fetched = await this._fetchImageComponent(component);
                 console.log(`[build] fetched ${component.id} ${Date.now() - t}ms ${fetched ? fetched.note || "ok" : "FAILED"}`);
                 return { kind: "image", fetched };
               }
@@ -1348,11 +1347,11 @@ export class App {
    * Fetch phase of an image component. The subject comes from L1 and is led by
    * the tuning query only when L1 supplied none. Search goes through the local
    * Unsplash proxy, picks the best aspect fit among relevance-ranked results,
-   * and inlines the image as a data URL. When no honest result arrives, the
-   * region gets deterministic palette artwork — never a random photo and never
-   * a hotlink that can break PNG export.
+   * and inlines the image as a data URL. There is no image fallback: if the
+   * query or the Unsplash result is missing, this region fails and the final
+   * completeness gate blocks persistence.
    */
-  async _fetchImageComponent(component, plan = null) {
+  async _fetchImageComponent(component) {
     const box = component.box || {};
     const tStart = Date.now();
     if (isMockEnabled()) {
@@ -1365,25 +1364,10 @@ export class App {
       if (query && !candidates.includes(query)) candidates.push(query);
     }
     const query = candidates[0] || "";
-    const localArtwork = (reason) => {
-      console.warn(
-        `[build] image ${component.id} ${reason}${query ? ` for "${query}"` : ""} — using local palette artwork`,
-      );
-      return {
-        src: imagePlaceholderDataUrl({
-          width: box.width,
-          height: box.height,
-          palette: plan?.palette || {},
-          query,
-          seed: component.id,
-        }),
-        w: box.width,
-        h: box.height,
-        note: "palette artwork",
-        photographer: "",
-      };
-    };
-    if (!query) return localArtwork("has no image subject");
+    if (!query) {
+      console.warn(`[build] image ${component.id} has no image subject — failing region`);
+      return null;
+    }
 
     const orientation = orientationFor(box);
     for (const candidate of candidates.slice(0, 2)) {
@@ -1417,7 +1401,8 @@ export class App {
         console.warn(`[build] image ${component.id} search failed (${error.message})`);
       }
     }
-    return localArtwork("found no usable photo");
+    console.warn(`[build] image ${component.id} found no usable Unsplash photo — failing region`);
+    return null;
   }
 
   onReferenceAnalysis(analysis) {

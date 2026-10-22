@@ -1,11 +1,11 @@
 /**
- * Deterministic, local artwork placeholder.
+ * Deterministic artwork for an initial template sample.
  *
- * This is not a random stock image. It is a palette-derived abstract scene
- * used only when photo search has no honest result or a remote image cannot
- * be fetched into the canvas. The semantic query is kept in the SVG title so
- * the layer remains identifiable, but the pixels are generated from the
- * design's own colours and composition.
+ * Used only when a template is first placed on the canvas, before AI
+ * generation replaces its regions. It is never used as a fallback for an AI
+ * image region: those require a real Unsplash result and fail closed when one
+ * is unavailable. The semantic query stays in the SVG title so the sample
+ * remains identifiable.
  */
 
 import { ensurePaletteRoles } from "./paletteRoles";
@@ -84,8 +84,8 @@ export function imagePlaceholderDataUrl({ width = 800, height = 600, palette = {
   }).join("");
 
   const svg =
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" role="img" aria-label="${escapeXml(query || "palette artwork")}">` +
-    `<title>${escapeXml(query || "palette artwork")}</title>` +
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" role="img" aria-label="${escapeXml(query || "template sample artwork")}">` +
+    `<title>${escapeXml(query || "template sample artwork")}</title>` +
     `<defs>` +
     `<linearGradient id="sky" x1="0" y1="0" x2="1" y2="1">` +
     `<stop offset="0" stop-color="${roles.background}"/>` +

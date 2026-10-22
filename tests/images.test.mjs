@@ -40,7 +40,7 @@ test("image subject is a structural hand-off of the model's scene", () => {
   assert.deepEqual(imageQueryCandidates({}, ""), []);
 });
 
-test("local artwork is palette-derived and keeps the semantic query", () => {
+test("template sample artwork is palette-derived and keeps the semantic query", () => {
   const src = imagePlaceholderDataUrl({
     width: 480,
     height: 320,
