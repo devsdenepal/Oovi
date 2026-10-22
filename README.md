@@ -4,11 +4,11 @@ Oovi turns natural-language prompts into **fully editable graphic designs** | no
 
 ![Oovi editor generating a design](docs/screenshot.png)
 
-**Prompt → plan → validated Design DSL → editable canvas.**
+**Prompt to plan to validated Design DSL to editable canvas.**
 
 ## Quickstart
 
-**Prerequisites:** Node.js 18+ and PostgreSQL.
+**Prerequisites:** Node.js 18 and PostgreSQL.
 
 ```bash
 cp .env.example .env   # set your local values
@@ -16,7 +16,7 @@ npm install
 createdb oovi
 node scripts/db-probe.mjs
 
-# Terminal 1 | API + persistence (:3001)
+# Terminal 1 | API and persistence (:3001)
 npm run dev:api
 
 # Terminal 2 | editor UI (:5173)
@@ -35,7 +35,7 @@ Open `http://localhost:5173`, describe a design, and it opens in the editor.
 - **Query-driven imagery.** Unsplash searches are grounded in the brief, so images follow the prompt instead of a random asset.
 - **Closed decoration vocabulary.** The model picks circles, arcs, stars, dots, grids, squiggles, brackets, ribbons, pills, dividers, icons, or patterns; the renderer expands them into editable primitives.
 - **Copy that cannot ship broken.** A single copy deck writes all regions first. Strict repetition and deterministic guards catch duplicates, instruction leakage, meta-copy, and ungrounded claims.
-- **Quality + repair.** Generations are scored for coverage, balance, contrast, hierarchy, and hero presence; only failing regions are regenerated.
+- **Quality and repair.** Generations are scored for coverage, balance, contrast, hierarchy, and hero presence; only failing regions are regenerated.
 - **Export, persistence, offline mode.** PNG/JPG/SVG/PDF, Postgres autosave with soft-delete trash, and `?mock=1` for a network-free run.
 
 ## How it works
@@ -44,10 +44,10 @@ Open `http://localhost:5173`, describe a design, and it opens in the editor.
 Prompt
   > L1 goal        refine the brief                  src/ai/layerPrompt.js
   > L2 palette     choose a readable palette          src/ai/aiClient.js
-  > L3 template    choose + tune a layout             src/ai/aiClient.js
+  > L3 template    choose and tune a layout         src/ai/aiClient.js
   > L3c copy deck  write every region once            src/ai/copyPrompt.js
-  > L4 regions     DSL + Unsplash per region          src/ai/architectPrompt.js
-  > L5 color       palette + contrast repair          src/ai/colorCorrect.js
+  > L4 regions     DSL and Unsplash per region      src/ai/architectPrompt.js
+  > L5 color       palette and contrast repair      src/ai/colorCorrect.js
   > validate       structural checks                  src/design/designValidator.js
   > quality        non-mutating score                 src/ai/quality.js
   > render         editable Fabric objects            src/renderer/fabricRenderer.js
@@ -149,7 +149,7 @@ src/
   storage/       REST client for /api/designs
   ui/            Hash router, shell, toasts, brand tokens
 server/          Local API (stdlib node:http): designs CRUD, trash, asset/photo proxy
-api/             Shared serverless handlers (Vercel + local server)
+api/             Shared serverless handlers (Vercel and local server)
 scripts/         Probe scripts (db, api, history, quality, trash, …)
 tests/           Node test suites, run through the Vite bundler
 ```
@@ -160,8 +160,8 @@ Supporting docs: `DESIGN.md` (visual identity and tokens).
 
 | Command | Purpose |
 |---|---|
-| `npm run dev` | Vite dev server (`:5173`, proxies `/api` → `:3001`) |
-| `npm run dev:api` | Local API + Postgres backend (`:3001`) |
+| `npm run dev` | Vite dev server (`:5173`, proxies `/api` to `:3001`) |
+| `npm run dev:api` | Local API and Postgres backend (`:3001`) |
 | `npm run build` | Production build |
 | `npm run preview` | Preview the production build |
 | `npm test` | Run the full test suite |
