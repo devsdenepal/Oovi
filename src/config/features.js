@@ -6,21 +6,21 @@
  * reads the same setting.
  *
  * Density:
- *   layout.gutters  — gap multiplier per named density (lower = tighter)
- *   layout.density  — the density new template builds start with
- *   layout.coverageTarget — minimum share of a reserved box L4 should fill
- *   layout.regionFill — minimum rendered fill per role before a region is
+ *   layout.gutters  | gap multiplier per named density (lower = tighter)
+ *   layout.density  | the density new template builds start with
+ *   layout.coverageTarget | minimum share of a reserved box L4 should fill
+ *   layout.regionFill | minimum rendered fill per role before a region is
  *                      treated as under-built (not a style preference)
- *   layout.densityRepair — re-tune the same template, then replace any
+ *   layout.densityRepair | re-tune the same template, then replace any
  *                      remaining sparse region with deterministic composition
- *   decoration.*    — shape-count multiplier, minimum pieces and density
+ *   decoration.*    | shape-count multiplier, minimum pieces and density
  *
  * Copy:
- *   strictRepetition — reject a region that reuses another region's
+ *   strictRepetition | reject a region that reuses another region's
  *                      distinctive words (greetings/brand sign-offs excepted)
- *   repairPasses     — number of focused copy-deck rewrite calls
- *   maxRegionRepairs — most regions regenerated per repair pass
- *   regenerateBadCopy — retry L4 when its copy fails validation instead of
+ *   repairPasses     | number of focused copy-deck rewrite calls
+ *   maxRegionRepairs | most regions regenerated per repair pass
+ *   regenerateBadCopy | retry L4 when its copy fails validation instead of
  *                      dropping the text in the final sanitizer
  */
 

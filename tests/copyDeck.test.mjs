@@ -276,7 +276,7 @@ test("copy validation rejects brand-only headlines and design labels", () => {
     id: "headline-main",
     role: "headline",
     kind: "dsl",
-    describe: "what is being awarded — the largest type on the canvas",
+    describe: "what is being awarded | the largest type on the canvas",
     maxChars: 40,
   };
   assert.match(copyProblem(["Graphilla Technology"], headline, GOAL, ""), /occasion|greeting/);
@@ -342,7 +342,7 @@ test("copy validation accepts a coherent Diwali deck", () => {
     id: "headline-main",
     role: "headline",
     kind: "dsl",
-    describe: "what is being awarded — the largest type on the canvas",
+    describe: "what is being awarded | the largest type on the canvas",
     maxChars: 40,
   };
   const tagline = {
@@ -374,7 +374,7 @@ test("copy validation accepts a coherent Diwali deck", () => {
 
 test("copy validation accepts the expected Diwali lines", () => {
   assert.equal(copyProblem(["Happy Diwali"], REGIONS[0], GOAL, ""), "");
-  assert.equal(copyProblem(["— Graphilla Technology"], REGIONS[1], GOAL, ""), "");
+  assert.equal(copyProblem(["| Graphilla Technology"], REGIONS[1], GOAL, ""), "");
   assert.equal(copyProblem(["Happy Diwali from Graphilla Technology"], REGIONS[2], GOAL, ""), "");
 });
 

@@ -2,12 +2,12 @@ import 'dotenv/config';
 import { register } from 'node:module';
 import pg from 'pg';
 
-// src/ uses extensionless relative imports — resolve them for plain node.
+// src/ uses extensionless relative imports | resolve them for plain node.
 register(new URL('./ext-loader.mjs', import.meta.url));
 const { validateDesign } = await import('../src/design/designValidator.js');
 
 // Revalidates every saved design in local Postgres with the CURRENT
-// validator. Save never validates (persist path), open always does — so a
+// validator. Save never validates (persist path), open always does | so a
 // design can save fine and then refuse to open. This catches that drift.
 const pool = new pg.Pool({
   host: process.env.PGHOST || 'localhost',

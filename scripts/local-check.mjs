@@ -16,10 +16,10 @@ try {
   const names = (data?.models || []).map((m) => m.name);
   console.log(`reachable=${res.ok} models=[${names.join(', ')}]`);
   if (!names.some((n) => n === MODEL || n.startsWith(MODEL.split(':')[0]))) {
-    console.warn(`WARN: model "${MODEL}" not installed — run: ollama pull ${MODEL}`);
+    console.warn(`WARN: model "${MODEL}" not installed | run: ollama pull ${MODEL}`);
   }
 } catch (error) {
-  console.error(`UNREACHABLE (${error.message}) — is Ollama running? https://ollama.com`);
+  console.error(`UNREACHABLE (${error.message}) | is Ollama running? https://ollama.com`);
   console.log('LOCAL CHECK DONE');
   process.exit(0);
 }
@@ -85,12 +85,12 @@ try {
   const bad = els.filter((e) => !fields.every((f) => e[f] !== undefined) || (e.type === 'text' && !e.content));
   console.log(`parsed: ${els.length} elements, ${bad.length} malformed`);
 } catch {
-  console.log('parsed: FAILED — not JSON');
+  console.log('parsed: FAILED | not JSON');
 }
 
 // 5. Context pressure: a prompt near the default context window with a big
 // system block. Our real plan prompt is ~3.8k tokens, so a small n_ctx
-// (Ollama defaults to 2048) truncates it — raise OLLAMA_CONTEXT_LENGTH.
+// (Ollama defaults to 2048) truncates it | raise OLLAMA_CONTEXT_LENGTH.
 console.log('--- context: oversized prompt ---');
 const bigSys = SYS + ' ' + 'Poster design theory placeholder. '.repeat(120);
 const r5 = await chat(

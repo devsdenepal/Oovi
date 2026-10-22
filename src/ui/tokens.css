@@ -1,11 +1,11 @@
 /* ══════════════════════════════════════════════════════════════
-   OOVI BRAND TOKENS — the single rulebook for color, type, spacing,
+   OOVI BRAND TOKENS | the single rulebook for color, type, spacing,
    radius, elevation, motion and layering.
    Customize the brand by editing THIS file only. Everything in
    style.css consumes these variables; no hex/font lives there.
    Spacing/radius/elevation tokens are defined here and adopted by all
    new code; pre-existing padding/margin literals migrate in Goal 8.
-   Light theme only — no dark mode.
+   Light theme only | no dark mode.
    ══════════════════════════════════════════════════════════════ */
 
 :root {

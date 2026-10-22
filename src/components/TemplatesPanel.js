@@ -1,5 +1,5 @@
 /**
- * TemplatesPanel — the manual, no-AI template library in the left sidebar.
+ * TemplatesPanel | the manual, no-AI template library in the left sidebar.
  *
  * Canva's template tab is a visual browser: small previews grouped by kind,
  * searchable, and a click applies the layout. This panel uses the same
@@ -194,7 +194,7 @@ export class TemplatesPanel {
 
     this.container.classList.add("tpl-panel");
     this.container.innerHTML = `
-      <p class="tpl-intro">Start from a layout. Sample text and image boxes are editable — click any text on the canvas to change it.</p>
+      <p class="tpl-intro">Start from a layout. Sample text and image boxes are editable. Click any text on the canvas to change it.</p>
       <label class="tpl-search" for="tpl-search-input">
         <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
         <input id="tpl-search-input" type="search" placeholder="Search templates" autocomplete="off" maxlength="60" />

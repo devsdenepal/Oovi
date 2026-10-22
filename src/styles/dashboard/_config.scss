@@ -1,0 +1,279 @@
+@use "sass:map";
+
+// ══════════════════════════════════════════════════════════════════
+// Dashboard configuration
+//
+// This file is the single place to tune the workspace UI. Font sizes,
+// spacing, component dimensions, breakpoints, and motion are all maps.
+// Change a value here and the whole dashboard follows.
+// ══════════════════════════════════════════════════════════════════
+
+// ── Palette ────────────────────────────────────────────────────────
+$dash-colors: (
+  "paper": #f1f0ea,
+  "surface": #ffffff,
+  "surface-soft": #f7f5ef,
+  "ink": #15171a,
+  "ink-hover": #2c3034,
+  "muted": #62665f,
+  "faint": #8e9188,
+  "placeholder": #9c9f96,
+  "hint": #a0a39a,
+  "line": #dcd9cf,
+  "line-strong": #c9c5b8,
+  "mat": #e8e4d9,
+  "teal": #0f766e,
+  "teal-strong": #0b5f58,
+  "teal-soft": #ddf2ee,
+  "orange": #c2410c,
+  "orange-strong": #9a3412,
+  "orange-soft": #fbe7dd,
+  "side": #17191c,
+  "side-2": #22262b,
+  "side-3": #2a3035,
+  "side-ink": #f4f3ee,
+  "side-muted": #8b9297,
+  "side-label": #70777c,
+  "side-text": #c7cdd1,
+  "side-icon": #7f878c,
+  "side-count-bg": #24292e,
+  "side-count-ink": #92999e,
+  "side-count-active-bg": #344047,
+  "side-count-active-ink": #b5f3e8,
+  "side-active-icon": #5eead4,
+  "side-line": #2c3237,
+  "side-line-hover": #33393f,
+  "side-strong": #dce1e3,
+  "side-note": #667077,
+  "side-scroll": #3b4147,
+  "white": #ffffff,
+  "white-teal": #f5fffc,
+  "error-border": #ecc8b8,
+  "error-bg": #fff5ef,
+  "error-ink": #7e3217,
+  "error-muted": #94513a,
+  "error-strong": #a1350f,
+  "danger-border": #edcdc1,
+  "danger-border-hover": #dba994,
+  "skeleton": #e7e4db,
+  "card-image-line": rgba(21, 23, 26, 0.09),
+  "scrim": rgba(21, 23, 26, 0.45),
+);
+
+// ── Type scale ─────────────────────────────────────────────────────
+// Every text size in the dashboard resolves through this map.
+$dash-font-sizes: (
+  "3xs": 7px,
+  "2xs": 8px,
+  "xs": 9px,
+  "sm": 10px,
+  "md": 11px,
+  "base": 12px,
+  "lg": 13px,
+  "xl": 14px,
+  "2xl": 15px,
+  "3xl": 16px,
+  "4xl": 19px,
+  "hero": clamp(34px, 3.45vw, 48px),
+  "hero-stacked": 44px,
+  "hero-mobile": clamp(34px, 7vw, 44px),
+  "input-mobile": 16px,
+);
+
+// ── Spacing scale ──────────────────────────────────────────────────
+// Used by the sp() helper for margins, padding, gaps, and offsets.
+$dash-space: (
+  0: 0,
+  1: 1px,
+  2: 2px,
+  3: 3px,
+  4: 4px,
+  5: 5px,
+  6: 6px,
+  7: 7px,
+  8: 8px,
+  9: 9px,
+  10: 10px,
+  11: 11px,
+  12: 12px,
+  13: 13px,
+  14: 14px,
+  15: 15px,
+  16: 16px,
+  17: 17px,
+  18: 18px,
+  19: 19px,
+  20: 20px,
+  21: 21px,
+  22: 22px,
+  23: 23px,
+  24: 24px,
+  25: 25px,
+  26: 26px,
+  28: 28px,
+  30: 30px,
+  32: 32px,
+  34: 34px,
+  36: 36px,
+  40: 40px,
+  42: 42px,
+  46: 46px,
+  48: 48px,
+  54: 54px,
+  64: 64px,
+);
+
+// ── Radii ──────────────────────────────────────────────────────────
+$dash-radii: (
+  "sharp": 2px,
+  "micro": 3px,
+  "control": 4px,
+  "field": 5px,
+  "chip": 7px,
+  "card": 8px,
+  "mark": 9px,
+  "panel": 12px,
+  "frame": 14px,
+  "composer": 15px,
+  "pill": 999px,
+);
+
+// ── Layout and component dimensions ────────────────────────────────
+$dash-layout: (
+  "sidebar": 248px,
+  "sidebar-collapsed": 76px,
+  "sidebar-mobile": 280px,
+  "sidebar-mobile-offset": 40px,
+  "brand-mark": 34px,
+  "top-brand": 27px,
+  "icon-button": 32px,
+  "icon-button-mobile": 36px,
+  "nav-item": 40px,
+  "nav-icon": 15px,
+  "nav-count-min": 20px,
+  "side-spacer": 32px,
+  "topbar": 64px,
+  "topbar-mobile": 60px,
+  "content-max": 1180px,
+  "hero-gap": 48px,
+  "hero-gap-stacked": 24px,
+  "hero-copy-max": 590px,
+  "hero-copy-stacked-max": 700px,
+  "sub-max": 410px,
+  "sub-stacked-max": 560px,
+  "composer-stacked-max": 820px,
+  "search-width": 310px,
+  "search-vw": 30vw,
+  "search-width-tablet": 300px,
+  "search-vw-tablet": 36vw,
+  "search-height": 35px,
+  "search-height-tablet": 40px,
+  "new-height": 35px,
+  "new-height-tablet": 38px,
+  "new-width-compact": 38px,
+  "prompt-min": 106px,
+  "preset-min": 40px,
+  "preset-frame-w": 30px,
+  "preset-frame-h": 24px,
+  "generate-height": 38px,
+  "generate-height-tablet": 42px,
+  "custom-input-w": 64px,
+  "custom-input-h": 28px,
+  "custom-input-w-tablet": 72px,
+  "custom-input-h-tablet": 34px,
+  "sort-height": 32px,
+  "sort-height-tablet": 38px,
+  "chip-height": 29px,
+  "chip-height-tablet": 36px,
+  "quiet-height": 30px,
+  "quiet-height-tablet": 36px,
+  "grid-min": 240px,
+  "grid-gap": 18px,
+  "doc-icon": 30px,
+  "doc-icon-touch": 36px,
+  "skeleton-title-h": 12px,
+  "skeleton-meta-h": 7px,
+  "skeleton-footer-h": 30px,
+  "rename-size": 26px,
+  "rename-size-touch": 30px,
+  "empty-art": 154px,
+  "empty-art-tablet": 132px,
+  "empty-art-compact": 112px,
+  "empty-mini-w": 48px,
+  "empty-mini-h": 36px,
+  "empty-mini-card-w": 34px,
+  "empty-mini-card-h": 25px,
+  "empty-cta-height": 34px,
+);
+
+// ── Breakpoints ────────────────────────────────────────────────────
+// Used through the below(), above(), and at-least() mixins.
+$dash-breakpoints: (
+  "wide": 1400px,
+  "stacked": 1240px,
+  "editor-condense": 1120px,
+  "tablet": 900px,
+  "mobile": 720px,
+  "compact": 520px,
+  "narrow": 460px,
+  "tiny": 360px,
+  "micro": 294px,
+);
+
+// ── Motion ─────────────────────────────────────────────────────────
+$dash-motion: (
+  "ease": 180ms cubic-bezier(0.2, 0.7, 0.3, 1),
+  "drawer": 220ms cubic-bezier(0.2, 0.7, 0.3, 1),
+  "fade": 220ms ease,
+  "image": 240ms cubic-bezier(0.2, 0.7, 0.3, 1),
+  "pulse": 1.5s ease-in-out,
+);
+
+// ── Layering ───────────────────────────────────────────────────────
+$dash-z: (
+  "topbar": 20,
+  "sidebar": 30,
+  "scrim": 40,
+  "sidebar-mobile": 50,
+);
+
+// ── Accessibility ──────────────────────────────────────────────────
+$dash-a11y: (
+  "reduced-motion-duration": 0.01ms,
+);
+
+// ── Token helpers ──────────────────────────────────────────────────
+@function dash-token($map, $key, $name) {
+  @if not map.has-key($map, $key) {
+    @error "Unknown #{$name} token `#{$key}`.";
+  }
+  @return map.get($map, $key);
+}
+
+@function fs($key) {
+  @return dash-token($dash-font-sizes, $key, "font-size");
+}
+
+@function sp($key) {
+  @return dash-token($dash-space, $key, "spacing");
+}
+
+@function layout($key) {
+  @return dash-token($dash-layout, $key, "layout");
+}
+
+@function bp($key) {
+  @return dash-token($dash-breakpoints, $key, "breakpoint");
+}
+
+@function motion($key) {
+  @return dash-token($dash-motion, $key, "motion");
+}
+
+@function layer($key) {
+  @return dash-token($dash-z, $key, "layer");
+}
+
+@function a11y($key) {
+  @return dash-token($dash-a11y, $key, "accessibility");
+}

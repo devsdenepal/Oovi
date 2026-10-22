@@ -1,6 +1,6 @@
 /**
  * Patch prompt (Goal 4): asks the model for a PATCH against the live
- * design — changed props only — never a full redesign.
+ * design | changed props only | never a full redesign.
  */
 
 import { hasDesignMemory, memoryForPrompt } from "../memory/designMemory";
@@ -52,7 +52,7 @@ export function buildPatchPrompt(message, design, selectedIds = [], memory = nul
     `Editable props: x, y, width, height, radius, angle, opacity, content, fontSize (4-400), fontWeight, fontFamily, textAlign, lineHeight, charSpacing, fill, stroke, strokeWidth, cornerRadius.`,
     `Coordinates are pixels on a ${design.canvas.width}x${design.canvas.height} canvas. Keep x/y >= 0 and sizes inside the canvas.`,
     locked.length ? `Locked (never touch): ${locked.join(", ")}.` : "Nothing is locked.",
-    selectedIds.length ? `User selection: ${selectedIds.join(", ")} — prefer editing these.` : "No selection — infer the target from the request.",
+    selectedIds.length ? `User selection: ${selectedIds.join(", ")} | prefer editing these.` : "No selection | infer the target from the request.",
     "Max 20 ops. Unknown ids fail validation, so only use ids from the design below.",
     memoryBlock,
     "",

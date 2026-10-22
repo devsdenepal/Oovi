@@ -1,7 +1,7 @@
 import { contrastRatio, evaluateDesign } from '../src/ai/quality.js';
 import { register } from 'node:module';
 
-// src/ uses extensionless relative imports — resolve them for plain node.
+// src/ uses extensionless relative imports | resolve them for plain node.
 register(new URL('./ext-loader.mjs', import.meta.url));
 const { validateDesign } = await import('../src/design/designValidator.js');
 
@@ -276,8 +276,8 @@ const onArt = {
 }
 
 // 23. Validator: group-relative negatives + off-canvas positions open.
-// (Save persists them — Fabric children are group-relative, drags go
-// off-canvas — so rejecting them bricked saved projects.)
+// (Save persists them | Fabric children are group-relative, drags go
+// off-canvas | so rejecting them bricked saved projects.)
 const negGroup = {
   canvas: { width: 1200, height: 630, background: '#FFFFFF' },
   elements: [

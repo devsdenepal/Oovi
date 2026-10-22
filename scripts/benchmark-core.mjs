@@ -6,7 +6,7 @@
  *
  * It measures, over a hand-labelled set of realistic briefs:
  *   - top-1 and top-3 accuracy (does the correct layout make the shortlist?);
- *   - how often retrieval abstains (the brief reaches the free-form L3 — the
+ *   - how often retrieval abstains (the brief reaches the free-form L3 | the
  *     slow path, so the abstain rate is a speed number, not just an accuracy
  *     number);
  *   - how often retrieval decides for free instead of asking the model;
@@ -72,7 +72,7 @@ const CASES = [
 /**
  * A brief shaped like the one the pipeline actually passes: a REAL L1 goal.
  *
- * `mustInclude` is not decoration — a real goal always carries 3-7 content
+ * `mustInclude` is not decoration | a real goal always carries 3-7 content
  * requirements ("Event details (Date, Time, Venue TBA)", "Office closing/wish").
  * An earlier version of this harness omitted them, which made every score look
  * healthy while the app abstained on the same brief: the benchmark was measuring
@@ -118,7 +118,7 @@ function report(title, rows, extra) {
       ? r.shortlist
           .map((id, i) => (r.covers?.[i] !== undefined ? `${id} ${(r.covers[i] * 100).toFixed(0)}%` : id))
           .join(", ")
-      : "—";
+      : "|";
     console.log(
       r.prompt.slice(0, 50).padEnd(52),
       r.shape.padEnd(8),
@@ -206,7 +206,7 @@ function cosine(a, b) {
  * Vectors for the WHOLE library, embedded once and cached on disk.
  *
  * The pool is a per-canvas subset of the same 30 documents, so embedding each
- * shape's pool separately would encode the same text up to five times — five
+ * shape's pool separately would encode the same text up to five times | five
  * times the CPU on a box where a 30-document prefill takes minutes. One corpus
  * pass, then every case just looks its candidates up by id.
  */

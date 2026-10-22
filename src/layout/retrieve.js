@@ -1,5 +1,5 @@
 /**
- * Template retrieval (Phase 3) — choose a layout by SIMILARITY, not by a
+ * Template retrieval (Phase 3) | choose a layout by SIMILARITY, not by a
  * hand-maintained keyword list.
  *
  * Phase 2 asked L3 to pick from a fixed menu of every template and then tune
@@ -7,7 +7,7 @@
  * flat list spends the model's attention on templates that cannot possibly
  * fit. Retrieval fixes both:
  *
- *   1. hard filters first — only templates whose declared size buckets include
+ *   1. hard filters first | only templates whose declared size buckets include
  *      this canvas compete, so a story-shaped canvas never sees a banner;
  *   2. rank the survivors against the brief: BM25 over a per-template document
  *      (label, blurb, type, description, moods, tags, keywords, slot
@@ -16,7 +16,7 @@
  *   3. score CONFIDENCE as the share of the brief's information the best
  *      template explains. A brief nothing matches (a niche theme, or a brief
  *      in another script whose tokens never appear in the corpus) scores ~0 and
- *      returns no candidates — the signal to fall back to the free-form L3
+ *      returns no candidates | the signal to fall back to the free-form L3
  *      instead of silently picking a wrong layout.
  *
  * BM25 is the default because it is free, synchronous and deterministic: no
@@ -50,7 +50,7 @@ const STOP = new Set([
  * Diwali announcement poster") can carry three adjectives no layout vocabulary
  * contains and still be a perfect brief for `hero-split`. What the threshold
  * actually has to reject is a template that shares one accidental word with a
- * brief it does not fit — and a brief with no vocabulary overlap at all scores
+ * brief it does not fit | and a brief with no vocabulary overlap at all scores
  * exactly 0 whatever the threshold is (that is what the two negative controls
  * in the benchmark check, and they abstain at every value).
  */
@@ -130,9 +130,9 @@ const SUFFIXES = ["ations", "ation", "ments", "ment", "ings", "ing", "ions", "io
  *
  *   - a light suffix strip, so "donation"/"donate" and "opening"/"open" are the
  *     same term (a designer writes "blood donation drive", the corpus says
- *     "donate" — without this, coverage 0 and a needless fallback);
+ *     "donate" | without this, coverage 0 and a needless fallback);
  *   - non-ASCII input (a brief written in another script) yields no tokens at
- *     all, which is exactly the "nothing matched" signal the caller needs —
+ *     all, which is exactly the "nothing matched" signal the caller needs |
  *     never a wrong match.
  */
 export function stem(word) {
@@ -159,13 +159,13 @@ export function stem(word) {
 /**
  * The words retrieval is allowed to reason about.
  *
- * Deliberately NOT `briefText()` — that is the prompt's own one-line brief and
+ * Deliberately NOT `briefText()` | that is the prompt's own one-line brief and
  * includes `mustInclude`, the checklist of things that must appear in the copy.
  * Those are content requirements ("Event details (Date, Time, Venue TBA)",
  * "Office closing/wish"): no layout vocabulary will ever describe them, and
  * because coverage is a SHARE of the brief's terms they quietly sank every
  * score. The Diwali brief retrieved `hero-split` at 51% coverage in the
- * benchmark and abstained at 16% in the app — retrieval never fired in
+ * benchmark and abstained at 16% in the app | retrieval never fired in
  * production while the benchmark looked healthy, because the benchmark fed it a
  * hand-written `{summary, style}` object instead of a real L1 goal.
  *
@@ -179,7 +179,7 @@ export function retrievalText(brief) {
   // last three are generic design words ("festive", "warm", "clean modern",
   // "colleagues") that almost every template's blurb can claim, so they inflate
   // the denominator of the coverage share without discriminating between
-  // layouts — including them dropped top-1 from 60 % to 35 % on the labelled
+  // layouts | including them dropped top-1 from 60 % to 35 % on the labelled
   // set. Style belongs to L2 (the palette), not to which layout to use.
   return [brief.summary, brief.subject, brief.purpose, join(brief.keywords)]
     .filter((s) => typeof s === "string" && s.trim())
@@ -198,8 +198,8 @@ export function tokenize(text) {
 /**
  * The searchable document for one template.
  *
- * Deliberately built from CURATED metadata only — label, blurb, type,
- * description, moods, tags, keywords and the slot descriptions — and NOT from
+ * Deliberately built from CURATED metadata only | label, blurb, type,
+ * description, moods, tags, keywords and the slot descriptions | and NOT from
  * the example copy. Examples are written to fit a slot, not to describe a
  * layout, and they leak their own domain: a class-schedule example that
  * mentions a yoga mat made "the mating habits of the glass frog" rank layout
@@ -224,7 +224,7 @@ export function templateDocument(template) {
 }
 
 /**
- * The templates that could fit this canvas at all — the hard filter.
+ * The templates that could fit this canvas at all | the hard filter.
  * `extra` is where user-saved layouts join the library (same rules: they only
  * compete on canvases whose shape they were saved from).
  */
@@ -300,14 +300,14 @@ export function createRanker(documents) {
  * the retrieval benchmark cannot drift apart:
  *
  *   - CANDIDATES are the templates that clear the threshold, capped at `limit`
- *     — not "the top three no matter what";
+ *     | not "the top three no matter what";
  *   - exactly one candidate -> taken for free (0 tokens);
  *   - two or three -> the model arbitrates the shortlist;
  *   - none -> the caller falls back to the free-form L3.
  *
  * The first version of this took the top hit whenever its coverage was high,
  * which quietly picked the `ticket` layout (64%) over `centered-poster` (36%)
- * for "wedding invitation card" — both genuinely share vocabulary, and the
+ * for "wedding invitation card" | both genuinely share vocabulary, and the
  * right answer needs judgement, not a threshold. Being decisive is only safe
  * when there is nothing to decide between.
  *
@@ -338,7 +338,7 @@ export function selectFromScored(scored, options = {}) {
  * then apply the L1 scope biases (design type, composition, industry).
  *
  * The bias is multiplicative on the BM25 score and capped, so it can only
- * reorder templates that already match the brief's vocabulary — it can never
+ * reorder templates that already match the brief's vocabulary | it can never
  * lift a template the brief has nothing to do with. `scope` is reported per
  * candidate so a live run shows WHY a layout moved.
  *
@@ -371,7 +371,7 @@ export function retrieveTemplates(goal, canvas, options = {}) {
       // Scope raises the EFFECTIVE coverage, because coverage is what the
       // threshold and the ordering read. A brief with no vocabulary overlap
       // still has base === 0 at every threshold, so the abstain guarantee is
-      // untouched — this only helps a template that already matched at least
+      // untouched | this only helps a template that already matched at least
       // one term.
       return {
         id: template.id,

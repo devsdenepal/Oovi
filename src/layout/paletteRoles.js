@@ -14,7 +14,7 @@
  *   background     the canvas
  *   surface        cards / panels / bars that sit ON the canvas
  *   textPrimary    body copy and headings on `background` or `surface`
- *   textSecondary  supporting copy, captions, facts — quieter than primary
+ *   textSecondary  supporting copy, captions, facts | quieter than primary
  *   accent         the one rationed hue (rules, badges, highlights)
  *   onAccent       text that sits ON `accent`
  *   ctaSurface     a call-to-action button/bar
@@ -26,7 +26,7 @@
  * for two reasons: 15 palettes × 10 roles is 150 values nobody will maintain,
  * and a derived role is guaranteed to be readable against its own backdrop
  * (which is asserted in tests/palettes.test.mjs). The derivation is pure and
- * deterministic — the same palette always yields the same roles, in node and in
+ * deterministic | the same palette always yields the same roles, in node and in
  * the browser.
  *
  * Pure functions: no Fabric, no network.
@@ -152,7 +152,7 @@ function readable(against, candidates, min) {
 /**
  * Derives the full semantic role set from the three base colours.
  *
- * The rules are deliberately conservative — they nudge the base palette into a
+ * The rules are deliberately conservative | they nudge the base palette into a
  * complete, readable system rather than inventing a new look:
  *
  *   - `surface` moves the background slightly toward the ink, so cards read as
@@ -287,7 +287,7 @@ export function paletteColor(palette, role, fallback = "#111111") {
  * Region-level colour assignment, applied to a component's elements before
  * they reach the editor.
  *
- * This is NOT a replacement for L5 `correctColors()` — it is the cheap first
+ * This is NOT a replacement for L5 `correctColors()` | it is the cheap first
  * pass that makes the palette true at the moment a region lands. Text whose
  * fill is already a palette role is left alone (so a two-tone headline that
  * uses `accent` and `textPrimary` survives); text that invented a hue is

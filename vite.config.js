@@ -5,7 +5,7 @@ export default defineConfig({
     port: 5173,
     proxy: {
       // Local API backend (server/index.js). Falls through to Vite's
-      // 404 when the backend isn't running — callers degrade gracefully.
+      // 404 when the backend isn't running | callers degrade gracefully.
       "/api": {
         target: "http://localhost:3001",
         changeOrigin: true,

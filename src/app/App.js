@@ -253,7 +253,7 @@ export class App {
       this._syncContextBar(objects);
       this._updateAssistantContext(objects);
       const first = objects && objects[0];
-      if (this.devRole) this.devRole.textContent = first ? String(first.elementRole || "—") : "—";
+      if (this.devRole) this.devRole.textContent = first ? String(first.elementRole || "None") : "None";
     };
     this.editor.onDirty = () => {
       this.scheduleSave();
@@ -267,7 +267,7 @@ export class App {
   async boot() {
     // Start with an empty canvas restricted to the default design-type
     // preset (Facebook Post). Generation only runs when the user presses
-    // Generate — never automatically on startup.
+    // Generate | never automatically on startup.
     const preset = this.designPreset;
     const placeholder = {
       canvas: { width: preset.width, height: preset.height, background: "#F5F5F7" },
@@ -300,7 +300,7 @@ export class App {
       // private mode: sidebar simply starts open
     }
     document.getElementById("exit-preview")?.addEventListener("click", () => this.togglePreview(false));
-    this.assistant.pushAssistant("Select something, then describe a change. Offline? Add ?mock=1 to the URL.");
+    this.assistant.pushAssistant("Select a layer, then describe a change.");
     this._updateAssistantContext([]);
     let pending = "";
     try {
@@ -416,7 +416,7 @@ export class App {
 
   /**
    * Architected path: choose a template, show its regions immediately, then
-   * fill them one by one — DSL text/shapes through the existing pipeline,
+   * fill them one by one | DSL text/shapes through the existing pipeline,
    * photos through a prompt-grounded Unsplash search. Each component is its
    * own undo entry.
    */
@@ -459,13 +459,13 @@ export class App {
         status("2/5 Choosing the palette…");
         const palette = await planPalette(goal, canvas, live("2/5 palette"));
         this.assistant.pushAssistant(
-          `Palette: ${palette.background} / ${palette.ink} / ${palette.accent} — ${palette.style}` +
+          `Palette: ${palette.background} / ${palette.ink} / ${palette.accent}. Style: ${palette.style}` +
             `${palette.source === "library" ? " (library)" : ""}.`,
         );
         status("3/5 Choosing a template…");
         plan = await planTemplate(goal, palette, canvas, live("3/5 template"), { rawPrompt: prompt });
         this.assistant.pushAssistant(
-          `Template: "${plan.template}" (${plan.tuning.variant}, ${plan.tuning.density}) — ${plan.components.length} regions.`,
+          `Template: "${plan.template}" (${plan.tuning.variant}, ${plan.tuning.density}), ${plan.components.length} regions.`,
         );
       } catch (error) {
         console.error("[architect] template planning failed:", error);
@@ -553,7 +553,7 @@ export class App {
       };
       if (showTemplateSample(plan)) {
         this.assistant.pushAssistant(
-          `Showing template "${plan.template}" — ${plan.components.length} regions. Replacing each region with content from your prompt…`,
+          `Showing template "${plan.template}". ${plan.components.length} regions. Replacing each region with content from your prompt…`,
         );
       }
       this._updateCanvasMeta(canvas);
@@ -579,7 +579,7 @@ export class App {
         const details = (unresolved.length ? unresolved : copyDeck.rejected || [])
           .map((entry) => `${entry.id || entry.component?.id || "region"}: ${entry.reason || "no approved copy"}`)
           .join("; ");
-        throw new Error(`Copy deck incomplete — ${details || "no approved copy for every text region"}`);
+        throw new Error(`Copy deck incomplete: ${details || "no approved copy for every text region"}`);
       }
       plan = {
         ...plan,
@@ -614,7 +614,7 @@ export class App {
       //
       // The on-device model serves ONE generation at a time
       // (OLLAMA_NUM_PARALLEL=1). Fanning component calls out does not make
-      // them faster — Ollama just queues them, and while queued they receive
+      // them faster | Ollama just queues them, and while queued they receive
       // no bytes, so a queued request eventually dies on a client timeout
       // ("fetch failed") while the total wall clock stays the same. So run
       // them strictly serially: same speed, no queue-timeout failures.
@@ -714,7 +714,7 @@ export class App {
         // Template sample elements for one region stay on the canvas until
         // the region's validated content is ready; if generation fails, they
         // are the fallback so the template never loses a region.
-        status(`4/5 Adding text — ${n} regions (serially, on-device model)…`);
+        status(`4/5 Adding text: ${n} regions (serially, on this device)…`);
         const applyOne = async (q, settled) => {
           const { component, i } = queue[q];
           out.done += 1;
@@ -731,7 +731,7 @@ export class App {
             const kept = (placeholders.get(component.id) || []).length > 0;
             this.assistant.pushAssistant(
               `${component.id} skipped: ${settled && settled.error ? settled.error.message : "unknown error"}` +
-                `${kept ? " — kept the template sample." : ""}`,
+                `${kept ? " Kept the template sample." : ""}`,
               "error",
             );
           } else if (settled.value.kind === "image") {
@@ -762,7 +762,7 @@ export class App {
                   : fetched.note || "";
                 console.log(`[build] placed ${component.id} image at=${at}`);
                 this.assistant.pushAssistant(
-                  `+ ${component.id} (image${imagetag ? `, ${imagetag}` : ""})`,
+                  `Added ${component.id} (image${imagetag ? `, ${imagetag}` : ""})`,
                 );
               } catch (error) {
                 out.failed += 1;
@@ -784,7 +784,7 @@ export class App {
               placed.push({ i, count: res.applied.length });
               note(component.id, res.applied.length, res.changedIds || []);
               console.log(`[build] placed ${component.id} ${res.applied.length} pieces at=${at}`);
-              this.assistant.pushAssistant(`+ ${component.id} (${res.applied.length} pieces)`);
+              this.assistant.pushAssistant(`Added ${component.id} (${res.applied.length} pieces)`);
             } catch (error) {
               out.failed += 1;
               note(component.id, 0);
@@ -857,7 +857,7 @@ export class App {
         //     not render what was asked: an empty reservation, or a missing
         //     planned region.
         //
-        // Deliberately absent: `thin-section` (a sparse box is a style — and
+        // Deliberately absent: `thin-section` (a sparse box is a style | and
         // this is what made elements vanish in a cycle on a real run: a region
         // that filled its box only partly was deleted and regenerated, up to
         // four times per build), plus `contrast` (L5 re-inks faded text
@@ -891,9 +891,9 @@ export class App {
 
       // Refinement is PER REGION, not a whole rebuild: complaints map back to
       // the regions that own the offending elements, and only those are
-      // regenerated — each in its own call, atomically. A region fix cannot
+      // regenerated | each in its own call, atomically. A region fix cannot
       // repair a template whose regions stack on top of each other (mass
-      // overlap), so that — and complaints with no owning region at all —
+      // overlap), so that | and complaints with no owning region at all |
       // re-tunes the SAME template instead of swapping in a different one.
       const overlapErrors = report.issues.filter((i) => i.severity === "error" && i.code === "overlap").length;
       const crowded = overlapErrors >= 5;
@@ -995,7 +995,7 @@ export class App {
           // Check this BEFORE writing a fresh copy deck: an unchanged tuning
           // means the first pass is kept, so a deck call here is pure waste.
           if (knobs(plan2.tuning) === knobs(plan.tuning)) {
-            this.assistant.pushAssistant("The template tuning did not change — keeping the first pass.");
+            this.assistant.pushAssistant("The template tuning did not change. Keeping the first pass.");
             return;
           }
           plan2.components = plan2.components.map((component) => {
@@ -1016,7 +1016,7 @@ export class App {
           );
           if (missingCopy.length) {
             this.assistant.pushAssistant(
-              `Refined template exposed ${missingCopy.length} region(s) without approved copy — writing a fresh deck…`,
+              `Refined template exposed ${missingCopy.length} region(s) without approved copy. Writing a fresh deck…`,
             );
             const freshDeck = await planCopyDeck(plan2.components, goal, canvas, prompt, live("3/5 copy refine"));
             const freshUnresolved = Array.isArray(freshDeck.unresolved) ? freshDeck.unresolved : [];
@@ -1042,14 +1042,14 @@ export class App {
           }
           if (showTemplateSample(plan2)) {
             this.assistant.pushAssistant(
-              `Refined template: "${plan2.template}" (${plan2.tuning.variant}, ${plan2.tuning.density}) — ${plan2.components.length} regions.`,
+              `Refined template: "${plan2.template}" (${plan2.tuning.variant}, ${plan2.tuning.density}), ${plan2.components.length} regions.`,
             );
           }
           plan = plan2;
           result = await buildAll(plan2);
           report = reEval(plan2);
         } catch (error) {
-          this.assistant.pushAssistant(`Template refinement failed (${error.message}) — keeping the first pass.`, "error");
+          this.assistant.pushAssistant(`Template refinement failed (${error.message}). Keeping the first pass.`, "error");
         }
       };
 
@@ -1058,7 +1058,7 @@ export class App {
         if (!ids.length) return;
         console.warn(`[build] per-region refinement: ${ids.join(", ")}`);
         this.assistant.pushAssistant(
-          `Refining ${ids.length} template region(s) in place: ${ids.join(", ")} — the layout stays the same.`,
+          `Refining ${ids.length} template region(s) in place: ${ids.join(", ")}. The layout stays the same.`,
         );
         for (const [index, cid] of ids.entries()) {
           const component = plan.components.find((c) => c.id === cid);
@@ -1106,9 +1106,9 @@ export class App {
             result.regions.set(cid, { count: res.applied.length, ids: res.changedIds || [] });
             dropPlaceholders(cid);
             console.log(`[build] refined ${cid} ${res.applied.length} pieces`);
-            this.assistant.pushAssistant(`+ refined template region ${cid} (${res.applied.length} pieces)`);
+            this.assistant.pushAssistant(`Added refined template region ${cid} (${res.applied.length} pieces)`);
           } catch (error) {
-            this.assistant.pushAssistant(`Refine ${cid} failed: ${error.message} — kept the previous content.`, "error");
+            this.assistant.pushAssistant(`Refine ${cid} failed: ${error.message}. Kept the previous content.`, "error");
           }
         }
         report = reEval(plan);
@@ -1116,7 +1116,7 @@ export class App {
 
       if (crowded) {
         await replanOnce(
-          `Sections overlap (${overlapErrors} collisions) — stagger boxes vertically with breathing room, keep bars behind their own text.`,
+          `Sections overlap (${overlapErrors} collisions). Stagger boxes vertically with breathing room, keep bars behind their own text.`,
         );
       } else if (failing.size) {
         await refineRegions(failing);
@@ -1135,7 +1135,7 @@ export class App {
           const remaining = collectCopyRepetitions();
           if (remaining.size) {
             this.assistant.pushAssistant(
-              `Copy repetition remains in ${[...remaining.keys()].join(", ")} — the region kept its last valid content.`,
+              `Copy repetition remains in ${[...remaining.keys()].join(", ")}. The region kept its last valid content.`,
               "error",
             );
           }
@@ -1205,13 +1205,13 @@ export class App {
         }
         if (fix.unresolvable.length) {
           this.assistant.pushAssistant(
-            `Could not separate: ${fix.unresolvable.slice(0, 4).join(", ")} — drag them apart by hand.`,
+            `Could not separate: ${fix.unresolvable.slice(0, 4).join(", ")}. Drag them apart by hand.`,
             "error",
           );
         }
       }
 
-      // L5 — Color correction: re-ink text that fades into its backdrop and
+      // L5 | Color correction: re-ink text that fades into its backdrop and
       // snap off-palette fills back to the palette. Applied as one undo step.
       status("5/5 Correcting colors…");
       const colorFix = correctColors(this.editor.toDesign(), plan.palette);
@@ -1219,7 +1219,7 @@ export class App {
         this.editor.applyPatchOps(colorFix.ops);
         this.assistant.pushAssistant(
           `Color correction: ${colorFix.notes.slice(0, 4).join("; ")}` +
-            `${colorFix.notes.length > 4 ? ` (+${colorFix.notes.length - 4} more)` : ""}`,
+            `${colorFix.notes.length > 4 ? ` (${colorFix.notes.length - 4} more)` : ""}`,
         );
         report = evaluateDesign(this.editor.toDesign(), evalOpts(plan, renderedIds));
       } else {
@@ -1235,7 +1235,7 @@ export class App {
           .map(([id, messages]) => `${id}: ${messages.join(" ")}`)
           .join("; ");
         this._markGenerationInvalid();
-        throw new Error(`Copy repetition remains — ${details}`);
+        throw new Error(`Copy repetition remains: ${details}`);
       }
 
       // Completeness gate: every planned region must have rendered output.
@@ -1247,7 +1247,7 @@ export class App {
       if (missingRegions.length) {
         const details = missingRegions.map((component) => component.id).join(", ");
         this._markGenerationInvalid();
-        throw new Error(`Template regions failed and could not be regenerated — ${details}`);
+        throw new Error(`Template regions failed and could not be regenerated: ${details}`);
       }
 
       // Copy completeness gate: approving a deck line is a promise to render
@@ -1277,7 +1277,7 @@ export class App {
           })
           .join("; ");
         this._markGenerationInvalid();
-        throw new Error(`Approved copy was not rendered — ${details}`);
+        throw new Error(`Approved copy was not rendered: ${details}`);
       }
 
       this.state.design = this.editor.toDesign();
@@ -1295,7 +1295,7 @@ export class App {
         .sort((a, b) => (a.severity === b.severity ? 0 : a.severity === "error" ? -1 : 1))
         .slice(0, 4);
       this.assistant.pushAssistant(
-        `Quality ${report.score}/100${top.length ? ": " + top.map((i) => i.message).join(" ") : " — clean."}`,
+        `Quality ${report.score}/100${top.length ? ": " + top.map((i) => i.message).join(" ") : "clean."}`,
       );
       if (report.issues.length) {
         this.debugTabs.set({
@@ -1310,14 +1310,14 @@ export class App {
       if (appliedTotal === 0) {
         this._markGenerationInvalid();
         const message = keptSample
-          ? `Kept the template sample for all ${done} regions — the model could not fill them (see the assistant log).`
-          : `All ${done} components failed — see the assistant log for reasons.`;
+          ? `Kept the template sample for all ${done} regions. Oovi could not fill them (see the assistant log).`
+          : `All ${done} components failed. See the assistant log for reasons.`;
         this.generateButton.setError(message);
         notify(message, "error");
       } else {
         const message =
           `Built ${done - failed}/${done} regions (${appliedTotal} pieces)` +
-          `${keptSample ? `; ${keptSample} kept the template sample` : ""} — every element is editable.`;
+          `${keptSample ? `; ${keptSample} kept the template sample` : ""}. Every element is editable.`;
         this.generateButton.setSuccess(message);
         notify(message, failed > 0 ? "info" : "success");
         // Capture the design-scoped model context only after the hard gates.
@@ -1375,7 +1375,7 @@ export class App {
     }
     const query = candidates[0] || "";
     if (!query) {
-      console.warn(`[build] image ${component.id} has no image subject — failing region`);
+      console.warn(`[build] image ${component.id} has no image subject | failing region`);
       return null;
     }
 
@@ -1411,7 +1411,7 @@ export class App {
         console.warn(`[build] image ${component.id} search failed (${error.message})`);
       }
     }
-    console.warn(`[build] image ${component.id} found no usable Unsplash photo — failing region`);
+    console.warn(`[build] image ${component.id} found no usable Unsplash photo | failing region`);
     return null;
   }
 
@@ -1424,7 +1424,7 @@ export class App {
       const row = await projects.get(this.projectId);
       this.state.title = row.title || "Untitled design";
       this.topbar.setTitle(this.state.title);
-      document.title = `${this.state.title} — Oovi`;
+      document.title = `${this.state.title} | Oovi`;
       const design = row.design;
       if (design && Array.isArray(design.elements) && design.elements.length) {
         const check = validateDesign(design);
@@ -1460,7 +1460,7 @@ export class App {
     if (hasObjects) {
       // Never reflow or destroy a finished design: the new size applies to
       // the next Generate instead.
-      const message = `Size set to ${label} ${width} × ${height} — press Regenerate to apply it.`;
+      const message = `Size set to ${label} ${width} × ${height}. Press Regenerate to apply it.`;
       this.generateButton.setStatus(message, "");
       notify(message, "info");
       return;
@@ -1518,15 +1518,18 @@ export class App {
 
   onTitle(title) {
     this.state.title = title;
-    document.title = `${title} — Oovi`;
+    document.title = `${title} | Oovi`;
     this.scheduleSave();
   }
 
   onTab(tab) {
-    if (tab === "pipeline") this.leftTabs?.set("pipeline");
-    else if (tab === "design") {
+    if (tab === "pipeline") {
+      this.leftTabs?.set("pipeline");
+      this._revealLeftPanel();
+    } else if (tab === "design") {
       this.leftTabs?.set("insert");
       this._closeDeveloper();
+      this._revealCanvas();
     } else if (tab === "code") this._openDeveloper();
   }
 
@@ -1711,7 +1714,7 @@ export class App {
           this._clearPreviewUI();
           this._syncDesignMemory();
           this._refreshChrome();
-          const message = `Patch rejected — it would repeat copy: ${details}`;
+          const message = `Patch rejected. It would repeat copy: ${details}`;
           this.assistant.pushAssistant(message, "error");
           notify(message, "error");
           return;
@@ -1906,7 +1909,7 @@ export class App {
     });
     this.scheduleSave();
     this._refreshChrome();
-    const message = `Applied "${template.label}" — edit the sample text, or Undo to go back.`;
+    const message = `Applied "${template.label}". Edit the sample text, or Undo to go back.`;
     this.generateButton.setStatus(message, "");
     notify(message, "success");
   }
@@ -1914,13 +1917,13 @@ export class App {
   /**
    * "Save as template": turn the current canvas into a reusable layout.
    * The converter reads the RENDERED design and the result must clear the same
-   * quality gate the template tests use — a layout that would overflow, collide
+   * quality gate the template tests use | a layout that would overflow, collide
    * or fade is refused with the reasons rather than stored.
    */
   saveCurrentAsTemplate() {
     const design = this.editor.toDesign();
     if (!design?.elements?.length) {
-      notify("Nothing to save yet — generate or draw a design first.", "error");
+      notify("Nothing to save yet. Generate or draw a design first.", "error");
       return;
     }
     const title = (this.state?.title || "Saved layout").trim() || "Saved layout";
@@ -1973,11 +1976,33 @@ export class App {
     else this._refreshContextBar();
   }
 
+  _stackedLayout() {
+    const grid = document.querySelector(".editor-grid");
+    return Boolean(grid) && getComputedStyle(grid).display === "flex";
+  }
+
+  _revealLeftPanel() {
+    const app = document.getElementById("app");
+    if (app?.classList.contains("side-collapsed")) this.setSidebar(true);
+    if (!this._stackedLayout()) return;
+    const left = document.querySelector(".editor-left");
+    requestAnimationFrame(() => left?.scrollIntoView({ behavior: "smooth", block: "center" }));
+  }
+
+  _revealCanvas() {
+    if (!this._stackedLayout()) return;
+    const center = document.querySelector(".editor-center");
+    requestAnimationFrame(() => center?.scrollIntoView({ behavior: "smooth", block: "start" }));
+  }
+
   _openDeveloper() {
     const dev = document.getElementById("developer");
     if (dev) {
       dev.open = true;
-      dev.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      dev.scrollIntoView({
+        behavior: "smooth",
+        block: this._stackedLayout() ? "center" : "nearest",
+      });
     }
   }
 
@@ -2079,7 +2104,7 @@ export class App {
   async persistNow() {
     if (!this.editor.canvas) return;
     if (this._persistLocked) {
-      console.log("[persist] skipped — generation is locked until its final gates pass");
+      console.log("[persist] skipped | generation is locked until its final gates pass");
       return;
     }
     this._syncDesignMemory();

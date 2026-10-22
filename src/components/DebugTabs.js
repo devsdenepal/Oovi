@@ -24,7 +24,7 @@ export class DebugTabs {
 
     this.container.innerHTML = `
       <div class="debug-tabs-header">
-        <span class="panel-title">Pipeline</span>
+        <span class="panel-title">Artifacts</span>
         <div class="debug-tabs-nav"></div>
       </div>
       <div class="debug-tabs-body"></div>

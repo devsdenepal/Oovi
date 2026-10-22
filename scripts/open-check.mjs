@@ -13,7 +13,7 @@ page.on('pageerror', (e) => console.log('PAGEERROR:', e.message.slice(0, 200)));
 await page.goto(`http://localhost:${PORT}/#/design/${ID}`, { waitUntil: 'networkidle' });
 await page.waitForFunction(() => !!window.__oovi?.app?.editor, { timeout: 30000 });
 
-// loadProject is async (backend fetch) — wait for objects, not just boot.
+// loadProject is async (backend fetch) | wait for objects, not just boot.
 await page.waitForFunction(() => window.__oovi.app.editor.canvas.getObjects().length > 0, { timeout: 30000 });
 await page.waitForTimeout(1000);
 

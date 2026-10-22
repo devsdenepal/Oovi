@@ -161,7 +161,7 @@ const COPY_STOPWORDS = new Set([
   "ten", "here", "there", "what", "when", "where", "who", "why", "how",
 ]);
 
-/** Lowercased words with punctuation stripped — the unit of the repeat guard. */
+/** Lowercased words with punctuation stripped | the unit of the repeat guard. */
 export function contentWords(value) {
   const text = normalizeCopyLines(value).join(" ").toLowerCase();
   return (text.match(/[a-z0-9]+(?:['’-][a-z0-9]+)*/g) || []).map((word) =>
@@ -169,7 +169,7 @@ export function contentWords(value) {
   );
 }
 
-/** Distinctive content words in one region — the vocabulary the repeat guard tracks. */
+/** Distinctive content words in one region | the vocabulary the repeat guard tracks. */
 export function distinctiveWords(value, allowed = null) {
   const allowedSet = allowed instanceof Set ? allowed : new Set(allowed || []);
   return [
@@ -334,7 +334,7 @@ function clamp(text, maxChars) {
   let cut = value.slice(0, maxChars);
   const space = cut.lastIndexOf(" ");
   if (space >= Math.floor(maxChars * 0.55)) cut = cut.slice(0, space);
-  return cut.replace(/[\s,;:—–-]+$/, "").trim();
+  return cut.replace(/[\s,;:|–-]+$/, "").trim();
 }
 
 export function briefText(goal, rawPrompt = "") {
@@ -723,7 +723,7 @@ export function regionCopyProblems(elements, component, goal, rawPrompt = "") {
  * Returns a new element list with text content made layout-safe. IDs and all
  * non-copy props are preserved so the region remains a normal design patch.
  * Approved copy-deck lines are preferred. A text element with unusable copy
- * and no approved line is DROPPED — never replaced with generic copy. L4
+ * and no approved line is DROPPED | never replaced with generic copy. L4
  * retries copy problems (regionCopyProblems) before this runs, so dropping is
  * the final safety net, not the normal path.
  */
@@ -747,7 +747,7 @@ export function sanitizeRegionCopy(elements, component, goal, rawPrompt = "") {
       const exactApproved = approved.length > 0 && normalize(element.content) === approvedLine;
       const problem = copyProblem(element.content, component, goal, rawPrompt);
       // When the copy deck approved exact lines, L4 is a layout pass: a valid
-      // but rewritten line ("Graphilla Technology — Happy Diwali", "1. To our
+      // but rewritten line ("Graphilla Technology | Happy Diwali", "1. To our
       // clients…") is still a deviation. Put the approved line back.
       if (!problem && (exactApproved || matchesApprovedDeck(element.content))) return [element];
       const replacement =
@@ -755,7 +755,7 @@ export function sanitizeRegionCopy(elements, component, goal, rawPrompt = "") {
       const clamped = replacement ? clamp(replacement, component?.maxChars) : "";
       if (!clamped) {
         console.warn(
-          `[copy] dropping invalid text in ${component?.id || "?"}: ${problem || "not approved"} — "${normalize(element.content)}"`,
+          `[copy] dropping invalid text in ${component?.id || "?"}: ${problem || "not approved"} | "${normalize(element.content)}"`,
         );
         return [];
       }

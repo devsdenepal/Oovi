@@ -1,8 +1,8 @@
-# DESIGN.md — Oovi visual identity (living document)
+# DESIGN.md | Oovi visual identity (living document)
 
 ## Rule 1: tokens are the brand
 `src/ui/tokens.css` is the **only** place brand values live. To rebrand,
-edit that file — never hardcode a color, font, or z-index in `style.css`
+edit that file | never hardcode a color, font, or z-index in `style.css`
 or components. New UI code uses `var(--oovi-*)` directly; the old
 `--studio-*` names in `style.css` are aliases, not values.
 

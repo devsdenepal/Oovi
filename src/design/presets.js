@@ -1,5 +1,5 @@
 /**
- * Design-type presets — the fixed canvas sizes the preview area is
+ * Design-type presets | the fixed canvas sizes the preview area is
  * restricted to (social / publishing formats).
  *
  * Pure data: no imports, no logic. The default is the Facebook feed post.

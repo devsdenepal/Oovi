@@ -1,5 +1,5 @@
 /**
- * Layers panel — first-class layer list (Goal 3).
+ * Layers panel | first-class layer list (Goal 3).
  *
  * Per-row previews (fill swatch / text sample / image thumb), drag-reorder
  * for top-level layers, visibility, lock, inline rename, duplicate,

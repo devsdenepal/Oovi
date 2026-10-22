@@ -1,7 +1,7 @@
 /**
  * InsertPanel - manual design tools that need no AI generation:
  * drop text and shapes onto the canvas, pick the new-element color
- * and the canvas background. Works like general design tools —
+ * and the canvas background. Works like general design tools |
  * everything stays editable via the existing toolbar/layers.
  */
 
@@ -43,7 +43,7 @@ export class InsertPanel {
           <input id="insert-bg" type="color" value="#f5f5f7" />
         </div>
       </details>
-      <div class="insert-hint">Dropped at canvas center — drag to move, double-click text to edit.</div>
+      <div class="insert-hint">Dropped at canvas center. Drag to move, double-click text to edit.</div>
     `;
 
     this.fillInput = this.container.querySelector("#insert-fill");
@@ -144,7 +144,7 @@ export class InsertPanel {
       img.className = "insert-thumb";
       img.src = photo.thumb;
       img.alt = photo.alt || "Unsplash photo";
-      img.title = `Photo by ${photo.photographer || "Unknown"} — click to insert`;
+      img.title = `Photo by ${photo.photographer || "Unknown"}. Click to insert`;
       img.loading = "lazy";
       img.addEventListener("click", () => this.handlers.onPhoto?.(photo));
       this.resultsEl.appendChild(img);

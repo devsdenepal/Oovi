@@ -1,0 +1,65 @@
+@forward "../dashboard/config";
+@use "sass:map";
+
+// ==================================================================
+// Editor configuration
+//
+// The editor reuses the workspace palette, type, spacing, breakpoint,
+// motion, and layering maps from the dashboard. Only dimensions that are
+// specific to the three-pane editor live here.
+// ==================================================================
+
+$editor-layout: (
+  "rail": 76px,
+  "rail-compact": 64px,
+  "left": 330px,
+  "left-wide": 360px,
+  "left-stacked": 320px,
+  "right": 270px,
+  "right-wide": 300px,
+  "topbar": 64px,
+  "topbar-mobile": 62px,
+  "canvas-head": 54px,
+  "control": 32px,
+  "control-compact": 30px,
+  "field": 32px,
+  "field-touch": 38px,
+  "view-select": 104px,
+  "view-select-compact": 100px,
+  "view-select-tiny": 96px,
+  "title-tiny": 112px,
+  "panel-pad": 18px,
+  "panel-pad-compact": 14px,
+  "canvas-pad": 16px,
+  "canvas-pad-mobile": 12px,
+  "card-radius": 12px,
+  "tile": 60px,
+  "tile-compact": 56px,
+  "ai-column": 240px,
+  "insert-tile": 110px,
+  "insert-tile-mobile": 108px,
+  "sidebar-stacked": 560px,
+  "sidebar-stacked-vh": 68vh,
+  "sidebar-stacked-mobile": 460px,
+  "sidebar-tablet-vh": 62vh,
+  "sidebar-tablet-min": 300px,
+  "sidebar-compact": 420px,
+  "sidebar-compact-vh": 58vh,
+  "sidebar-compact-min": 280px,
+  "canvas-stacked": 620px,
+  "canvas-stacked-vh": 64vh,
+  "canvas-stacked-min": 360px,
+  "canvas-tablet": 540px,
+  "canvas-tablet-vh": 58vh,
+  "canvas-tablet-min": 340px,
+  "canvas-compact": 480px,
+  "canvas-compact-vh": 56vh,
+  "canvas-compact-min": 320px,
+);
+
+@function ed($key) {
+  @if not map.has-key($editor-layout, $key) {
+    @error "Unknown editor layout token `#{$key}`.";
+  }
+  @return map.get($editor-layout, $key);
+}

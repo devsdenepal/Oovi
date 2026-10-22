@@ -1,5 +1,5 @@
 /**
- * Dataset builder — brief -> template + tuning, and slot spec -> copy.
+ * Dataset builder | brief -> template + tuning, and slot spec -> copy.
  *
  * Runs the SAME prompt builders the app uses at inference time, so the static
  * prefix ([System] code rules) in every example is byte-identical to

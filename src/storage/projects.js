@@ -31,7 +31,7 @@ async function request(path, options = {}) {
 }
 
 export const projects = {
-  /** @returns {Promise<Array<{id,title,thumbnail,created_at,updated_at}>>} */
+  /** @returns {Promise<Array<{id,title,thumbnail,created_at,updated_at,canvas_width,canvas_height}>>} */
   async list() {
     const data = await request("/api/designs");
     return data?.designs || [];

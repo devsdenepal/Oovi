@@ -1,13 +1,13 @@
 /**
- * L5 — Color correction (deterministic, no AI, fast).
+ * L5 | Color correction (deterministic, no AI, fast).
  *
  * The final layer of the cascade. It reads the RENDERED design against the
  * chosen palette and repairs the two failure modes the user cares about:
  *
- *   fading  — text whose fill has too little contrast against the shape
+ *   fading  | text whose fill has too little contrast against the shape
  *             actually behind it (bar, disc, artwork, canvas). Fixed by
  *             re-inking the text to the palette colour with the best contrast.
- *   mismatch — shapes painted outside the palette. Fixed by snapping their
+ *   mismatch | shapes painted outside the palette. Fixed by snapping their
  *             fill to the nearest palette colour.
  *
  * Returns PATCH ops (never mutates), so the App applies them as one undo step
@@ -143,7 +143,7 @@ export function correctColors(design, palette) {
     }
 
     if (bed && bed.kind === "image") {
-      notes.push(`${t.id}: sits on artwork — verify contrast on export`);
+      notes.push(`${t.id}: sits on artwork | verify contrast on export`);
       continue;
     }
     const backdrop = (bed && normHex(bed.fill)) || normHex(canvas.background);
@@ -201,7 +201,7 @@ export function correctColors(design, palette) {
   }
 
   // 3. Fading, part two: text drawn semi-transparent washes out regardless
-  // of colour — lift it back to full opacity.
+  // of colour | lift it back to full opacity.
   walk(design?.elements, (el) => {
     if (el.type !== "text") return;
     if (typeof el.opacity === "number" && el.opacity > 0 && el.opacity < 0.5) {

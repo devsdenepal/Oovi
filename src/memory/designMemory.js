@@ -316,7 +316,7 @@ export function syncMemoryCopy(memory, design) {
     for (const entry of textElementsUnder(design, elementIds)) owned.add(entry.id);
   }
 
-  // Text the memory does not own — a manual insert or an assistant-added line —
+  // Text the memory does not own | a manual insert or an assistant-added line |
   // still enters the ledger. Treat each such element as its own region so the
   // no-repeat gate can see it without inventing a semantic role.
   for (const entry of allTexts) {
@@ -409,7 +409,7 @@ export function memoryForPrompt(memory, maxChars = FEATURES.memory.promptChars) 
   payload.edits = [];
   text = JSON.stringify(payload, null, 1);
   if (text.length <= maxChars) return text;
-  // Last resort: a tiny but valid JSON object. Never slice serialized JSON —
+  // Last resort: a tiny but valid JSON object. Never slice serialized JSON |
   // a half object is worse than no context because the prompt becomes
   // syntactically ambiguous to the model.
   return "{}";

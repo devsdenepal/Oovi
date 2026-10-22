@@ -3,8 +3,8 @@
  *
  * L4 is one call per region; giving it one worked example of the SAME slot is
  * the cheapest quality lever available (a few dozen prompt tokens against a
- * prefill that already costs ~90s). This module is pure data — no imports, no
- * logic — so templates.js can attach it without a cycle and node tests can
+ * prefill that already costs ~90s). This module is pure data | no imports, no
+ * logic | so templates.js can attach it without a cycle and node tests can
  * assert every slot has usable copy.
  *
  * Keyed template id -> slot id -> 2-3 example strings. Every string must be
@@ -59,7 +59,7 @@ export const EXAMPLES = {
     "sections-card-2": ["Risograph Printing · Wed 6 March · £40", "Studio · £24 a month, five projects"],
     "sections-card-3": ["Bookbinding · Sat 16 March · £45", "Agency · £59 a month, unlimited seats"],
     "sections-card-4": ["Portrait Photography · Sat 23 March · £50", "Enterprise · Talk to us about a custom plan"],
-    "footer-registration": ["Book all sessions at makerspace.example/courses", "All plans include support — makerspace.example/plans"],
+    "footer-registration": ["Book all sessions at makerspace.example/courses", "All plans include support | makerspace.example/plans"],
   },
   "story-stack": {
     "header-branding": ["Field Journal", "Weekend Wanderers"],
@@ -71,7 +71,7 @@ export const EXAMPLES = {
   "statement-quote": {
     "header-branding": ["Our Studio Manifesto", "Founders' Pledge 2026"],
     "headline-statement": ["Good design is a public service, not a luxury", "We build things that outlast the people who make them"],
-    "tagline-attribution": ["— Mira Okafor, Founder", "— The Kestrel Studio Charter"],
+    "tagline-attribution": ["| Mira Okafor, Founder", "| The Kestrel Studio Charter"],
     "details-source": ["Adopted by the studio, March 2026 · London", "Agreed by all fifteen members · Ratified January 2026"],
     "footer-registration": ["Read the full pledge at kestrelstudio.example", "Sign the manifesto at makingservice.example"],
   },
@@ -128,7 +128,7 @@ export const EXAMPLES = {
     "header-branding": ["Words of the Week", "Founder's Note"],
     "tagline-line": ["March 2026", "Edition 04"],
     "headline-quote": ["The best work happens when nobody is watching the clock.", "Design is just listening, patiently, to what people need."],
-    "tagline-attribution": ["— Ines Barbosa, Designer", "— Tomas Reyes, Founder"],
+    "tagline-attribution": ["| Ines Barbosa, Designer", "| Tomas Reyes, Founder"],
     "details-source": ["From the studio talk 'Making Time', March 2026", "Recorded at the founders' retreat, January 2026"],
     "footer-registration": ["More quotes at kestrelstudio.example/notes", "Read the full note at kestrelstudio.example"],
   },
@@ -164,12 +164,12 @@ export const EXAMPLES = {
     "footer-registration": ["Full profiles at kestrelstudio.example/team", "Speaker bios at conference.example/lineup"],
   },
   "poster-rail": {
-    "headline-main": ["Save the Date: 14 March 2026", "One Night Only — Live at the Foundry"],
+    "headline-main": ["Save the Date: 14 March 2026", "One Night Only | Live at the Foundry"],
     "tagline-line": ["The annual showcase returns with forty new works", "Doors open at seven; the first set starts at eight"],
     "details-when": ["Sat 14 March · 19:00", "Fri 20 March · 20:00"],
     "details-where": ["The Old Foundry, Leeds", "The Roundhouse, London"],
     "details-who": ["All ages · Free entry", "Over 18s · Ticketed"],
-    "footer-registration": ["Tickets at foundry.example — £12, £8 concessions", "Book now at roundhouse.example/showcase"],
+    "footer-registration": ["Tickets at foundry.example | £12, £8 concessions", "Book now at roundhouse.example/showcase"],
   },
   "ticket": {
     "headline-main": ["Winter Nights Concert", "Foundry Film Festival"],
@@ -181,7 +181,7 @@ export const EXAMPLES = {
     "footer-registration": ["See terms at foundry.example/tickets", "Exchange or refund at foundry.example/help"],
   },
   "agenda": {
-    "headline-main": ["Trustee Meeting — March 2026", "Run of Show: Awards Night"],
+    "headline-main": ["Trustee Meeting | March 2026", "Run of Show: Awards Night"],
     "tagline-line": ["Thursday 5 March", "Sat 14 March, doors 18:00"],
     "sections-time-1": ["09:00", "18:00"],
     "sections-entry-1": ["Welcome and apologies", "Doors, drinks and seating"],
@@ -222,7 +222,7 @@ export const EXAMPLES = {
   "social-post": {
     "header-branding": ["@kestrelstudio", "Riverside Makers"],
     "headline-main": ["New mug, same stubborn clay", "Open day this Saturday!"],
-    "cta-action": ["Tell us which colour you'd pick in the comments", "Drop by between ten and four — bring a friend"],
+    "cta-action": ["Tell us which colour you'd pick in the comments", "Drop by between ten and four | bring a friend"],
     "footer-registration": ["Link in bio · kestrelstudio.example", "#RiversideMakers · riverside.example"],
   },
   "newsletter": {
@@ -238,7 +238,7 @@ export const EXAMPLES = {
   },
   "statement-split": {
     "headline-main": ["We make room for ideas that take time.", "Every neighbourhood deserves a good library."],
-    "tagline-attribution": ["— Kestrel Studio, 2026", "— The Library Campaign"],
+    "tagline-attribution": ["| Kestrel Studio, 2026", "| The Library Campaign"],
     "details-when": ["Thursdays, 18:00–20:00", "Open daily, 9:00–19:00"],
     "details-where": ["The Old Foundry, Leeds", "Central Library, Bristol"],
     "details-who": ["Open to all makers", "Free for residents"],
@@ -266,7 +266,7 @@ export const EXAMPLES = {
     "footer-registration": ["Allergen list available · book at kiln.example/menu", "Brunch served 10–2 · kiln.example/brunch"],
   },
   "class-schedule": {
-    "headline-main": ["Studio Timetable — Spring Term", "Weekly Classes for All Levels"],
+    "headline-main": ["Studio Timetable | Spring Term", "Weekly Classes for All Levels"],
     "tagline-line": ["Book by the class or save with a term pass", "Drop in when you can; mats provided"],
     "sections-col-1": ["Monday\n07:30 Sunrise Flow\n12:30 Lunch Express\n18:00 Restorative", "Tuesday\n09:00 Beginners\n17:30 Intermediate\n19:00 Advanced"],
     "sections-col-2": ["Wednesday\n10:00 Pilates Basics\n18:00 Power Hour\n19:30 Stretch & Rest", "Thursday\n07:00 Sunrise\n12:00 Lunch Flow\n18:30 Yin"],

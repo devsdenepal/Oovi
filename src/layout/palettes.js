@@ -1,5 +1,5 @@
 /**
- * Curated palette library (Phase 2D) — deterministic palette lookup.
+ * Curated palette library (Phase 2D) | deterministic palette lookup.
  *
  * L2 used to cost a full model call (~88s measured on this box) to pick three
  * hex values. For the common briefs below that answer is knowable: match the

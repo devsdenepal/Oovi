@@ -1,0 +1,343 @@
+@use "config" as *;
+@use "../dashboard/mixins" as *;
+
+// ==================================================================
+// Editor layout: top bar, three-pane grid, stacked workspace
+// ==================================================================
+
+#app > nav {
+  flex: 0 0 auto;
+  border-bottom: 1px solid var(--ed-line) !important;
+  background: var(--ed-paper) !important;
+}
+
+#app .editor-topbar {
+  position: relative;
+  z-index: var(--ed-z-topbar);
+  background: var(--ed-paper);
+}
+
+#app .oovi-topbar {
+  min-height: ed("topbar");
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: sp(14);
+  padding: 0 sp(20);
+}
+
+#app .editor-body {
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: sp(12) sp(16) sp(16);
+}
+
+#app .editor-grid {
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 auto;
+  display: grid;
+  grid-template-columns: ed("left") minmax(0, 1fr) ed("right");
+  align-items: stretch;
+  gap: sp(12);
+  margin: 0;
+  padding: 0;
+}
+
+#app .editor-grid > [class*="col"] {
+  width: auto;
+  max-width: none;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+}
+
+#app .editor-left,
+#app .editor-center,
+#app .editor-right {
+  min-height: 0;
+}
+
+#app .editor-left,
+#app .editor-right {
+  flex: 0 0 auto;
+}
+
+#app .sidebar-left {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  overflow: hidden;
+  border: 1px solid var(--ed-side-line);
+  border-radius: var(--ed-radius-panel);
+  background: var(--ed-side);
+  box-shadow: none;
+  padding: 0;
+}
+
+#app .canvas-area {
+  min-height: 0;
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--ed-line-strong);
+  border-radius: var(--ed-radius-panel);
+  background: var(--ed-surface);
+}
+
+#app .canvas-head {
+  min-height: ed("canvas-head");
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: sp(10);
+  padding: 0 sp(14);
+  border-bottom: 1px solid var(--ed-line);
+  background: var(--ed-surface);
+}
+
+#app .canvas-frame {
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 auto;
+  display: flex;
+  align-items: safe center;
+  justify-content: safe center;
+  overflow: auto;
+  padding: ed("canvas-pad");
+  background-color: var(--ed-mat);
+  background-image: radial-gradient(circle, var(--ed-line-strong) 1px, transparent 1px);
+  background-size: 18px 18px;
+}
+
+#app #canvas-holder {
+  flex: 0 0 auto;
+  margin: 0;
+  overflow: hidden;
+  border-radius: var(--ed-radius-sharp);
+  outline: 1px solid var(--ed-line-strong);
+  outline-offset: -1px;
+  box-shadow: var(--ed-shadow-art);
+}
+
+#app #canvas-holder canvas {
+  display: block;
+}
+
+#app .inspector {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: sp(12);
+  overflow-y: auto;
+}
+
+#app .inspector .card {
+  flex: 0 0 auto;
+}
+
+#app.side-collapsed > .editor-body > .editor-grid > .editor-left {
+  flex: 0 0 auto;
+  width: auto;
+  max-width: none;
+}
+
+#app.side-collapsed .left-panels {
+  display: none;
+}
+
+@include at-least("tablet") {
+  #app.side-collapsed .editor-center {
+    flex: 1 1 auto;
+    width: auto;
+    max-width: 100%;
+  }
+}
+
+@include above("stacked") {
+  #app .editor-grid {
+    grid-template-columns: ed("left") minmax(0, 1fr) ed("right");
+  }
+
+  #app.side-collapsed .editor-grid {
+    grid-template-columns: ed("rail") minmax(0, 1fr) ed("right");
+  }
+}
+
+@include above("wide") {
+  #app .editor-grid {
+    grid-template-columns: ed("left-wide") minmax(0, 1fr) ed("right-wide");
+  }
+
+  #app.side-collapsed .editor-grid {
+    grid-template-columns: ed("rail") minmax(0, 1fr) ed("right-wide");
+  }
+}
+
+@include below("stacked") {
+  #app .editor-body {
+    overflow-y: auto;
+  }
+
+  #app.side-collapsed > .editor-body > .editor-grid > .editor-left {
+    display: none;
+  }
+
+  #app .editor-grid {
+    height: auto;
+    flex: 0 0 auto;
+    display: flex;
+    flex-direction: column;
+    gap: sp(12);
+    overflow: visible;
+  }
+
+  #app .editor-grid > [class*="col"] {
+    width: 100%;
+    flex: 0 0 auto;
+  }
+
+  #app .editor-center {
+    order: 1;
+    height: min(ed("canvas-stacked-vh"), ed("canvas-stacked"));
+    min-height: ed("canvas-stacked-min");
+  }
+
+  #app .editor-left {
+    order: 2;
+  }
+
+  #app .editor-right {
+    order: 3;
+  }
+
+  #app .sidebar-left {
+    height: min(ed("sidebar-stacked"), ed("sidebar-stacked-vh"));
+    max-height: ed("sidebar-stacked");
+  }
+
+  #app .inspector {
+    display: grid;
+    grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr);
+    align-items: start;
+    gap: sp(12);
+    overflow: visible;
+  }
+}
+
+@include at-least("mobile") {
+  @include below("stacked") {
+    #app [data-lpanel="reference"] {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(ed("ai-column"), 1fr));
+      align-items: start;
+      gap: sp(20);
+    }
+
+    #app [data-lpanel="reference"] .side-block {
+      padding: 0;
+      border-top: 0;
+    }
+  }
+}
+
+@include below("tablet") {
+  #app .oovi-topbar {
+    min-height: ed("topbar");
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: sp(8);
+    padding: sp(9) sp(12);
+  }
+
+  #app .tb-brand {
+    flex: 1 1 auto;
+  }
+
+  #app .tb-actions {
+    margin-left: auto;
+  }
+
+  #app .editor-body {
+    padding: sp(10) sp(12) sp(14);
+  }
+
+  #app .sidebar-left {
+    height: min(ed("sidebar-stacked-mobile"), ed("sidebar-tablet-vh"));
+    min-height: ed("sidebar-tablet-min");
+  }
+
+  #app .editor-center {
+    height: min(ed("canvas-tablet-vh"), ed("canvas-tablet"));
+    min-height: ed("canvas-tablet-min");
+  }
+
+  #app .inspector {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@include below("mobile") {
+  #app .oovi-topbar {
+    min-height: ed("topbar-mobile");
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: sp(8);
+    padding: sp(9) sp(12);
+  }
+
+  #app .editor-body {
+    padding: sp(8) sp(10) sp(12);
+  }
+
+  #app .canvas-head {
+    padding-inline: sp(10);
+    gap: sp(8);
+  }
+
+  #app .canvas-frame {
+    padding: ed("canvas-pad-mobile");
+  }
+
+  #app .editor-center {
+    height: min(60vh, 540px);
+  }
+
+  #app .inspector {
+    gap: sp(10);
+  }
+}
+
+@include below("compact") {
+  #app .sidebar-left {
+    height: min(ed("sidebar-compact"), ed("sidebar-compact-vh"));
+    min-height: ed("sidebar-compact-min");
+  }
+
+  #app .editor-center {
+    height: min(ed("canvas-compact-vh"), ed("canvas-compact"));
+    min-height: ed("canvas-compact-min");
+  }
+}
+
+@include below("tiny") {
+  #app .tb-title {
+    max-width: ed("title-tiny");
+  }
+
+  #app .tb-sub {
+    display: none;
+  }
+}

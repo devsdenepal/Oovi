@@ -1,0 +1,67 @@
+@use "sass:map";
+@use "config" as *;
+
+// Runtime editor tokens. The editor deliberately remaps the legacy --oovi-*
+// names so existing structural rules inherit the workspace palette instead of
+// the old indigo theme.
+#app {
+  @each $name, $value in $dash-colors {
+    --ed-#{$name}: #{$value};
+  }
+
+  @each $name, $value in $dash-radii {
+    --ed-radius-#{$name}: #{$value};
+  }
+
+  @each $name, $value in $dash-motion {
+    --ed-#{$name}: #{$value};
+  }
+
+  @each $name, $value in $dash-z {
+    --ed-z-#{$name}: #{$value};
+  }
+
+  --ed-font-ui: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --ed-font-mono: "Cascadia Code", Consolas, monospace;
+  --ed-shadow-card: 0 1px 2px rgba(21, 23, 26, 0.04);
+  --ed-shadow-art: 0 18px 40px rgba(21, 23, 26, 0.18), 0 2px 6px rgba(21, 23, 26, 0.08);
+  --ed-shadow-pop: 0 16px 40px rgba(21, 23, 26, 0.18);
+  --ed-focus-ring: 0 0 0 3px #{map.get($dash-colors, "teal-soft")};
+
+  // Legacy aliases consumed by the existing shell rules.
+  --oovi-brand: var(--ed-teal);
+  --oovi-brand-strong: var(--ed-teal-strong);
+  --oovi-brand-soft: var(--ed-teal-soft);
+  --oovi-brand-line: #b7ddd6;
+  --oovi-logo-a: var(--ed-teal);
+  --oovi-logo-b: var(--ed-teal-strong);
+  --oovi-bg: var(--ed-paper);
+  --oovi-surface: var(--ed-surface);
+  --oovi-surface-2: var(--ed-surface-soft);
+  --oovi-ink: var(--ed-ink);
+  --oovi-ink-2: var(--ed-muted);
+  --oovi-line: var(--ed-line);
+  --oovi-line-strong: var(--ed-line-strong);
+  --oovi-ok: var(--ed-teal);
+  --oovi-warn: var(--ed-orange);
+  --oovi-bad: var(--ed-error-strong);
+  --oovi-workspace: var(--ed-mat);
+  --oovi-workspace-dot: var(--ed-line-strong);
+  --oovi-code-bg: var(--ed-side);
+  --oovi-code-ink: #d9d6cb;
+  --oovi-font-ui: var(--ed-font-ui);
+  --oovi-font-mono: var(--ed-font-mono);
+  --oovi-text-xs: #{fs("base")};
+  --oovi-text-sm: #{fs("lg")};
+  --oovi-text-md: #{fs("xl")};
+  --oovi-text-lg: #{fs("3xl")};
+  --oovi-text-xl: #{fs("4xl")};
+  --oovi-shadow-sm: var(--ed-shadow-card);
+  --oovi-shadow-lg: var(--ed-shadow-art);
+  --oovi-shadow-pop: var(--ed-shadow-pop);
+  --oovi-dur-fast: 140ms;
+  --oovi-dur-med: 200ms;
+  --oovi-z-ctx: 1090;
+  --oovi-z-preview: 1080;
+  --oovi-z-toast: 1200;
+}

@@ -1,7 +1,7 @@
 /**
  * Unsplash photo search (Insert panel + AI image regions).
  *
- * Uses the public access key (VITE_UNSPLASH_ACCESS_KEY) exactly as before —
+ * Uses the public access key (VITE_UNSPLASH_ACCESS_KEY) exactly as before |
  * designed for client-side use and rate-limited. The secret key is never
  * stored or sent anywhere: this integration does not use OAuth.
  *
@@ -62,7 +62,7 @@ export async function searchPhotos(query, options = {}) {
   const res = await fetch(`${SEARCH_ENDPOINT}?${params}`);
   if (res.status === 401) throw new Error("Unsplash rejected the access key (401)");
   if (res.status === 403 || res.status === 429) {
-    throw new Error("Unsplash rate limit reached — try again later");
+    throw new Error("Unsplash rate limit reached | try again later");
   }
   if (!res.ok) throw new Error(`photo search ${res.status}`);
   const data = await res.json();

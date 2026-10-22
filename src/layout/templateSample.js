@@ -155,7 +155,7 @@ function sampleFor(component, template) {
   // model call. Use them before the generic role text so menus, people grids
   // and schedules do not all say "Section title".
   if (/\bprice\b/.test(describe)) return "$12";
-  if (/attribution|source|credit/.test(describe)) return "— Your Name";
+  if (/attribution|source|credit/.test(describe)) return "| Your Name";
   if (/quote|statement|mission|vision|pledge/.test(describe)) return "A short, memorable statement.";
   if (/dish|menu item/.test(describe)) return "Dish name\nShort description";
   if (/step|stage|phase/.test(describe)) return "Step one\nWhat happens here";
