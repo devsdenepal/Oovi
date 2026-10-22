@@ -12,3 +12,18 @@ generations.db
 *.sqlite3
 # Generated dataset (scripts/make-dataset.mjs; reproducible from the seed)
 data/
+
+# Local agent and decision notes (keep these out of the public repo)
+AGENT.md
+AGENTS.md
+DECISIONS.md
+DECISION.md
+CLAUDE.md
+GEMINI.md
+CODEX.md
+.cursorrules
+.windsurfrules
+.cursor/
+.continue/
+.aider*
+.github/copilot-instructions.md

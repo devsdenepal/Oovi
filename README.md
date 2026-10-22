@@ -190,7 +190,7 @@ api/             Shared serverless handlers (Vercel + local server)
 scripts/         Probe scripts per flow (db, api, history, quality, trash, …)
 ```
 
-Supporting docs: `AGENT.md` (agent working agreement), `DESIGN.md` (visual identity + token rules), `DECISIONS.md` (decision log).
+Supporting docs: `DESIGN.md` (visual identity + token rules).
 
 ## Scripts
 

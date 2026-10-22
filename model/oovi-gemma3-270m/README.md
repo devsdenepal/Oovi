@@ -69,7 +69,7 @@ matters (`OLLAMA_MODEL_FALLBACK`).
 Strict-schema smoke eval on three briefs (choice / tune / copy = 9 calls):
 choice 2/3 matched, tuning 3/3 sanitized, copy 1/3 valid. That is a smoke
 check, not a quality claim. The full 15-brief benchmark was stopped early.
-See `DECISIONS.md` for the baseline vs strict design and the eval harness
+See the eval harness
 (`node scripts/tiny-eval.mjs --model oovi-gemma3-270m:q8 --strict`).
 
 ## License
