@@ -304,8 +304,16 @@ export class App {
     this._updateAssistantContext([]);
     let pending = "";
     try {
-      pending = window.sessionStorage.getItem("oovi.pendingPrompt") || "";
-      window.sessionStorage.removeItem("oovi.pendingPrompt");
+      // Dashboard stores the prompt by project id because a new tab has its
+      // own sessionStorage. Read and consume both storage fallbacks.
+      if (this.projectId) {
+        const key = `oovi.pendingPrompt.${this.projectId}`;
+        pending = window.localStorage.getItem(key) || window.sessionStorage.getItem(key) || "";
+        if (pending) {
+          window.localStorage.removeItem(key);
+          window.sessionStorage.removeItem(key);
+        }
+      }
     } catch {
       pending = "";
     }

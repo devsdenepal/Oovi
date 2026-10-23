@@ -19,6 +19,9 @@ const route = parseRoute();
 if (route.view === "home") {
   document.getElementById("view-home").hidden = false;
   new Dashboard(document.getElementById("home-mount"));
+  // Dashboard open falls back to a hash-only URL when a popup is blocked.
+  // Reload so main.js mounts the editor branch with the new route.
+  window.addEventListener("hashchange", () => window.location.reload());
 } else {
   document.getElementById("app").hidden = false;
   // Same-tab back/forward between dashboard and editor reboots cleanly.
