@@ -16,9 +16,30 @@ import { notify } from "../ui/toasts";
 
 const PENDING_KEY = "oovi.pendingPrompt";
 const SIDEBAR_KEY = "oovi.dashSidebar";
+const pendingKey = (id) => `${PENDING_KEY}.${id}`;
 const RECENT_MS = 7 * 24 * 60 * 60 * 1000;
 const MIN_CANVAS = 64;
 const MAX_CANVAS = 4096;
+
+/**
+ * Open an editor URL in a new tab. `noopener` makes window.open() return null
+ * by spec, so we sever the opener explicitly instead of relying on the flag.
+ * If the popup is blocked, fall back to this tab; main.js reloads on the
+ * dashboard's hashchange so the editor route mounts cleanly.
+ */
+function openEditorTab(id) {
+  const url = editorUrl(id);
+  const target = window.open(url, "_blank");
+  if (target) {
+    try {
+      target.opener = null;
+    } catch {
+      // Cross-origin target: the browser already isolates it.
+    }
+    return;
+  }
+  window.location.hash = url;
+}
 
 const PROMPT_EXAMPLES = [
   "A Hacktoberfest 2026 banner for our developer community…",
@@ -904,15 +925,21 @@ export class Dashboard {
         canvas: { width: preset.width, height: preset.height, background: "#F5F5F7" },
       });
       if (prompt) {
+        // localStorage is shared with the editor tab opened below. The old
+        // sessionStorage value was invisible to a new tab, so the prompt
+        // arrived empty. Keep a sessionStorage fallback for storage failures.
         try {
-          window.sessionStorage.setItem(PENDING_KEY, prompt);
+          window.localStorage.setItem(pendingKey(row.id), prompt);
         } catch {
-          // private mode: editor simply starts with the example prompt
+          try {
+            window.sessionStorage.setItem(pendingKey(row.id), prompt);
+          } catch {
+            // private mode: editor simply starts with the example prompt
+          }
         }
       }
       this.setComposerStatus("Opening the editor…", "busy");
-      const target = window.open(editorUrl(row.id), "_blank", "noopener");
-      if (!target) window.location.hash = editorUrl(row.id);
+      openEditorTab(row.id);
       this.setComposerStatus("");
       this.refresh();
     } catch (error) {
@@ -929,8 +956,7 @@ export class Dashboard {
   }
 
   open(id) {
-    const target = window.open(editorUrl(id), "_blank", "noopener");
-    if (!target) window.location.hash = editorUrl(id);
+    openEditorTab(id);
   }
 
   async cardAction(action, id, trashed) {

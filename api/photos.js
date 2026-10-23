@@ -2,7 +2,7 @@
  * Unsplash routes (Vercel-shaped handler, also mounted by server/index.js).
  *
  * The access key lives ONLY in UNSPLASH_ACCESS_KEY server env | the
- * browser never holds it (api/asset.js pattern for Pollinations).
+ * browser never holds it.
  *
  *   GET  /api/photos?q=mountains&page=1&orientation=landscape
  *                                        → { photos: [...] }

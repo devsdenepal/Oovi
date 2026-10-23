@@ -4,6 +4,7 @@
   "version": "0.1.0",
   "type": "module",
   "description": "AI-powered editable graphic design system - natural language to editable Fabric.js canvas",
+  "license": "MIT",
   "scripts": {
     "dev": "vite",
     "dev:api": "node server/index.js",

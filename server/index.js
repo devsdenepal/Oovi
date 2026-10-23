@@ -1,12 +1,11 @@
 import 'dotenv/config';
 import http from 'node:http';
 import pg from 'pg';
-import assetHandler from '../api/asset.js';
 import photosHandler from '../api/photos.js';
 import aiHandler from '../api/ai.js';
 
 // NOTE: stdlib http, not Express | the environment's npm tree cannot
-// materialize express's transitive deps (see DECISIONS). 8 JSON routes
+// materialize express's transitive deps (see DECISIONS). These JSON routes
 // don't justify fighting that; pg + dotenv load fine.
 
 const PORT = Number(process.env.API_PORT || 3001);
@@ -137,8 +136,8 @@ const server = http.createServer(async (req, res) => {
       }
     }
 
-    if (path === '/api/asset' || path === '/api/photos' || path === '/api/ai') {
-      const handler = path === '/api/asset' ? assetHandler : path === '/api/photos' ? photosHandler : aiHandler;
+    if (path === '/api/photos' || path === '/api/ai') {
+      const handler = path === '/api/photos' ? photosHandler : aiHandler;
       if (req.method !== 'GET' && req.method !== 'POST') return finish(405, { error: 'GET or POST only' });
       const body = req.method === 'POST' ? await readBody(req).catch(() => undefined) : undefined;
       await handler(...adapt(req, res, query, body));
