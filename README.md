@@ -12,7 +12,8 @@ Oovi turns natural-language prompts into **fully editable graphic designs** - no
 
 ## Demo
 
-- **~100-second walkthrough:** [docs/oovi-demo.mp4](docs/oovi-demo.mp4) - dashboard, local pipeline, editable layers, manual copy edit, undo/redo, preview, and PNG export.
+- **Captioned real demo (52s):** [docs/Screencast_20261024_210545_captioned.mp4](docs/Screencast_20261024_210545_captioned.mp4) - 01 Prompt → 02 Brief → 03 Pipeline → 04 Editor → 05 Manual edit → 06 Saved design opened from library.
+- **Captioned real demo (52s):** [docs/Screencast_20261024_210545_captioned.mp4](docs/Screencast_20261024_210545_captioned.mp4) - 01 Prompt → 02 Brief → 03 Pipeline → 04 Editor → 05 Manual edit → 06 Saved design opened from library.
 - **36-second product film:** [docs/oovi-promo.mp4](docs/oovi-promo.mp4) - the short visual overview.
 - **Run it locally:** [docs/DEMO.md](docs/DEMO.md) has prerequisites and a click-by-click demo script.
 
